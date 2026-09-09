@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao XLSTART
-# Phien ban: v3.6.0
+# Phien ban: v3.7.0 (Centralized LAN Distribution Hub & Auto-Update Engine)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -11,7 +11,7 @@ $OutputEncoding           = [System.Text.Encoding]::UTF8
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - INSTALLER v3.6.0                                  " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - INSTALLER v3.7.0                                  " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 # ==============================================================================
@@ -299,7 +299,11 @@ if (Test-Path $srcWorker) {
         New-Item -Path $guardRegKey -Force | Out-Null
     }
     Set-ItemProperty -Path $guardRegKey -Name "ScannerScript" -Value $srcWorker -Force
+    Set-ItemProperty -Path $guardRegKey -Name "InstalledVersion" -Value "3.7.0" -Force
+    Set-ItemProperty -Path $guardRegKey -Name "UpdateSource" -Value "\\$env:COMPUTERNAME\KangatangGuard_Hub" -Force
     Write-Host "   -> [OK] Da dang ky ScannerScript vao Registry: $srcWorker" -ForegroundColor Green
+    Write-Host "   -> [OK] Da dang ky InstalledVersion: v3.7.0" -ForegroundColor Green
+    Write-Host "   -> [OK] Da dang ky UpdateSource: \\$env:COMPUTERNAME\KangatangGuard_Hub" -ForegroundColor Green
 } else {
     Write-Host "   -> [CANH BAO] Khong tim thay $srcWorker de sao chep." -ForegroundColor DarkYellow
 }

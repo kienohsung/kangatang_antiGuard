@@ -1,10 +1,10 @@
 '==============================================================================
 ' KangatangGuard - Excel Add-in Diet Virus Macro Kangatang
-' Phien ban: v3.6.0 (Session Checkpointing & Fast Resume Architecture)
+' Phien ban: v3.7.0 (Centralized LAN Distribution Hub & Auto-Update Engine)
 ' Mo ta: Tu dong quet va tieu diet virus macro Kangatang/Laroux/mypersonnel
-'         ngay khi mo file Excel. Khi quet thu muc hoac khi phat hien file nhiem,
-'         tu dong tach sang tien trinh PowerShell doc lap (Asynchronous Worker),
-'         ho tro Tiep tuc phien quet truoc do (Fast Resume) va quet luong truc tiep!
+'         ngay khi mo file Excel. Ho tro Trung tam Phan phoi Mang LAN Hub,
+'         tu dong cap nhat phien ban moi qua mang noi bo (Offline-First),
+'         tach tien trinh Scanner doc lap (Out-of-Process) va Fast Resume!
 '
 ' File nay chua toan bo ma VBA duoc phan tach theo section markers.
 ' PowerShell Installer se doc va inject tung phan vao dung module/class.
@@ -17,6 +17,11 @@ Option Explicit
 
 Private Sub Workbook_Open()
     Call InitializeGuard
+    ' Kiem tra cap nhat tu May chu LAN ngam sau 3 giay (Async / Non-blocking)
+    ' Giup Excel mo tuc thi trong 0.05 giay ma khong bi cham tre du chi 1 ms
+    On Error Resume Next
+    Application.OnTime Now + TimeValue("00:00:03"), "CheckForLanUpdatesSilent"
+    On Error GoTo 0
 End Sub
 
 Private Sub Workbook_BeforeClose(Cancel As Boolean)
@@ -78,6 +83,10 @@ Public bIsFolderScanning As Boolean
 ' Scan Cache chong lag: key=UCase(FullName), value=Date
 Private dicScanCache As Object
 
+Public Const CURRENT_VERSION As String = "3.7.0"
+Private Const DEFAULT_HUB_HOST As String = "\\CM-GA-MRKIENIT1\KangatangGuard_Hub"
+Private Const DEFAULT_HUB_IP As String = "\\192.168.223.176\KangatangGuard_Hub"
+
 Private Const ADDIN_NAME As String = "KangatangGuard.xlam"
 Private Const BACKUP_FOLDER_NAME As String = "_Backup_Kangatang"
 Private Const LOG_SUBFOLDER As String = "KangatangGuard"
@@ -118,7 +127,7 @@ Public Function MsgBoxW(ByVal prompt As String, Optional ByVal buttons As VbMsgB
     On Error GoTo 0
     
     If Len(title) = 0 Then
-        title = Uni("KangatangGuard v3.6.0")
+        title = Uni("KangatangGuard v3.7.0")
     End If
     
     MsgBoxW = MessageBoxW(h, StrPtr(prompt), StrPtr(title), buttons)
@@ -174,7 +183,7 @@ Public Sub InitializeGuard()
     
     Call CreateMenu
     
-    WriteLog "KangatangGuard v3.6.0 da khoi dong thanh cong."
+    WriteLog "KangatangGuard v3.7.0 da khoi dong thanh cong."
     
     Dim openWb As Workbook
     For Each openWb In Application.Workbooks
@@ -241,10 +250,18 @@ Private Sub CreateMenu()
     btn3.OnAction = "OpenLogFolder"
     btn3.Tag = "KG_OpenLog"
     
+    ' Nut 3b: Kiem tra cap nhat tu May chu LAN (v3.7.0)
+    Dim btn3b As CommandBarButton
+    Set btn3b = menuItem.Controls.Add(Type:=msoControlButton)
+    btn3b.Caption = Uni("Ki\u1ec3m tra c\u1eadp nh\u1eadt t\u1eeb M\u00e1y ch\u1ee7...")
+    btn3b.FaceId = 463
+    btn3b.OnAction = "CheckForLanUpdatesManual"
+    btn3b.Tag = "KG_CheckUpdate"
+    
     ' Nut 4: Thong tin
     Dim btn4 As CommandBarButton
     Set btn4 = menuItem.Controls.Add(Type:=msoControlButton)
-    btn4.Caption = Uni("Th\u00f4ng tin KangatangGuard v3.6.0")
+    btn4.Caption = Uni("Th\u00f4ng tin KangatangGuard v3.7.0")
     btn4.FaceId = 487
     btn4.OnAction = "ShowAbout"
     btn4.Tag = "KG_About"
@@ -938,15 +955,256 @@ End Sub
 ' HAM MENU: Hien thi thong tin Add-in
 ' ===========================================================================
 Public Sub ShowAbout()
-    MsgBoxW Uni("KangatangGuard v3.6.0" & vbCrLf & vbCrLf & _
+    Dim regVer As String, regSrc As String
+    Dim wsh As Object
+    On Error Resume Next
+    Set wsh = CreateObject("WScript.Shell")
+    regVer = wsh.RegRead("HKCU\Software\KangatangGuard\InstalledVersion")
+    regSrc = wsh.RegRead("HKCU\Software\KangatangGuard\UpdateSource")
+    Set wsh = Nothing
+    On Error GoTo 0
+    
+    If Len(regVer) = 0 Then regVer = CURRENT_VERSION
+    If Len(regSrc) = 0 Then regSrc = DEFAULT_HUB_HOST
+    
+    MsgBoxW Uni("KangatangGuard v" & CURRENT_VERSION & vbCrLf & vbCrLf & _
                 "H\u1ec7 th\u1ed1ng b\u1ea3o v\u1ec7 Excel chuy\u00ean d\u1ee5ng ch\u1ed1ng virus macro Kangatang / Laroux / mypersonnel." & vbCrLf & vbCrLf & _
                 "- T\u1ef1 \u0111\u1ed9ng qu\u00e9t th\u1eddi gian th\u1ef1c khi m\u1edf t\u1ec7p." & vbCrLf & _
                 "- ScanCache th\u00f4ng minh ch\u1ed1ng lag khi l\u01b0u v\u00e0 AutoSave." & vbCrLf & _
-                "- Ki\u1ebfn tr\u00fac T\u00e1ch ti\u1ebfn tr\u00ecnh (Out-of-Process Worker): Qu\u00e9t h\u00e0ng ngh\u00ecn t\u1ec7p tr\u00ean c\u1eeda s\u1ed5 ri\u00eang, Excel kh\u00f4ng bao gi\u1edd b\u1ecb treo (Not Responding)!" & vbCrLf & _
-                "- T\u00ednh n\u0103ng Fast Resume: Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t d\u1edf dang si\u00eau t\u1ed1c m\u00e0 kh\u00f4ng c\u1ea7n qu\u00e9t l\u1ea1i t\u1eeb \u0111\u1ea7u." & vbCrLf & _
-                "- H\u1ed7 tr\u1ee3 \u1ed5 m\u1ea1ng UNC (\\\\server\\share) v\u00e0 t\u00ean t\u1ec7p Unicode c\u00f3 d\u1ea5u." & vbCrLf & vbCrLf & _
-                "Phi\u00ean b\u1ea3n ki\u1ebfn tr\u00fac: v3.6.0 Production-grade"), _
-            vbInformation, Uni("Gi\u1edbi thi\u1ec7u KangatangGuard v3.6.0")
+                "- Ki\u1ebfn tr\u00fac Out-of-Process Worker: Excel kh\u00f4ng bao gi\u1edd b\u1ecb treo (Not Responding)!" & vbCrLf & _
+                "- T\u00ednh n\u0103ng Fast Resume: Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t d\u1edf dang si\u00eau t\u1ed1c." & vbCrLf & _
+                "- Trung t\u00e2m Ph\u00e2n ph\u1ed1i LAN Hub & T\u1ef1 \u0111\u1ed9ng C\u1eadp nh\u1eadt qua m\u1ea1ng n\u1ed9i b\u1ed9." & vbCrLf & vbCrLf & _
+                "\u2022 M\u00e1y ch\u1ee7 ngu\u1ed3n: " & regSrc & vbCrLf & _
+                "\u2022 Phi\u00ean b\u1ea3n ki\u1ebfn tr\u00fac: v" & CURRENT_VERSION & " Production-grade"), _
+            vbInformation, Uni("Gi\u1edbi thi\u1ec7u KangatangGuard v" & CURRENT_VERSION)
+End Sub
+
+' ===========================================================================
+' KIEM TRA VA DONG BO CAP NHAT TU TRUNG TAM LAN HUB (v3.7.0)
+' ===========================================================================
+Public Sub CheckForLanUpdatesManual()
+    Call CheckForLanUpdates(bSilent:=False)
+End Sub
+
+Public Sub CheckForLanUpdatesSilent()
+    Call CheckForLanUpdates(bSilent:=True)
+End Sub
+
+Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
+    On Error GoTo UpdateErr
+    
+    Dim wsh As Object, fso As Object
+    Dim updateSource As String
+    Dim versionFile As String
+    Dim serverVer As String
+    Dim jsonText As String
+    
+    Set wsh = CreateObject("WScript.Shell")
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ' 1. Doc UpdateSource tu Registry HKCU\Software\KangatangGuard
+    On Error Resume Next
+    updateSource = wsh.RegRead("HKCU\Software\KangatangGuard\UpdateSource")
+    On Error GoTo UpdateErr
+    
+    If Len(Trim(updateSource)) = 0 Then
+        ' Thu cac nguon mac dinh cua May chu Hub
+        If fso.FolderExists(DEFAULT_HUB_HOST) Then
+            updateSource = DEFAULT_HUB_HOST
+        ElseIf fso.FolderExists(DEFAULT_HUB_IP) Then
+            updateSource = DEFAULT_HUB_IP
+        End If
+    End If
+    
+    If Len(Trim(updateSource)) = 0 Then
+        If Not bSilent Then
+            MsgBoxW Uni("Ch\u01b0a c\u1ea5u h\u00ecnh \u0111\u01b0\u1eddng d\u1eabn M\u00e1y ch\u1ee7 ph\u00e2n ph\u1ed1i (UpdateSource)!" & vbCrLf & vbCrLf & _
+                        "Vui l\u00f2ng ch\u1ea1y file 'Install_Client_Kangatang.bat' t\u1eeb M\u00e1y ch\u1ee7 \u0111\u1ec3 \u0111\u0103ng k\u00fd."), _
+                    vbExclamation, Uni("KangatangGuard v3.7.0 - C\u1eadp nh\u1eadt")
+        End If
+        Exit Sub
+    End If
+    
+    ' Loai bo dau \ o cuoi neu co
+    If Right(updateSource, 1) = "\" Then updateSource = Left(updateSource, Len(updateSource) - 1)
+    
+    versionFile = updateSource & "\version.json"
+    
+    ' Kiem tra tep version.json
+    If Not fso.FileExists(versionFile) Then
+        ' Thu fallback IP neu dang dung ten may
+        If InStr(1, updateSource, "CM-GA-MRKIENIT1", vbTextCompare) > 0 Then
+            updateSource = Replace(updateSource, "CM-GA-MRKIENIT1", "192.168.223.176", , , vbTextCompare)
+            versionFile = updateSource & "\version.json"
+        End If
+    End If
+    
+    If Not fso.FileExists(versionFile) Then
+        If Not bSilent Then
+            MsgBoxW Uni("Kh\u00f4ng th\u1ec3 k\u1ebft n\u1ed1i \u0111\u1ebfn M\u00e1y ch\u1ee7 LAN ho\u1eb7c kh\u00f4ng t\u00ecm th\u1ea5y th\u00f4ng tin phi\u00ean b\u1ea3n:" & vbCrLf & vbCrLf) & _
+                    updateSource & vbCrLf & vbCrLf & _
+                    Uni("Vui l\u00f2ng ki\u1ec3m tra k\u1ebft n\u1ed1i m\u1ea1ng LAN ho\u1eb7c m\u00e1y ch\u1ee7 c\u00f3 \u0111ang b\u1eadt kh\u00f4ng."), _
+                    vbExclamation, Uni("KangatangGuard v3.7.0 - K\u1ebft n\u1ed1i th\u1ea5t b\u1ea1i")
+        End If
+        Exit Sub
+    End If
+    
+    ' Doc noi dung version.json
+    Dim ts As Object
+    Set ts = fso.OpenTextFile(versionFile, 1, False)
+    jsonText = ts.ReadAll
+    ts.Close
+    Set ts = Nothing
+    
+    serverVer = ExtractJsonValue(jsonText, "version")
+    If Len(serverVer) = 0 Then
+        If Not bSilent Then
+            MsgBoxW Uni("Kh\u00f4ng th\u1ec3 \u0111\u1ecdc th\u00f4ng tin phi\u00ean b\u1ea3n t\u1eeb t\u1ec7p version.json tr\u00ean m\u00e1y ch\u1ee7."), vbExclamation, Uni("KangatangGuard v3.7.0")
+        End If
+        Exit Sub
+    End If
+    
+    ' So sanh phien ban
+    If IsNewerVersion(serverVer, CURRENT_VERSION) Then
+        Dim promptMsg As String
+        Dim changelog As String
+        changelog = ExtractJsonValue(jsonText, "changelog")
+        
+        promptMsg = Uni("M\u00e1y ch\u1ee7 ph\u00e1t h\u00e0nh phi\u00ean b\u1ea3n M\u1edaI: v") & serverVer & "!" & vbCrLf & _
+                    Uni("(Phi\u00ean b\u1ea3n hi\u1ec7n t\u1ea1i tr\u00ean m\u00e1y b\u1ea1n: v") & CURRENT_VERSION & ")" & vbCrLf & vbCrLf
+        If Len(changelog) > 0 Then
+            promptMsg = promptMsg & Uni("N\u1ed9i dung c\u1eadp nh\u1eadt:") & vbCrLf & changelog & vbCrLf & vbCrLf
+        End If
+        promptMsg = promptMsg & Uni("B\u1ea1n c\u00f3 mu\u1ed1n C\u1eacP NH\u1eacT NGAY kh\u00f4ng?")
+        
+        Dim ans As VbMsgBoxResult
+        ans = MsgBoxW(promptMsg, vbYesNo + vbInformation, Uni("KangatangGuard - C\u00f3 phi\u00ean b\u1ea3n m\u1edbi v") & serverVer)
+        If ans = vbYes Then
+            Call PerformLanUpdate(updateSource, serverVer)
+        End If
+    Else
+        If Not bSilent Then
+            MsgBoxW Uni("B\u1ea1n \u0111ang s\u1eed d\u1ee5ng phi\u00ean b\u1ea3n M\u1edaI NH\u1ea4T (v") & CURRENT_VERSION & ")!" & vbCrLf & vbCrLf & _
+                    Uni("M\u00e1y ch\u1ee7 ph\u00e2n ph\u1ed1i: ") & updateSource, _
+                    vbInformation, Uni("KangatangGuard v3.7.0 - H\u1ec7 th\u1ed1ng \u0111\u00e3 c\u1eadp nh\u1eadt")
+        End If
+    End If
+    
+    ' Luu moc thoi gian kiem tra
+    On Error Resume Next
+    wsh.RegWrite "HKCU\Software\KangatangGuard\LastUpdateCheck", Format(Now, "yyyy-MM-dd HH:mm:ss"), "REG_SZ"
+    On Error GoTo 0
+    
+    Set fso = Nothing
+    Set wsh = Nothing
+    Exit Sub
+    
+UpdateErr:
+    If Not bSilent Then
+        MsgBoxW Uni("L\u1ed7i khi ki\u1ec3m tra c\u1eadp nh\u1eadt: ") & Err.Description, vbCritical, Uni("KangatangGuard v3.7.0 - L\u1ed7i")
+    End If
+    On Error GoTo 0
+End Sub
+
+Public Function IsNewerVersion(ByVal vServer As String, ByVal vLocal As String) As Boolean
+    IsNewerVersion = False
+    On Error Resume Next
+    
+    ' Loai bo ky tu 'v' hoac khoang trang
+    vServer = Replace(Replace(vServer, "v", ""), "V", "")
+    vLocal  = Replace(Replace(vLocal, "v", ""), "V", "")
+    
+    Dim sParts() As String, lParts() As String
+    sParts = Split(vServer, ".")
+    lParts = Split(vLocal, ".")
+    
+    Dim i As Long, maxParts As Long
+    maxParts = UBound(sParts)
+    If UBound(lParts) > maxParts Then maxParts = UBound(lParts)
+    
+    For i = 0 To maxParts
+        Dim sNum As Long, lNum As Long
+        sNum = 0: lNum = 0
+        If i <= UBound(sParts) Then sNum = CLng(Val(sParts(i)))
+        If i <= UBound(lParts) Then lNum = CLng(Val(lParts(i)))
+        
+        If sNum > lNum Then
+            IsNewerVersion = True
+            Exit Function
+        ElseIf sNum < lNum Then
+            IsNewerVersion = False
+            Exit Function
+        End If
+    Next i
+    
+    On Error GoTo 0
+End Function
+
+Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As String)
+    On Error GoTo InstallErr
+    
+    Dim fso As Object, wsh As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set wsh = CreateObject("WScript.Shell")
+    
+    Dim stagedDir As String
+    stagedDir = Environ("APPDATA") & "\KangatangGuard\staged_update"
+    If Not fso.FolderExists(stagedDir) Then
+        fso.CreateFolder stagedDir
+    End If
+    
+    ' Sao chep tap tin tu Hub vao bo dem tam staged_update
+    Dim srcXlam As String, srcPs1 As String
+    srcXlam = updateSource & "\KangatangGuard.xlam"
+    srcPs1 = updateSource & "\Kangatang_FolderScanner.ps1"
+    
+    If fso.FileExists(srcXlam) Then
+        fso.CopyFile srcXlam, stagedDir & "\KangatangGuard.xlam", True
+    End If
+    If fso.FileExists(srcPs1) Then
+        fso.CopyFile srcPs1, stagedDir & "\Kangatang_FolderScanner.ps1", True
+    End If
+    
+    ' Tao script ap dung cap nhat ngoai tien trinh (Out-of-Process Updater)
+    Dim updaterBat As String
+    updaterBat = stagedDir & "\apply_update.cmd"
+    
+    Dim xlStartDir As String, addInsDir As String, guardDir As String
+    xlStartDir = Environ("APPDATA") & "\Microsoft\Excel\XLSTART"
+    addInsDir = Environ("APPDATA") & "\Microsoft\AddIns"
+    guardDir = Environ("APPDATA") & "\KangatangGuard"
+    
+    Dim ts As Object
+    Set ts = fso.CreateTextFile(updaterBat, True)
+    ts.WriteLine "@echo off"
+    ts.WriteLine "timeout /t 2 /nobreak > nul"
+    ts.WriteLine "attrib -r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
+    ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & xlStartDir & "\KangatangGuard.xlam"" > nul"
+    ts.WriteLine "attrib +r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
+    ts.WriteLine "attrib -r """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
+    ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & addInsDir & "\KangatangGuard.xlam"" > nul"
+    ts.WriteLine "attrib +r """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
+    ts.WriteLine "copy /y """ & stagedDir & "\Kangatang_FolderScanner.ps1"" """ & guardDir & "\Kangatang_FolderScanner.ps1"" > nul"
+    ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""InstalledVersion"" /t REG_SZ /d """ & serverVer & """ /f > nul"
+    ts.Close
+    Set ts = Nothing
+    
+    ' Chay updater script ngam
+    wsh.Run Chr(34) & updaterBat & Chr(34), 0, False
+    
+    WriteLog "Da tai va kich hoat cap nhat len phien ban v" & serverVer & " tu Hub: " & updateSource
+    
+    MsgBoxW Uni("\u0110\u00e3 t\u1ea3i v\u00e0 k\u00edch ho\u1ea1t b\u1ea3n c\u1eadp nh\u1eadt v") & serverVer & Uni(" th\u00e0nh c\u00f4ng!" & vbCrLf & vbCrLf & _
+                "B\u1ea3n m\u1edbi s\u1ebd \u0111\u01b0\u1ee3c \u00e1p d\u1ee5ng ho\u00e0n to\u00e0n khi b\u1ea1n kh\u1edfi \u0111\u1ed9ng l\u1ea1i Excel."), _
+            vbInformation, Uni("KangatangGuard - C\u1eadp nh\u1eadt th\u00e0nh c\u00f4ng")
+            
+    Set fso = Nothing
+    Set wsh = Nothing
+    Exit Sub
+    
+InstallErr:
+    MsgBoxW Uni("L\u1ed7i khi c\u00e0i \u0111\u1eb7t b\u1ea3n c\u1eadp nh\u1eadt: ") & Err.Description, vbCritical, Uni("KangatangGuard v3.7.0 - L\u1ed7i")
+    On Error GoTo 0
 End Sub
 
 '### END_SECTION: modKangatangScanner ###

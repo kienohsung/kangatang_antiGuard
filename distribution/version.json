@@ -1,0 +1,14 @@
+﻿{
+    "release_timestamp":  "2026-09-09 17:04:20",
+    "share_name":  "KangatangGuard_Hub",
+    "version":  "3.7.0",
+    "release_date":  "2026-09-09",
+    "unc_path":  "\\\\CM-GA-MRKIENIT1\\KangatangGuard_Hub",
+    "files":  {
+                  "scanner":  "Kangatang_FolderScanner.ps1",
+                  "xlam":  "KangatangGuard.xlam"
+              },
+    "hub_host":  "CM-GA-MRKIENIT1",
+    "changelog":  "v3.7.0 - Trung tam Phan phoi Mang LAN Hub va Tu dong Cap nhat Dong bo (Offline-First Architecture)",
+    "hub_ip":  "192.168.223.176"
+}
