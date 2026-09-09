@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao XLSTART
-# Phien ban: v3.5.3
+# Phien ban: v3.5.4
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -11,7 +11,7 @@ $OutputEncoding           = [System.Text.Encoding]::UTF8
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - INSTALLER v3.5.3                                  " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - INSTALLER v3.5.4                                  " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 # ==============================================================================
@@ -265,7 +265,7 @@ try {
 }
 
 # ==============================================================================
-# BUOC 3: TAO THU MUC LOG VA CAI DAT WORKER SCANNER DOC LAP (v3.5.3)
+# BUOC 3: TAO THU MUC LOG VA CAI DAT WORKER SCANNER DOC LAP (v3.5.4)
 # ==============================================================================
 Write-Host "`n[3/3] Dang thiet lap thu muc Log va cai dat Background Worker..." -ForegroundColor Yellow
 $logDir = Join-Path $env:APPDATA "KangatangGuard"
@@ -274,12 +274,27 @@ if (-not (Test-Path $logDir)) {
 }
 Write-Host "   -> [OK] Thu muc Log: $logDir" -ForegroundColor Green
 
-# Sao chep Kangatang_FolderScanner.ps1 vao APPDATA\KangatangGuard
+# Sao chep Kangatang_FolderScanner.ps1 vao APPDATA\KangatangGuard (Luu y: KHONG chep vao XLSTART vi Excel se tu mo script nhu workbook)
 $srcWorker = Join-Path $ScriptDir "Kangatang_FolderScanner.ps1"
 if (Test-Path $srcWorker) {
-    $dstWorker = Join-Path $logDir "Kangatang_FolderScanner.ps1"
-    Copy-Item -Path $srcWorker -Destination $dstWorker -Force
-    Write-Host "   -> [OK] Da cai dat Background Worker: $dstWorker" -ForegroundColor Green
+    # 1. Thu muc hoat dong mac dinh APPDATA\KangatangGuard
+    $dstWorker1 = Join-Path $logDir "Kangatang_FolderScanner.ps1"
+    Copy-Item -Path $srcWorker -Destination $dstWorker1 -Force
+    Write-Host "   -> [OK] Da cai dat Background Worker vao KangatangGuard: $dstWorker1" -ForegroundColor Green
+    
+    # 2. Xoa khoi XLSTART neu vo tinh co (tranh Excel tu mo va quet nham)
+    $badXlStartWorker = Join-Path $xlStartPath "Kangatang_FolderScanner.ps1"
+    if (Test-Path $badXlStartWorker) {
+        Remove-Item -Path $badXlStartWorker -Force -ErrorAction SilentlyContinue
+    }
+    
+    # 3. Dang ky ScannerScript vao Registry de Add-in uu tien doc tu vi tri an toan (Chong Antivirus/EDR xoa file trong APPDATA)
+    $guardRegKey = "HKCU:\Software\KangatangGuard"
+    if (-not (Test-Path $guardRegKey)) {
+        New-Item -Path $guardRegKey -Force | Out-Null
+    }
+    Set-ItemProperty -Path $guardRegKey -Name "ScannerScript" -Value $srcWorker -Force
+    Write-Host "   -> [OK] Da dang ky ScannerScript vao Registry: $srcWorker" -ForegroundColor Green
 } else {
     Write-Host "   -> [CANH BAO] Khong tim thay $srcWorker de sao chep." -ForegroundColor DarkYellow
 }

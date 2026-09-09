@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Tien trinh Quet Luong Truc Tiep & Tu dong Phuc hoi (Auto-Recovery Worker)
-# Phien ban: v3.5.3 (Zero-Hang Watchdog & Safe Network Cleaning Architecture)
+# Phien ban: v3.5.4 (Zero-Hang Watchdog & Safe Network Cleaning Architecture)
 # Dac diem:
 #   - Tich hop Native C# Watchdog (gioi han 25s/tep) chong treo 100% tren mang SMB.
 #   - Kiem tra khoa ghi truoc khi diet (Pre-flight Write Lock Check) tranh dialog xung dot.
@@ -20,10 +20,10 @@ param (
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
-$Host.UI.RawUI.WindowTitle = "KangatangGuard v3.5.3 - Trinh quet luong chong treo & Tu dong phuc hoi"
+$Host.UI.RawUI.WindowTitle = "KangatangGuard v3.5.4 - Trinh quet luong chong treo & Tu dong phuc hoi"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANGGUARD v3.5.3 - ZERO-HANG WATCHDOG STREAM SCANNER (ROBUST) " -ForegroundColor Cyan
+Write-Host "   KANGATANGGUARD v3.5.4 - ZERO-HANG WATCHDOG STREAM SCANNER (ROBUST) " -ForegroundColor Cyan
 Write-Host "   Kien truc Quan ly Tien trinh Doc lap & Chong Treo Mang SMB        " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
@@ -72,7 +72,7 @@ function Write-AuditLog([string]$msg) {
     } catch {}
 }
 
-Write-AuditLog "[STREAM_SCAN_START] Bat dau quet luong v3.5.3 tai: $TargetFolder"
+Write-AuditLog "[STREAM_SCAN_START] Bat dau quet luong v3.5.4 tai: $TargetFolder"
 
 # ==============================================================================
 # BO MAY WATCHDOG NATIVE C# (ZERO-HANG HARD TIMEOUT ENGINE)
@@ -179,10 +179,14 @@ function Stop-CurrentExcel {
 }
 
 function Start-FreshExcel {
+    Write-AuditLog "[DEBUG] Trong Start-FreshExcel: Truoc Stop-CurrentExcel"
     Stop-CurrentExcel
+    Write-AuditLog "[DEBUG] Trong Start-FreshExcel: Sau Stop-CurrentExcel"
     try {
         $pidsBefore = @(Get-Process excel -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+        Write-AuditLog "[DEBUG] Trong Start-FreshExcel: Truoc New-Object"
         $Script:CurrentExcelApp = New-Object -ComObject Excel.Application
+        Write-AuditLog "[DEBUG] Trong Start-FreshExcel: Sau New-Object"
         
         # Lay chinh xac PID qua Win32 Hwnd
         $exactPid = [ExcelWatchdog]::GetExcelPid($Script:CurrentExcelApp.Hwnd)
@@ -212,12 +216,15 @@ function Start-FreshExcel {
 }
 
 Write-Host "`nDang khoi dong Excel COM doc lap (PID quan ly rieng)..." -ForegroundColor Gray
+Write-AuditLog "[DEBUG] Bat dau khoi dong Excel COM..."
 if (-not (Start-FreshExcel)) {
+    Write-AuditLog "[DEBUG] Start-FreshExcel tra ve false!"
     Write-Host "`nNhan Enter de thoat..." -ForegroundColor Gray
-    Read-Host | Out-Null
+    try { Read-Host | Out-Null } catch {}
     exit 1
 }
-Write-Host "   -> [OK] Excel Worker v3.5.3 da san sang (PID: $Script:CurrentExcelPid)" -ForegroundColor Green
+Write-AuditLog "[DEBUG] Start-FreshExcel thanh cong, PID: $Script:CurrentExcelPid"
+Write-Host "   -> [OK] Excel Worker v3.5.4 da san sang (PID: $Script:CurrentExcelPid)" -ForegroundColor Green
 
 # Bien dem thoi gian thuc
 $Script:TotalScanned = 0
@@ -236,7 +243,7 @@ function Scan-SingleExcelFile($file) {
     $idx = $Script:TotalScanned
     
     # Cap nhat tieu de cua so thoi gian thuc
-    $Host.UI.RawUI.WindowTitle = "KangatangGuard v3.5.3 | Da quet: $Script:TotalScanned | Da diet: $Script:TotalCleaned | PID: $Script:CurrentExcelPid"
+    $Host.UI.RawUI.WindowTitle = "KangatangGuard v3.5.4 | Da quet: $Script:TotalScanned | Da diet: $Script:TotalCleaned | PID: $Script:CurrentExcelPid"
     
     # Dinh ky lam moi tien trinh Excel moi 30 tep de chong tran bo nho
     if ($Script:TotalScanned % 30 -eq 0) {
@@ -504,7 +511,7 @@ function Scan-FolderStream([string]$currentDir) {
     Write-Host "Folder [$Script:TotalFolders]: $currentDir" -ForegroundColor Yellow
     Write-Host "----------------------------------------------------------------------" -ForegroundColor DarkGray
     
-    Write-Progress -Activity "KangatangGuard v3.5.3 - Dang quet luong chong treo" -Status "Thu muc #$Script:TotalFolders: $currentDir" -CurrentOperation "Da quet: $Script:TotalScanned tep | Da diet: $Script:TotalCleaned"
+    Write-Progress -Activity "KangatangGuard v3.5.4 - Dang quet luong chong treo" -Status "Thu muc #$Script:TotalFolders: $currentDir" -CurrentOperation "Da quet: $Script:TotalScanned tep | Da diet: $Script:TotalCleaned"
 
     # 1. Quet ngay lap tuc tat ca tep Excel co trong thu muc nay
     try {
@@ -534,17 +541,17 @@ function Scan-FolderStream([string]$currentDir) {
 }
 
 # 3. Kich hoat quet luong ngay lap tuc!
-Write-Host "`nBAT DAU QUET LUONG TRUC TIEP CHONG TREO (v3.5.3)..." -ForegroundColor Cyan
+Write-Host "`nBAT DAU QUET LUONG TRUC TIEP CHONG TREO (v3.5.4)..." -ForegroundColor Cyan
 Scan-FolderStream $TargetFolder
 
-Write-Progress -Activity "KangatangGuard v3.5.3" -Completed
+Write-Progress -Activity "KangatangGuard v3.5.4" -Completed
 
 # 4. Giai phong va dong tien trinh Excel COM
 Stop-CurrentExcel
 
 # 5. Bao cao tong ket
 Write-Host "`n======================================================================" -ForegroundColor Green
-Write-Host "   BAO CAO TONG KET QUET LUONG CHONG TREO (v3.5.3)                   " -ForegroundColor Green
+Write-Host "   BAO CAO TONG KET QUET LUONG CHONG TREO (v3.5.4)                   " -ForegroundColor Green
 Write-Host "======================================================================" -ForegroundColor Green
 Write-Host "   Thu muc bat dau                 : $TargetFolder" -ForegroundColor White
 Write-Host "   Tong so thu muc da duyet qua    : $Script:TotalFolders" -ForegroundColor Yellow
@@ -559,4 +566,4 @@ Write-AuditLog "[STREAM_SCAN_END] $TargetFolder - ThuMuc: $Script:TotalFolders, 
 
 Write-Host "`nToan bo tien trinh quet luong da hoan tat ma khong lam giam hieu nang Excel." -ForegroundColor Cyan
 Write-Host "Nhan Enter de hoan tat va dong cua so..." -ForegroundColor Gray
-Read-Host | Out-Null
+try { Read-Host | Out-Null } catch {}
