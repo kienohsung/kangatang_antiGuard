@@ -1,10 +1,10 @@
 '==============================================================================
 ' KangatangGuard - Excel Add-in Diet Virus Macro Kangatang
-' Phien ban: v3.5.4 (Self-Healing Scanner & Zero-Hang Architecture)
+' Phien ban: v3.6.0 (Session Checkpointing & Fast Resume Architecture)
 ' Mo ta: Tu dong quet va tieu diet virus macro Kangatang/Laroux/mypersonnel
 '         ngay khi mo file Excel. Khi quet thu muc hoac khi phat hien file nhiem,
 '         tu dong tach sang tien trinh PowerShell doc lap (Asynchronous Worker),
-'         quet luong truc tiep lan luot tung thu muc ma khong can cho gom tep!
+'         ho tro Tiep tuc phien quet truoc do (Fast Resume) va quet luong truc tiep!
 '
 ' File nay chua toan bo ma VBA duoc phan tach theo section markers.
 ' PowerShell Installer se doc va inject tung phan vao dung module/class.
@@ -118,7 +118,7 @@ Public Function MsgBoxW(ByVal prompt As String, Optional ByVal buttons As VbMsgB
     On Error GoTo 0
     
     If Len(title) = 0 Then
-        title = Uni("KangatangGuard v3.5.4")
+        title = Uni("KangatangGuard v3.6.0")
     End If
     
     MsgBoxW = MessageBoxW(h, StrPtr(prompt), StrPtr(title), buttons)
@@ -174,7 +174,7 @@ Public Sub InitializeGuard()
     
     Call CreateMenu
     
-    WriteLog "KangatangGuard v3.5.4 da khoi dong thanh cong."
+    WriteLog "KangatangGuard v3.6.0 da khoi dong thanh cong."
     
     Dim openWb As Workbook
     For Each openWb In Application.Workbooks
@@ -217,13 +217,21 @@ Private Sub CreateMenu()
     btn1.OnAction = "ScanActiveWorkbook"
     btn1.Tag = "KG_ScanCurrent"
     
-    ' Nut 2: Quet thu muc (Out-of-process)
+    ' Nut 2: Quet thu muc moi (Out-of-process)
     Dim btn2 As CommandBarButton
     Set btn2 = menuItem.Controls.Add(Type:=msoControlButton)
-    btn2.Caption = Uni("Qu\u00e9t th\u01b0 m\u1ee5c (Ch\u1ea1y ng\u1ea7m)...")
+    btn2.Caption = Uni("Qu\u00e9t th\u01b0 m\u1ee5c m\u1edbi...")
     btn2.FaceId = 23
     btn2.OnAction = "ScanFolderDialog"
     btn2.Tag = "KG_ScanFolder"
+    
+    ' Nut 2b: Tiep tuc phien quet truoc do (v3.6.0 Fast Resume)
+    Dim btn2b As CommandBarButton
+    Set btn2b = menuItem.Controls.Add(Type:=msoControlButton)
+    btn2b.Caption = Uni("Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t tr\u01b0\u1edbc...")
+    btn2b.FaceId = 38
+    btn2b.OnAction = "ResumeScanDialog"
+    btn2b.Tag = "KG_ResumeScan"
     
     ' Nut 3: Mo thu muc Nhat ky
     Dim btn3 As CommandBarButton
@@ -236,7 +244,7 @@ Private Sub CreateMenu()
     ' Nut 4: Thong tin
     Dim btn4 As CommandBarButton
     Set btn4 = menuItem.Controls.Add(Type:=msoControlButton)
-    btn4.Caption = Uni("Th\u00f4ng tin KangatangGuard v3.5.4")
+    btn4.Caption = Uni("Th\u00f4ng tin KangatangGuard v3.6.0")
     btn4.FaceId = 487
     btn4.OnAction = "ShowAbout"
     btn4.Tag = "KG_About"
@@ -425,9 +433,9 @@ Public Sub ScanWorkbook(ByVal wb As Workbook)
             MsgBoxW Uni("C\u1ea2NH B\u00c1O: PH\u00c1T HI\u1ec6N VIRUS KANGATANG TRONG T\u1ec6P CH\u1ec8 \u0110\u1eccC (READ-ONLY)!" & vbCrLf & vbCrLf & _
                         "T\u1ec7p: ") & wb.Name & vbCrLf & vbCrLf & _
                         Uni("Chi ti\u1ebft:") & vbCrLf & detailMsg & vbCrLf & _
-                        Uni("L\u01b0u \u00fd: T\u1ec7p \u0111ang \u1edf ch\u1ebf \u0111\u1ed9 Ch\u1ec9 \u0111\u1ecdc (Read-Only) n\u00ean kh\u00f4ng th\u1ec3 t\u1ef1 \u0111\u1ed9ng ghi \u0111\u00e8." & vbCrLf & _
+                        Uni("L\u01b0u \u00fd: T\u1ec7p \u0111ang \u1edf ch\u1ebf \u0111\u1ed9 Ch\u1ec8 \u0111\u1ecdc (Read-Only) n\u00ean kh\u00f4ng th\u1ec3 t\u1ef1 \u0111\u1ed9ng ghi \u0111\u00e8." & vbCrLf & _
                         "Vui l\u00f2ng m\u1edf kh\u00f3a t\u1ec7p ho\u1eb7c ch\u1ecdn 'Save As' sang b\u1ea3n sao m\u1edbi."), _
-                    vbCritical, Uni("KangatangGuard v3.5.4 - C\u1ea3nh b\u00e1o")
+                    vbCritical, Uni("KangatangGuard v3.6.0 - C\u1ea3nh b\u00e1o")
             Exit Sub
         End If
         
@@ -447,9 +455,9 @@ Public Sub ScanWorkbook(ByVal wb As Workbook)
                             Uni("Tr\u1ea1ng th\u00e1i: \u0110\u00c3 TI\u00caU DI\u1ec6T TH\u00c0NH C\u00d4NG!" & vbCrLf & _
                             "B\u1ea3n sao l\u01b0u g\u1ed1c \u0111\u00e3 \u0111\u01b0\u1ee3c t\u1ea1o t\u1ea1i: ") & BACKUP_FOLDER_NAME & "\" & vbCrLf & vbCrLf & _
                             Uni("Ti\u1ebfn tr\u00ecnh qu\u00e9t ng\u1ea7m \u0111\u1ed9c l\u1eadp s\u1ebd T\u1ef0 \u0110\u1ed8NG QU\u00c9T TO\u00c0N B\u1ed8 TH\u01af M\u1ee4C ch\u1ee9a t\u1ec7p n\u00e0y m\u00e0 kh\u00f4ng l\u00e0m gi\u00e1n \u0111o\u1ea1n Excel c\u1ee7a b\u1ea1n!"), _
-                        vbExclamation, Uni("KangatangGuard v3.5.4 - Th\u00e0nh c\u00f4ng")
+                        vbExclamation, Uni("KangatangGuard v3.6.0 - Th\u00e0nh c\u00f4ng")
                 
-                ' v3.5.4: Khoi chay tien trinh quet ngam doc lap (khong lam treo Excel)
+                ' v3.6.0: Khoi chay tien trinh quet ngam doc lap (khong lam treo Excel)
                 Dim parentDir As String
                 parentDir = Left(wb.FullName, InStrRev(wb.FullName, "\"))
                 If Len(parentDir) > 0 Then
@@ -460,7 +468,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook)
                 MsgBoxW Uni("C\u1ea2NH B\u00c1O: Ph\u00e1t hi\u1ec7n virus nh\u01b0ng KH\u00d4NG TH\u1ec2 l\u00e0m s\u1ea1ch t\u1ef1 \u0111\u1ed9ng!" & vbCrLf & _
                             "T\u1ec7p: ") & wb.Name & vbCrLf & _
                             Uni("Vui l\u00f2ng ch\u1ea1y Diet_Virus_Kangatang.bat \u0111\u1ec3 x\u1eed l\u00fd th\u1ee7 c\u00f4ng."), _
-                        vbCritical, Uni("KangatangGuard v3.5.4 - L\u1ed7i")
+                        vbCritical, Uni("KangatangGuard v3.6.0 - L\u1ed7i")
             End If
         Else
             WriteLog "[ERROR] Khong the tao backup cho: " & wb.FullName
@@ -468,7 +476,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook)
                         "T\u1ec7p: ") & wb.Name & vbCrLf & _
                         Uni("\u0110\u1ec3 b\u1ea3o to\u00e0n d\u1eef li\u1ec7u, h\u1ec7 th\u1ed1ng kh\u00f4ng t\u1ef1 \u0111\u1ed9ng s\u1eeda t\u1ec7p khi ch\u01b0a sao l\u01b0u \u0111\u01b0\u1ee3c." & vbCrLf & _
                         "Vui l\u00f2ng sao l\u01b0u th\u1ee7 c\u00f4ng v\u00e0 ch\u1ea1y Diet_Virus_Kangatang.bat."), _
-                    vbCritical, Uni("KangatangGuard v3.5.4 - C\u1ea3nh b\u00e1o an to\u00e0n")
+                    vbCritical, Uni("KangatangGuard v3.6.0 - C\u1ea3nh b\u00e1o an to\u00e0n")
         End If
     Else
         WriteLog "[SAFE] " & wb.FullName
@@ -482,14 +490,14 @@ ScanError:
 End Sub
 
 ' ===========================================================================
-' HAM KHOI CHAY TIEN TRINH QUET NGAM DOC LAP (v3.5.4 - ASYNCHRONOUS WORKER)
+' HAM KHOI CHAY TIEN TRINH QUET NGAM DOC LAP (v3.6.0 - ASYNCHRONOUS WORKER)
 ' Chay ngoai tien trinh (Out-of-Process), thoat ngay trong 10ms
-' Giup Excel 100% muot ma, khong bao gio bi (Not Responding)
+' Ho tro tham so bResume de tiep tuc phien quet truoc do
 ' ===========================================================================
-Public Sub LaunchBackgroundScanner(ByVal folderPath As String)
+Public Sub LaunchBackgroundScanner(ByVal folderPath As String, Optional ByVal bResume As Boolean = False)
     On Error GoTo LaunchErr
     
-    ' VACCINE v3.5.4: Cat bo toan bo dau \ o cuoi duong dan de tranh loi Command Line Escaping (\" trong Windows CLI)
+    ' VACCINE v3.5.4+: Cat bo toan bo dau \ o cuoi duong dan de tranh loi Command Line Escaping (\" trong Windows CLI)
     Dim cleanFolder As String
     cleanFolder = folderPath
     Do While Right(cleanFolder, 1) = "\" And Len(cleanFolder) > 0
@@ -558,20 +566,28 @@ Public Sub LaunchBackgroundScanner(ByVal folderPath As String)
         Set wsh = Nothing
         MsgBoxW Uni("Kh\u00f4ng t\u00ecm th\u1ea5y t\u1ec7p tr\u00ecnh qu\u00e9t ng\u1ea7m: Kangatang_FolderScanner.ps1!" & vbCrLf & vbCrLf & _
                     "Vui l\u00f2ng ch\u1ea1y l\u1ea1i t\u1ec7p C\u00e0i \u0111\u1eb7t Add-in ho\u1eb7c li\u00ean h\u1ec7 IT \u0111\u1ec3 \u0111\u01b0\u1ee3c h\u1ed7 tr\u1ee3."), _
-                vbCritical, Uni("KangatangGuard v3.5.4 - Thi\u1ebfu t\u1ec7p h\u1ec7 th\u1ed1ng")
+                vbCritical, Uni("KangatangGuard v3.6.0 - Thi\u1ebfu t\u1ec7p h\u1ec7 th\u1ed1ng")
         Exit Sub
     End If
     Set fso = Nothing
     
-    ' VACCINE v3.5.4: Dung -NoExit de duy tri cua so hien thi tien do va bao cao tong ket
+    ' VACCINE v3.6.0: Ho tro tham so -Resume
     Dim cmd As String
-    cmd = "powershell.exe -NoExit -ExecutionPolicy Bypass -File """ & scannerScript & """ -TargetFolder """ & cleanFolder & """"
+    If bResume Then
+        If Len(cleanFolder) > 0 Then
+            cmd = "powershell.exe -NoExit -ExecutionPolicy Bypass -File """ & scannerScript & """ -TargetFolder """ & cleanFolder & """ -Resume"
+        Else
+            cmd = "powershell.exe -NoExit -ExecutionPolicy Bypass -File """ & scannerScript & """ -Resume"
+        End If
+    Else
+        cmd = "powershell.exe -NoExit -ExecutionPolicy Bypass -File """ & scannerScript & """ -TargetFolder """ & cleanFolder & """"
+    End If
     
     ' Tham so 1 = Normal window, False = Asynchronous non-blocking (Khong cho, thoat ngay lap tuc!)
     wsh.Run cmd, 1, False
     Set wsh = Nothing
     
-    WriteLog "[BG_LAUNCH] Da khoi chay tien trinh quet ngam cho: " & cleanFolder & " (Script: " & scannerScript & ")"
+    WriteLog "[BG_LAUNCH] Da khoi chay tien trinh quet ngam cho: " & cleanFolder & " (Resume: " & bResume & ", Script: " & scannerScript & ")"
     Exit Sub
     
 LaunchErr:
@@ -762,7 +778,7 @@ End Function
 ' ===========================================================================
 Public Sub ScanActiveWorkbook()
     If ActiveWorkbook Is Nothing Then
-        MsgBoxW Uni("Kh\u00f4ng c\u00f3 t\u1ec7p Excel n\u00e0o \u0111ang m\u1edf."), vbInformation, Uni("KangatangGuard v3.5.4")
+        MsgBoxW Uni("Kh\u00f4ng c\u00f3 t\u1ec7p Excel n\u00e0o \u0111ang m\u1edf."), vbInformation, Uni("KangatangGuard v3.6.0")
         Exit Sub
     End If
     
@@ -773,13 +789,12 @@ Public Sub ScanActiveWorkbook()
     
     MsgBoxW Uni("\u0110\u00e3 ho\u00e0n th\u00e0nh qu\u00e9t t\u1ec7p: ") & wbName & vbCrLf & _
             Uni("Chi ti\u1ebft \u0111\u01b0\u1ee3c ghi t\u1ea1i th\u01b0 m\u1ee5c nh\u1eadt k\u00fd (Log)."), _
-            vbInformation, Uni("KangatangGuard v3.5.4")
+            vbInformation, Uni("KangatangGuard v3.6.0")
 End Sub
 
 ' ===========================================================================
-' ===========================================================================
-' HAM MENU: Quet thu muc (goi tu menu, hien hop thoai chon thu muc)
-' v3.5.4: Tach tien trinh quet ngam doc lap khong lam treo Excel
+' HAM MENU: Quet thu muc moi (goi tu menu, hien hop thoai chon thu muc)
+' v3.6.0: Tach tien trinh quet ngam doc lap khong lam treo Excel
 ' ===========================================================================
 Public Sub ScanFolderDialog()
     Dim fd As FileDialog
@@ -791,7 +806,7 @@ Public Sub ScanFolderDialog()
         Dim folderPath As String
         folderPath = fd.SelectedItems(1)
         
-        ' v3.5.4: Goi worker ngam doc lap (non-blocking)
+        ' v3.6.0: Goi worker ngam doc lap (non-blocking)
         Call LaunchBackgroundScanner(folderPath)
         
         ' Thong bao nhanh cho nguoi dung (Excel tiep tuc hoat dong ngay lap tuc)
@@ -799,9 +814,108 @@ Public Sub ScanFolderDialog()
                 folderPath & vbCrLf & vbCrLf & _
                 Uni("Ti\u1ebfn tr\u00ecnh \u0111ang ch\u1ea1y tr\u00ean c\u1eeda s\u1ed5 ri\u00eang bi\u1ec7t v\u1edbi thanh ti\u1ebfn \u0111\u1ed9 % th\u1eddi gian th\u1ef1c." & vbCrLf & _
                     "B\u1ea1n c\u00f3 th\u1ec3 TI\u1ebeP T\u1ee4C L\u00c0M VI\u1ec6C tr\u00ean Excel b\u00ecnh th\u01b0\u1eddng m\u00e0 kh\u00f4ng lo b\u1ecb treo m\u00e1y!"), _
-                vbInformation, Uni("KangatangGuard v3.5.4 - Ti\u1ebfn tr\u00ecnh ng\u1ea7m")
+                vbInformation, Uni("KangatangGuard v3.6.0 - Ti\u1ebfn tr\u00ecnh ng\u1ea7m")
     End If
 End Sub
+
+' ===========================================================================
+' HAM MENU: Tiep tuc phien quet truoc do (v3.6.0 - Resume In-Progress Scan)
+' ===========================================================================
+Public Sub ResumeScanDialog()
+    On Error GoTo ResumeErr
+    
+    Dim lastSessionPath As String
+    lastSessionPath = Environ("APPDATA") & "\" & LOG_SUBFOLDER & "\last_session.json"
+    
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    If Not fso.FileExists(lastSessionPath) Then
+        Set fso = Nothing
+        MsgBoxW Uni("Kh\u00f4ng t\u00ecm th\u1ea5y phi\u00ean qu\u00e9t n\u00e0o tr\u01b0\u1edbc \u0111\u00f3 \u0111\u1ec3 ti\u1ebfp t\u1ee5c."), _
+                vbInformation, Uni("KangatangGuard v3.6.0 - Ti\u1ebfp t\u1ee5c phi\u00ean")
+        Exit Sub
+    End If
+    
+    Dim ts As Object
+    Set ts = fso.OpenTextFile(lastSessionPath, 1, False, -2)
+    Dim jsonText As String
+    jsonText = ts.ReadAll
+    ts.Close
+    Set ts = Nothing
+    Set fso = Nothing
+    
+    Dim statusVal As String, targetVal As String, scannedVal As String, cleanedVal As String, timeVal As String
+    statusVal = ExtractJsonValue(jsonText, "Status")
+    targetVal = ExtractJsonValue(jsonText, "TargetFolder")
+    scannedVal = ExtractJsonValue(jsonText, "TotalScanned")
+    cleanedVal = ExtractJsonValue(jsonText, "TotalCleaned")
+    timeVal = ExtractJsonValue(jsonText, "StartTime")
+    
+    If UCase(statusVal) = "COMPLETED" Then
+        MsgBoxW Uni("Phi\u00ean qu\u00e9t g\u1ea7n nh\u1ea5t \u0111\u00e3 HO\u00c0N T\u1ea4T 100%!" & vbCrLf & _
+                    "Th\u01b0 m\u1ee5c: ") & targetVal & vbCrLf & _
+                Uni("\u0110\u00e3 qu\u00e9t: ") & scannedVal & Uni(" t\u1ec7p | \u0110\u00e3 di\u1ec7t: ") & cleanedVal & Uni(" t\u1ec7p" & vbCrLf & vbCrLf & _
+                    "B\u1ea1n c\u00f3 th\u1ec3 ch\u1ecdn 'Qu\u00e9t th\u01b0 m\u1ee5c m\u1edbi...' n\u1ebfu mu\u1ed1n qu\u00e9t l\u1ea1i ho\u1eb7c ch\u1ecdn th\u01b0 m\u1ee5c kh\u00e1c."), _
+                vbInformation, Uni("KangatangGuard v3.6.0 - Phi\u00ean \u0111\u00e3 ho\u00e0n t\u1ea5t")
+        Exit Sub
+    End If
+    
+    Dim promptMsg As String
+    promptMsg = Uni("T\u00ecm th\u1ea5y phi\u00ean qu\u00e9t d\u1edf dang ch\u01b0a ho\u00e0n th\u00e0nh:" & vbCrLf & vbCrLf) & _
+                Uni("\u2022 Th\u01b0 m\u1ee5c: ") & targetVal & vbCrLf & _
+                Uni("\u2022 Th\u1eddi gian: ") & timeVal & vbCrLf & _
+                Uni("\u2022 Ti\u1ebfn \u0111\u1ed9: \u0110\u00e3 qu\u00e9t ") & scannedVal & Uni(" t\u1ec7p (\u0110\u00e3 di\u1ec7t: ") & cleanedVal & Uni(" t\u1ec7p)" & vbCrLf & vbCrLf) & _
+                Uni("B\u1ea1n c\u00f3 mu\u1ed1n TI\u1ebeP T\u1ee4C qu\u00e9t t\u1eeb v\u1ecb tr\u00ed n\u00e0y kh\u00f4ng?" & vbCrLf & _
+                    "(C\u00e1c t\u1ec7p \u0111\u00e3 ki\u1ec3m tra s\u1ebd \u0111\u01b0\u1ee3c b\u1ecf qua si\u00eau t\u1ed1c)")
+    
+    Dim res As VbMsgBoxResult
+    res = MsgBoxW(promptMsg, vbYesNo + vbQuestion, Uni("KangatangGuard v3.6.0 - Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t"))
+    
+    If res = vbYes Then
+        Call LaunchBackgroundScanner(targetVal, bResume:=True)
+        MsgBoxW Uni("\u0110\u00e3 k\u00edch ho\u1ea1t ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t ng\u1ea7m tr\u00ean c\u1eeda s\u1ed5 ri\u00eang bi\u1ec7t." & vbCrLf & _
+                    "B\u1ea1n c\u00f3 th\u1ec3 ti\u1ebfp t\u1ee5c l\u00e0m vi\u1ec7c tr\u00ean Excel b\u00ecnh th\u01b0\u1eddng!"), _
+                vbInformation, Uni("KangatangGuard v3.6.0 - Ti\u1ebfp t\u1ee5c phi\u00ean")
+    End If
+    Exit Sub
+    
+ResumeErr:
+    MsgBoxW Uni("L\u1ed7i khi \u0111\u1ecdc th\u00f4ng tin phi\u00ean qu\u00e9t: ") & Err.Description, vbCritical, Uni("KangatangGuard v3.6.0 - L\u1ed7i")
+    On Error GoTo 0
+End Sub
+
+Private Function ExtractJsonValue(ByVal json As String, ByVal key As String) As String
+    Dim pattern As String, p1 As Long, p2 As Long
+    pattern = """" & key & """"
+    p1 = InStr(1, json, pattern, vbTextCompare)
+    If p1 = 0 Then
+        ExtractJsonValue = ""
+        Exit Function
+    End If
+    
+    p1 = InStr(p1 + Len(pattern), json, ":")
+    If p1 = 0 Then Exit Function
+    p1 = p1 + 1
+    
+    Do While Mid(json, p1, 1) = " " Or Mid(json, p1, 1) = vbTab Or Mid(json, p1, 1) = vbCr Or Mid(json, p1, 1) = vbLf
+        p1 = p1 + 1
+    Loop
+    
+    If Mid(json, p1, 1) = """" Then
+        p1 = p1 + 1
+        p2 = InStr(p1, json, """")
+        If p2 > p1 Then
+            ExtractJsonValue = Mid(json, p1, p2 - p1)
+        End If
+    Else
+        p2 = p1
+        Do While p2 <= Len(json) And Mid(json, p2, 1) <> "," And Mid(json, p2, 1) <> "}" And Mid(json, p2, 1) <> vbCr And Mid(json, p2, 1) <> vbLf
+            p2 = p2 + 1
+        Loop
+        ExtractJsonValue = Trim(Mid(json, p1, p2 - p1))
+    End If
+End Function
 
 ' ===========================================================================
 ' HAM MENU: Mo thu muc Log
@@ -824,14 +938,15 @@ End Sub
 ' HAM MENU: Hien thi thong tin Add-in
 ' ===========================================================================
 Public Sub ShowAbout()
-    MsgBoxW Uni("KangatangGuard v3.5.4" & vbCrLf & vbCrLf & _
+    MsgBoxW Uni("KangatangGuard v3.6.0" & vbCrLf & vbCrLf & _
                 "H\u1ec7 th\u1ed1ng b\u1ea3o v\u1ec7 Excel chuy\u00ean d\u1ee5ng ch\u1ed1ng virus macro Kangatang / Laroux / mypersonnel." & vbCrLf & vbCrLf & _
                 "- T\u1ef1 \u0111\u1ed9ng qu\u00e9t th\u1eddi gian th\u1ef1c khi m\u1edf t\u1ec7p." & vbCrLf & _
                 "- ScanCache th\u00f4ng minh ch\u1ed1ng lag khi l\u01b0u v\u00e0 AutoSave." & vbCrLf & _
                 "- Ki\u1ebfn tr\u00fac T\u00e1ch ti\u1ebfn tr\u00ecnh (Out-of-Process Worker): Qu\u00e9t h\u00e0ng ngh\u00ecn t\u1ec7p tr\u00ean c\u1eeda s\u1ed5 ri\u00eang, Excel kh\u00f4ng bao gi\u1edd b\u1ecb treo (Not Responding)!" & vbCrLf & _
+                "- T\u00ednh n\u0103ng Fast Resume: Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t d\u1edf dang si\u00eau t\u1ed1c m\u00e0 kh\u00f4ng c\u1ea7n qu\u00e9t l\u1ea1i t\u1eeb \u0111\u1ea7u." & vbCrLf & _
                 "- H\u1ed7 tr\u1ee3 \u1ed5 m\u1ea1ng UNC (\\\\server\\share) v\u00e0 t\u00ean t\u1ec7p Unicode c\u00f3 d\u1ea5u." & vbCrLf & vbCrLf & _
-                "Phi\u00ean b\u1ea3n ki\u1ebfn tr\u00fac: v3.5.4 Production-grade"), _
-            vbInformation, Uni("Gi\u1edbi thi\u1ec7u KangatangGuard v3.5.4")
+                "Phi\u00ean b\u1ea3n ki\u1ebfn tr\u00fac: v3.6.0 Production-grade"), _
+            vbInformation, Uni("Gi\u1edbi thi\u1ec7u KangatangGuard v3.6.0")
 End Sub
 
 '### END_SECTION: modKangatangScanner ###

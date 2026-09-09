@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao XLSTART
-# Phien ban: v3.5.4
+# Phien ban: v3.6.0
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -11,7 +11,7 @@ $OutputEncoding           = [System.Text.Encoding]::UTF8
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - INSTALLER v3.5.4                                  " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - INSTALLER v3.6.0                                  " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 # ==============================================================================
@@ -265,14 +265,19 @@ try {
 }
 
 # ==============================================================================
-# BUOC 3: TAO THU MUC LOG VA CAI DAT WORKER SCANNER DOC LAP (v3.5.4)
+# BUOC 3: TAO THU MUC LOG, SESSIONS VA CAI DAT WORKER SCANNER DOC LAP (v3.6.0)
 # ==============================================================================
-Write-Host "`n[3/3] Dang thiet lap thu muc Log va cai dat Background Worker..." -ForegroundColor Yellow
+Write-Host "`n[3/3] Dang thiet lap thu muc Log, Sessions va cai dat Background Worker..." -ForegroundColor Yellow
 $logDir = Join-Path $env:APPDATA "KangatangGuard"
 if (-not (Test-Path $logDir)) {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 }
+$sessionsDir = Join-Path $logDir "Sessions"
+if (-not (Test-Path $sessionsDir)) {
+    New-Item -ItemType Directory -Path $sessionsDir -Force | Out-Null
+}
 Write-Host "   -> [OK] Thu muc Log: $logDir" -ForegroundColor Green
+Write-Host "   -> [OK] Thu muc Sessions: $sessionsDir" -ForegroundColor Green
 
 # Sao chep Kangatang_FolderScanner.ps1 vao APPDATA\KangatangGuard (Luu y: KHONG chep vao XLSTART vi Excel se tu mo script nhu workbook)
 $srcWorker = Join-Path $ScriptDir "Kangatang_FolderScanner.ps1"

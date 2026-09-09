@@ -1,8 +1,10 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Tien trinh Quet Luong Truc Tiep & Tu dong Phuc hoi (Auto-Recovery Worker)
-# Phien ban: v3.5.4 (Zero-Hang Watchdog & Safe Network Cleaning Architecture)
+# Phien ban: v3.6.0 (Session Checkpointing & Fast Resume Architecture)
 # Dac diem:
+#   - Ho tro Tiep tuc phien quet dang do (Fast Resume) qua HashSet O(1) bo qua sieu toc.
+#   - Checkpoint ben bi Append-only (chong hong du lieu tuyet doi khi sap nguon).
 #   - Tich hop Native C# Watchdog (gioi han 25s/tep) chong treo 100% tren mang SMB.
 #   - Kiem tra khoa ghi truoc khi diet (Pre-flight Write Lock Check) tranh dialog xung dot.
 #   - Goi COM 3 tham so nguyen ban chuan chi khong gay loi marshaller/binder.
@@ -13,21 +15,56 @@
 
 param (
     [Parameter(Mandatory=$false)]
-    [string]$TargetFolder = ""
+    [string]$TargetFolder = "",
+    [Parameter(Mandatory=$false)]
+    [switch]$Resume
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
-$Host.UI.RawUI.WindowTitle = "KangatangGuard v3.5.4 - Trinh quet luong chong treo & Tu dong phuc hoi"
+$Host.UI.RawUI.WindowTitle = "KangatangGuard v3.6.0 - Trinh quet luong chong treo & Tiep tuc phien quet"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANGGUARD v3.5.4 - ZERO-HANG WATCHDOG STREAM SCANNER (ROBUST) " -ForegroundColor Cyan
-Write-Host "   Kien truc Quan ly Tien trinh Doc lap & Chong Treo Mang SMB        " -ForegroundColor Cyan
+Write-Host "   KANGATANGGUARD v3.6.0 - FAST RESUME & ZERO-HANG STREAM SCANNER      " -ForegroundColor Cyan
+Write-Host "   Kien truc Quan ly Phien Quet Dang Do & Chong Treo Mang SMB        " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
-# 1. Xu ly va chuan hoa tham so duong dan thu muc
+# Thiet lap thu muc nhat ky (Audit Log) va Sessions
+$logDir = Join-Path $env:APPDATA "KangatangGuard"
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+$logFile = Join-Path $logDir ("scan_log_" + (Get-Date -Format "yyyyMMdd") + ".txt")
+$sessionsBaseDir = Join-Path $logDir "Sessions"
+if (-not (Test-Path $sessionsBaseDir)) {
+    New-Item -ItemType Directory -Path $sessionsBaseDir -Force | Out-Null
+}
+$lastSessionFile = Join-Path $logDir "last_session.json"
+
+function Write-AuditLog([string]$msg) {
+    $timeStr = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "$timeStr | $msg"
+    try {
+        Add-Content -Path $logFile -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue
+    } catch {}
+}
+
+# 1. Neu yeu cau -Resume ma chua truyen TargetFolder, doc tu last_session.json
+if ($Resume -and (-not $TargetFolder -or -not (Test-Path $TargetFolder))) {
+    if (Test-Path $lastSessionFile) {
+        try {
+            $lastMeta = Get-Content -Path $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($lastMeta.TargetFolder -and (Test-Path $lastMeta.TargetFolder)) {
+                $TargetFolder = $lastMeta.TargetFolder
+                Write-Host "`n[RESUME] Lay thu muc phien truoc tu last_session: $TargetFolder" -ForegroundColor Cyan
+            }
+        } catch {}
+    }
+}
+
+# 2. Xu ly va chuan hoa tham so duong dan thu muc
 if ($TargetFolder) {
     $TargetFolder = $TargetFolder.Trim('"').Trim("'").TrimEnd('\')
     if ($TargetFolder -match '^[a-zA-Z]:$') {
@@ -36,16 +73,37 @@ if ($TargetFolder) {
 }
 
 if (-not $TargetFolder -or -not (Test-Path $TargetFolder)) {
-    Add-Type -AssemblyName System.Windows.Forms
-    $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
-    $fbd.Description = "Chon thu muc can quet virus Kangatang"
-    $fbd.ShowNewFolderButton = $false
-    if ($fbd.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        $TargetFolder = $fbd.SelectedPath
-    } else {
-        Write-Host "`nDa huy chon thu muc. Dang thoat..." -ForegroundColor Yellow
-        Start-Sleep -Seconds 2
-        exit 0
+    # Kiem tra xem co phien dang do gan nhat de goi y khong
+    if (Test-Path $lastSessionFile) {
+        try {
+            $lastMeta = Get-Content -Path $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($lastMeta.Status -eq "In-Progress" -and $lastMeta.TargetFolder -and (Test-Path $lastMeta.TargetFolder)) {
+                Write-Host "`n[PHAT HIEN PHIEN QUET DO DANG GAN NHAT]" -ForegroundColor Yellow
+                Write-Host "   - Thu muc : $($lastMeta.TargetFolder)" -ForegroundColor White
+                Write-Host "   - Bat dau : $($lastMeta.StartTime)" -ForegroundColor DarkGray
+                Write-Host "   - Tien do : Da quet $($lastMeta.TotalScanned) tep (Da diet $($lastMeta.TotalCleaned) tep)" -ForegroundColor Cyan
+                Write-Host "`nBan co muon TIEP TUC phien nay khong?" -ForegroundColor Yellow
+                $ans = Read-Host "Lua chon [Y/N] (Mac dinh: Y)"
+                if (-not $ans -or $ans -eq "Y" -or $ans -eq "y") {
+                    $TargetFolder = $lastMeta.TargetFolder
+                    $Resume = $true
+                }
+            }
+        } catch {}
+    }
+    
+    if (-not $TargetFolder -or -not (Test-Path $TargetFolder)) {
+        Add-Type -AssemblyName System.Windows.Forms
+        $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
+        $fbd.Description = "Chon thu muc can quet virus Kangatang"
+        $fbd.ShowNewFolderButton = $false
+        if ($fbd.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $TargetFolder = $fbd.SelectedPath
+        } else {
+            Write-Host "`nDa huy chon thu muc. Dang thoat..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+            exit 0
+        }
     }
 }
 
@@ -56,23 +114,7 @@ if ($TargetFolder -match '^[a-zA-Z]:$') {
 }
 
 Write-Host "`n[THU MUC BAT DAU] : $TargetFolder" -ForegroundColor Yellow
-
-# Thiet lap thu muc nhat ky (Audit Log)
-$logDir = Join-Path $env:APPDATA "KangatangGuard"
-if (-not (Test-Path $logDir)) {
-    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-}
-$logFile = Join-Path $logDir ("scan_log_" + (Get-Date -Format "yyyyMMdd") + ".txt")
-
-function Write-AuditLog([string]$msg) {
-    $timeStr = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $line = "$timeStr | $msg"
-    try {
-        Add-Content -Path $logFile -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue
-    } catch {}
-}
-
-Write-AuditLog "[STREAM_SCAN_START] Bat dau quet luong v3.5.4 tai: $TargetFolder"
+Write-AuditLog "[STREAM_SCAN_START] Bat dau quet luong v3.6.0 tai: $TargetFolder (Resume: $Resume)"
 
 # ==============================================================================
 # BO MAY WATCHDOG NATIVE C# (ZERO-HANG HARD TIMEOUT ENGINE)
@@ -182,38 +224,165 @@ function Start-FreshExcel {
     Write-AuditLog "[DEBUG] Trong Start-FreshExcel: Truoc Stop-CurrentExcel"
     Stop-CurrentExcel
     Write-AuditLog "[DEBUG] Trong Start-FreshExcel: Sau Stop-CurrentExcel"
-    try {
-        $pidsBefore = @(Get-Process excel -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
-        Write-AuditLog "[DEBUG] Trong Start-FreshExcel: Truoc New-Object"
-        $Script:CurrentExcelApp = New-Object -ComObject Excel.Application
-        Write-AuditLog "[DEBUG] Trong Start-FreshExcel: Sau New-Object"
-        
-        # Lay chinh xac PID qua Win32 Hwnd
-        $exactPid = [ExcelWatchdog]::GetExcelPid($Script:CurrentExcelApp.Hwnd)
-        if ($exactPid -gt 0) {
-            $Script:CurrentExcelPid = $exactPid
-        } else {
-            $pidsAfter = @(Get-Process excel -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
-            $newPid = $pidsAfter | Where-Object { $pidsBefore -notcontains $_ } | Select-Object -First 1
-            if ($newPid) { $Script:CurrentExcelPid = $newPid }
-        }
+    
+    $maxRetries = 5
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        try {
+            $pidsBefore = @(Get-Process excel -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+            Write-AuditLog "[DEBUG] Trong Start-FreshExcel (Lan $attempt): Truoc New-Object"
+            $Script:CurrentExcelApp = New-Object -ComObject Excel.Application
+            Write-AuditLog "[DEBUG] Trong Start-FreshExcel (Lan $attempt): Sau New-Object"
+            
+            # VACCINE HRESULT 0x800AC472: Cho 300ms de message pump va cac add-in khoi dong on dinh
+            Start-Sleep -Milliseconds 300
+            
+            # Lay chinh xac PID qua Win32 Hwnd
+            try {
+                $exactPid = [ExcelWatchdog]::GetExcelPid($Script:CurrentExcelApp.Hwnd)
+                if ($exactPid -gt 0) {
+                    $Script:CurrentExcelPid = $exactPid
+                } else {
+                    $pidsAfter = @(Get-Process excel -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+                    $newPid = $pidsAfter | Where-Object { $pidsBefore -notcontains $_ } | Select-Object -First 1
+                    if ($newPid) { $Script:CurrentExcelPid = $newPid }
+                }
+            } catch {}
 
-        $Script:CurrentExcelApp.Visible = $false
-        $Script:CurrentExcelApp.DisplayAlerts = $false
-        $Script:CurrentExcelApp.ScreenUpdating = $false
-        $Script:CurrentExcelApp.EnableEvents = $false
-        $Script:CurrentExcelApp.AskToUpdateLinks = $false
-        $Script:CurrentExcelApp.AlertBeforeOverwriting = $false
-        try { $Script:CurrentExcelApp.FeatureInstall = 0 } catch {}
-        try { $Script:CurrentExcelApp.AutomationSecurity = 3 } catch {}
-        return $true
-    } catch {
-        $errTxt = $_.Exception.Message
-        Write-Host "[LOI] Khong the khoi dong Excel COM: $errTxt" -ForegroundColor Red
-        Write-AuditLog "[STREAM_SCAN_ERROR] Khong the khoi dong Excel COM: $errTxt"
-        return $false
+            # VACCINE HRESULT 0x800AC472: Bao boc TUNG THUOC TINH RIENG BIET trong try-catch
+            # Tuyet doi khong de bat ky thuoc tinh nao (nhu AlertBeforeOverwriting) lam loi tien trinh khoi dong!
+            try { $Script:CurrentExcelApp.Visible = $false } catch {}
+            try { $Script:CurrentExcelApp.DisplayAlerts = $false } catch {}
+            try { $Script:CurrentExcelApp.ScreenUpdating = $false } catch {}
+            try { $Script:CurrentExcelApp.EnableEvents = $false } catch {}
+            try { $Script:CurrentExcelApp.AskToUpdateLinks = $false } catch {}
+            try { $Script:CurrentExcelApp.AlertBeforeOverwriting = $false } catch {}
+            try { $Script:CurrentExcelApp.FeatureInstall = 0 } catch {}
+            try { $Script:CurrentExcelApp.AutomationSecurity = 3 } catch {}
+            
+            if ($null -ne $Script:CurrentExcelApp) {
+                return $true
+            }
+        } catch {
+            $errTxt = $_.Exception.Message
+            Write-AuditLog "[DEBUG] Start-FreshExcel Lan $attempt that bai: $errTxt"
+            Stop-CurrentExcel
+            if ($attempt -lt $maxRetries) {
+                Start-Sleep -Milliseconds (500 * $attempt)
+            } else {
+                Write-Host "[LOI] Khong the khoi dong Excel COM sau $maxRetries lan thu: $errTxt" -ForegroundColor Red
+                Write-AuditLog "[STREAM_SCAN_ERROR] Khong the khoi dong Excel COM sau $maxRetries lan: $errTxt"
+                return $false
+            }
+        }
     }
+    return $false
 }
+
+# ==============================================================================
+# KHOI TAO PHIEN QUET & CHECKPOINT (SESSION CHECKPOINTING v3.6.0)
+# ==============================================================================
+function Get-FolderHash([string]$folder) {
+    $clean = $folder.Trim().ToLowerInvariant().TrimEnd('\')
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($clean)
+    $md5 = [System.Security.Cryptography.MD5]::Create()
+    $hashBytes = $md5.ComputeHash($bytes)
+    return -join ($hashBytes | ForEach-Object { $_.ToString("x2") })
+}
+
+$folderHash = Get-FolderHash $TargetFolder
+$sessionDir = Join-Path $sessionsBaseDir $folderHash
+$sessionMetaFile = Join-Path $sessionDir "meta.json"
+$sessionScannedLog = Join-Path $sessionDir "scanned_files.log"
+
+if (-not (Test-Path $sessionDir)) {
+    New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+}
+
+if (-not $Resume -and (Test-Path $sessionMetaFile)) {
+    try {
+        $existingMeta = Get-Content -Path $sessionMetaFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($existingMeta.Status -eq "In-Progress") {
+            Write-Host "`n======================================================================" -ForegroundColor Yellow
+            Write-Host "   PHAT HIEN PHIEN QUET CHUA HOAN TAT TAI THU MUC NAY!              " -ForegroundColor Yellow
+            Write-Host "======================================================================" -ForegroundColor Yellow
+            Write-Host "   - Bat dau luc : $($existingMeta.StartTime)" -ForegroundColor White
+            Write-Host "   - Da quet     : $($existingMeta.TotalScanned) tep (Da diet: $($existingMeta.TotalCleaned) tep)" -ForegroundColor Cyan
+            Write-Host "   - Thu muc     : $TargetFolder" -ForegroundColor White
+            Write-Host "`nBan co muon TIEP TUC quet tu vi tri nay khong?" -ForegroundColor Yellow
+            Write-Host "  [Y] Tiep tuc phien truoc (Bo qua cac tep da kiem tra)" -ForegroundColor Green
+            Write-Host "  [N] Quet lai tu dau (Xoa phien cu)" -ForegroundColor DarkYellow
+            $ans = Read-Host "Lua chon [Y/N] (Mac dinh: Y)"
+            if (-not $ans -or $ans -eq "Y" -or $ans -eq "y") {
+                $Resume = $true
+            } else {
+                if (Test-Path $sessionScannedLog) { Remove-Item -Path $sessionScannedLog -Force -ErrorAction SilentlyContinue }
+                if (Test-Path $sessionMetaFile) { Remove-Item -Path $sessionMetaFile -Force -ErrorAction SilentlyContinue }
+            }
+        }
+    } catch {}
+}
+
+$Script:ScannedFilesSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+$Script:SessionStartTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+
+if ($Resume -and (Test-Path $sessionMetaFile)) {
+    try {
+        $loadedMeta = Get-Content -Path $sessionMetaFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $Script:TotalScanned = [int]$loadedMeta.TotalScanned
+        $Script:TotalCleaned = [int]$loadedMeta.TotalCleaned
+        $Script:TotalSafe    = [int]$loadedMeta.TotalSafe
+        $Script:TotalErrors  = [int]$loadedMeta.TotalErrors
+        $Script:TotalFolders = [int]$loadedMeta.TotalFolders
+        if ($loadedMeta.StartTime) { $Script:SessionStartTime = $loadedMeta.StartTime }
+        Write-Host "`n   -> [OK] Da khoi phuc phien quet: Da quet $Script:TotalScanned tep (Da diet $Script:TotalCleaned)" -ForegroundColor Green
+    } catch {
+        $Script:TotalScanned = 0
+        $Script:TotalCleaned = 0
+        $Script:TotalSafe    = 0
+        $Script:TotalErrors  = 0
+        $Script:TotalFolders = 0
+    }
+    
+    if (Test-Path $sessionScannedLog) {
+        Get-Content -Path $sessionScannedLog -Encoding UTF8 | ForEach-Object {
+            $line = $_.Trim()
+            if ($line) { $Script:ScannedFilesSet.Add($line) | Out-Null }
+        }
+        Write-Host "   -> [OK] Da nap $($Script:ScannedFilesSet.Count) tep da quet vao bo nho dem Fast-Skip." -ForegroundColor Green
+    }
+} else {
+    $Script:TotalScanned = 0
+    $Script:TotalCleaned = 0
+    $Script:TotalSafe    = 0
+    $Script:TotalErrors  = 0
+    $Script:TotalFolders = 0
+    if (Test-Path $sessionScannedLog) { Remove-Item -Path $sessionScannedLog -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType File -Path $sessionScannedLog -Force | Out-Null
+}
+
+function Save-SessionMeta([string]$status = "In-Progress") {
+    $metaObj = [ordered]@{
+        SessionId    = $folderHash
+        TargetFolder = $TargetFolder
+        Status       = $status
+        StartTime    = $Script:SessionStartTime
+        LastUpdated  = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+        TotalFolders = $Script:TotalFolders
+        TotalScanned = $Script:TotalScanned
+        TotalCleaned = $Script:TotalCleaned
+        TotalSafe    = $Script:TotalSafe
+        TotalErrors  = $Script:TotalErrors
+        SessionDir   = $sessionDir
+    }
+    $json = $metaObj | ConvertTo-Json -Depth 3
+    try {
+        [System.IO.File]::WriteAllText($sessionMetaFile, $json, [System.Text.Encoding]::UTF8)
+        [System.IO.File]::WriteAllText($lastSessionFile, $json, [System.Text.Encoding]::UTF8)
+    } catch {}
+}
+
+# Ghi checkpoint khoi tao
+Save-SessionMeta "In-Progress"
 
 Write-Host "`nDang khoi dong Excel COM doc lap (PID quan ly rieng)..." -ForegroundColor Gray
 Write-AuditLog "[DEBUG] Bat dau khoi dong Excel COM..."
@@ -224,14 +393,7 @@ if (-not (Start-FreshExcel)) {
     exit 1
 }
 Write-AuditLog "[DEBUG] Start-FreshExcel thanh cong, PID: $Script:CurrentExcelPid"
-Write-Host "   -> [OK] Excel Worker v3.5.4 da san sang (PID: $Script:CurrentExcelPid)" -ForegroundColor Green
-
-# Bien dem thoi gian thuc
-$Script:TotalScanned = 0
-$Script:TotalCleaned = 0
-$Script:TotalSafe    = 0
-$Script:TotalErrors  = 0
-$Script:TotalFolders = 0
+Write-Host "   -> [OK] Excel Worker v3.6.0 da san sang (PID: $Script:CurrentExcelPid)" -ForegroundColor Green
 
 $excelExtensions = @(".xls", ".xlsx", ".xlsm", ".xlsb", ".xltx", ".xltm", ".xlt", ".xla", ".xlam")
 $virusKeywords   = @("Kangatang", "Kangaatang", "Kanga", "mypersonnel")
@@ -243,7 +405,7 @@ function Scan-SingleExcelFile($file) {
     $idx = $Script:TotalScanned
     
     # Cap nhat tieu de cua so thoi gian thuc
-    $Host.UI.RawUI.WindowTitle = "KangatangGuard v3.5.4 | Da quet: $Script:TotalScanned | Da diet: $Script:TotalCleaned | PID: $Script:CurrentExcelPid"
+    $Host.UI.RawUI.WindowTitle = "KangatangGuard v3.6.0 | Da quet: $Script:TotalScanned | Da diet: $Script:TotalCleaned | PID: $Script:CurrentExcelPid"
     
     # Dinh ky lam moi tien trinh Excel moi 30 tep de chong tran bo nho
     if ($Script:TotalScanned % 30 -eq 0) {
@@ -511,20 +673,33 @@ function Scan-FolderStream([string]$currentDir) {
     Write-Host "Folder [$Script:TotalFolders]: $currentDir" -ForegroundColor Yellow
     Write-Host "----------------------------------------------------------------------" -ForegroundColor DarkGray
     
-    Write-Progress -Activity "KangatangGuard v3.5.4 - Dang quet luong chong treo" -Status "Thu muc #$Script:TotalFolders: $currentDir" -CurrentOperation "Da quet: $Script:TotalScanned tep | Da diet: $Script:TotalCleaned"
+    Write-Progress -Activity "KangatangGuard v3.6.0 - Dang quet luong chong treo" -Status "Thu muc #$Script:TotalFolders: $currentDir" -CurrentOperation "Da quet: $Script:TotalScanned tep | Da diet: $Script:TotalCleaned"
 
     # 1. Quet ngay lap tuc tat ca tep Excel co trong thu muc nay
     try {
         $files = Get-ChildItem -Path $currentDir -File -ErrorAction SilentlyContinue
         foreach ($f in $files) {
             if ($excelExtensions -contains $f.Extension.ToLower() -and $f.Name -ne "KangatangGuard.xlam") {
+                if ($Script:ScannedFilesSet.Contains($f.FullName)) {
+                    Write-Host "  ⏩ [BO QUA - DA QUET] $($f.Name)" -ForegroundColor DarkGray
+                    continue
+                }
                 Scan-SingleExcelFile $f
+                
+                # Ghi ngay vao checkpoint log
+                try {
+                    [System.IO.File]::AppendAllText($sessionScannedLog, $f.FullName + "`r`n", [System.Text.Encoding]::UTF8)
+                    $Script:ScannedFilesSet.Add($f.FullName) | Out-Null
+                } catch {}
             }
         }
     } catch {
         $errTxt = $_.Exception.Message
         Write-Host "  [LOI DUYET TEP] $errTxt" -ForegroundColor Red
     }
+
+    # Dinh ky luu checkpoint sau moi thu muc
+    Save-SessionMeta "In-Progress"
 
     # 2. Lay danh sach thu muc con va lan luot quet tiep
     try {
@@ -541,28 +716,35 @@ function Scan-FolderStream([string]$currentDir) {
 }
 
 # 3. Kich hoat quet luong ngay lap tuc!
-Write-Host "`nBAT DAU QUET LUONG TRUC TIEP CHONG TREO (v3.5.4)..." -ForegroundColor Cyan
+Write-Host "`nBAT DAU QUET LUONG TRUC TIEP CHONG TREO (v3.6.0)..." -ForegroundColor Cyan
 Scan-FolderStream $TargetFolder
 
-Write-Progress -Activity "KangatangGuard v3.5.4" -Completed
+Write-Progress -Activity "KangatangGuard v3.6.0" -Completed
 
 # 4. Giai phong va dong tien trinh Excel COM
 Stop-CurrentExcel
 
-# 5. Bao cao tong ket
+# 5. Cap nhat checkpoint hoan tat 100%
+Save-SessionMeta "Completed"
+
+# 6. Bao cao tong ket
 Write-Host "`n======================================================================" -ForegroundColor Green
-Write-Host "   BAO CAO TONG KET QUET LUONG CHONG TREO (v3.5.4)                   " -ForegroundColor Green
+Write-Host "   BAO CAO TONG KET QUET LUONG CHONG TREO (v3.6.0)                   " -ForegroundColor Green
 Write-Host "======================================================================" -ForegroundColor Green
 Write-Host "   Thu muc bat dau                 : $TargetFolder" -ForegroundColor White
+if ($Resume) {
+    Write-Host "   Che do                          : TIEP TUC PHIEN TRUOC (Fast Resume)" -ForegroundColor Cyan
+}
 Write-Host "   Tong so thu muc da duyet qua    : $Script:TotalFolders" -ForegroundColor Yellow
 Write-Host "   Tong so tep Excel da kiem tra   : $Script:TotalScanned" -ForegroundColor Cyan
 Write-Host "   So tep an toan                  : $Script:TotalSafe" -ForegroundColor Green
 Write-Host "   So tep phat hien & da tieu diet : $Script:TotalCleaned" -ForegroundColor $(if ($Script:TotalCleaned -gt 0) { "Red" } else { "Green" })
 Write-Host "   So tep loi / bo qua / bi khoa   : $Script:TotalErrors" -ForegroundColor $(if ($Script:TotalErrors -gt 0) { "Yellow" } else { "Gray" })
 Write-Host "   Nhat ky chi tiet                : $logFile" -ForegroundColor DarkGray
+Write-Host "   Trang thai phien quet           : HOAN TAT 100%" -ForegroundColor Green
 Write-Host "======================================================================" -ForegroundColor Green
 
-Write-AuditLog "[STREAM_SCAN_END] $TargetFolder - ThuMuc: $Script:TotalFolders, Tep: $Script:TotalScanned, Diet: $Script:TotalCleaned, AnToan: $Script:TotalSafe, Loi: $Script:TotalErrors"
+Write-AuditLog "[STREAM_SCAN_END] $TargetFolder - ThuMuc: $Script:TotalFolders, Tep: $Script:TotalScanned, Diet: $Script:TotalCleaned, AnToan: $Script:TotalSafe, Loi: $Script:TotalErrors, Resume: $Resume"
 
 Write-Host "`nToan bo tien trinh quet luong da hoan tat ma khong lam giam hieu nang Excel." -ForegroundColor Cyan
 Write-Host "Nhan Enter de hoan tat va dong cua so..." -ForegroundColor Gray
