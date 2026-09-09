@@ -1,0 +1,22 @@
+# Backup folders
+_Backup*/
+*_backup_*
+*.bak
+
+# Logs
+*.log
+scan_log_*.txt
+
+# Temporary / OS files
+Thumbs.db
+Desktop.ini
+~$*
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
