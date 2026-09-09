@@ -1,7 +1,7 @@
-﻿@echo off
+@echo off
 setlocal
 chcp 65001 >nul
-title HỆ THỐNG DIỆT VIRUS EXCEL KANGATANG - EXCEL CLEANER v3.5.0
+title HỆ THỐNG DIỆT VIRUS EXCEL KANGATANG - EXCEL CLEANER v3.5.3
 
 :: 1. Kiểm tra quyền Administrator và tự động kích hoạt nếu chưa có
 net session >nul 2>&1
@@ -27,7 +27,7 @@ exit /b
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   HỆ THỐNG DIỆT VIRUS MACRO KANGATANG - EXCEL CLEANER (v3.5.0)       " -ForegroundColor Cyan
+Write-Host "   HỆ THỐNG DIỆT VIRUS MACRO KANGATANG - EXCEL CLEANER (v3.5.3)       " -ForegroundColor Cyan
 Write-Host "   Phiên bản Quét Luồng Trực Tiếp & Đa tầng Office 365 (Streaming)   " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 

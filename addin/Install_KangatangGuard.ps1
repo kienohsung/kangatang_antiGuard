@@ -1,17 +1,17 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao XLSTART
-# Phien ban: v3.5.0
+# Phien ban: v3.5.3
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - INSTALLER v3.5.0                                  " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - INSTALLER v3.5.3                                  " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 # ==============================================================================
@@ -265,7 +265,7 @@ try {
 }
 
 # ==============================================================================
-# BUOC 3: TAO THU MUC LOG VA CAI DAT WORKER SCANNER DOC LAP (v3.5.0)
+# BUOC 3: TAO THU MUC LOG VA CAI DAT WORKER SCANNER DOC LAP (v3.5.3)
 # ==============================================================================
 Write-Host "`n[3/3] Dang thiet lap thu muc Log va cai dat Background Worker..." -ForegroundColor Yellow
 $logDir = Join-Path $env:APPDATA "KangatangGuard"

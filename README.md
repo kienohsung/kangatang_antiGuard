@@ -89,6 +89,11 @@ kangatang_antiGuard/
 
 ## 📝 Nhật Ký Phiên Bản (Changelog)
 
+- **v3.5.3:**
+  - Tích hợp **Native C# Watchdog Engine (25s timeout)** trên luồng ngầm CLR, tự động ngắt và hồi sinh Excel khi gặp tệp treo/hỏng hoặc modal dialog ngầm trên mạng SMB.
+  - Thêm **Pre-flight Write Lock Check** (.NET FileStream) phát hiện tệp đang được người dùng khác mở ghi để bỏ qua an toàn, ngăn chặn xung đột khóa mạng.
+  - Chặn triệt để hộp thoại Modal: truyền dummy password và tắt cảnh báo tương thích/bảo mật (`CheckCompatibility = $false`).
+  - Thêm cơ chế **Auto-Recovery ngay trong khối catch khử khuẩn**, khôi phục kênh COM tự động khi gặp sự cố giữa chừng.
 - **v3.5.2:**
   - Sửa triệt để lỗi biên dịch Duplicate Option statement trong VBA.
   - Tích hợp chuẩn hóa chuỗi tiêm mã phòng vệ Inject-CleanVbaModule.

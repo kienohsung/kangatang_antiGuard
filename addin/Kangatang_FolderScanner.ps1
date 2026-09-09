@@ -1,13 +1,14 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Tien trinh Quet Luong Truc Tiep & Tu dong Phuc hoi (Auto-Recovery Worker)
-# Phien ban: v3.5.1 (Enterprise Robust Batch Scanner)
+# Phien ban: v3.5.3 (Zero-Hang Watchdog & Safe Network Cleaning Architecture)
 # Dac diem:
-#   - Quet luong ngay lap tuc lan luot tung thu muc, khong co do tre cho gom tep.
-#   - Quan ly vong doi tien trinh Excel rieng biet (PID Tracking).
-#   - Tu dong hoi sinh Excel COM ngay lap tuc khi gap file loi/hong (Auto-Recovery).
+#   - Tich hop Native C# Watchdog (gioi han 25s/tep) chong treo 100% tren mang SMB.
+#   - Kiem tra khoa ghi truoc khi diet (Pre-flight Write Lock Check) tranh dialog xung dot.
+#   - Goi COM 3 tham so nguyen ban chuan chi khong gay loi marshaller/binder.
+#   - Tu dong hoi sinh Excel COM ngay lap tuc ca trong luong quet va luong lam sach.
 #   - Dinh ky lam moi tien trinh Excel moi 30 tep de chong ro ri bo nho.
-#   - Che do mo phong thu Read-Only tranh khoa tep va khong bi chan boi hop thoai.
+#   - Quan ly chinh xac PID tien trinh Excel qua Win32 Hwnd API.
 # ==============================================================================
 
 param (
@@ -19,16 +20,15 @@ param (
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
-$Host.UI.RawUI.WindowTitle = "KangatangGuard v3.5.1 - Trinh quet luong truc tiep & Tu dong phuc hoi"
+$Host.UI.RawUI.WindowTitle = "KangatangGuard v3.5.3 - Trinh quet luong chong treo & Tu dong phuc hoi"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANGGUARD v3.5.1 - TRINH QUET LUONG TU DONG PHUC HOI (ROBUST) " -ForegroundColor Cyan
-Write-Host "   Kien truc Quan ly Tien trinh Doc lap & Chuyen biet Chuyen sau      " -ForegroundColor Cyan
+Write-Host "   KANGATANGGUARD v3.5.3 - ZERO-HANG WATCHDOG STREAM SCANNER (ROBUST) " -ForegroundColor Cyan
+Write-Host "   Kien truc Quan ly Tien trinh Doc lap & Chong Treo Mang SMB        " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 # 1. Xu ly va chuan hoa tham so duong dan thu muc
 if ($TargetFolder) {
-    # Xu ly truong hop CLI thoat dau ngoac kep lam dinh dau kep o cuoi: "D:" -> D:"
     $TargetFolder = $TargetFolder.Trim('"').Trim("'").TrimEnd('\')
     if ($TargetFolder -match '^[a-zA-Z]:$') {
         $TargetFolder = $TargetFolder + "\"
@@ -72,7 +72,83 @@ function Write-AuditLog([string]$msg) {
     } catch {}
 }
 
-Write-AuditLog "[STREAM_SCAN_START] Bat dau quet luong tai: $TargetFolder"
+Write-AuditLog "[STREAM_SCAN_START] Bat dau quet luong v3.5.3 tai: $TargetFolder"
+
+# ==============================================================================
+# BO MAY WATCHDOG NATIVE C# (ZERO-HANG HARD TIMEOUT ENGINE)
+# ==============================================================================
+Add-Type -TypeDefinition @"
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+public class ExcelWatchdog : IDisposable {
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    private Timer _timer;
+    private int _pid;
+    public bool TimedOut { get; private set; }
+
+    public static int GetExcelPid(int hwnd) {
+        try {
+            uint pid = 0;
+            GetWindowThreadProcessId(new IntPtr(hwnd), out pid);
+            return (int)pid;
+        } catch {
+            return 0;
+        }
+    }
+
+    public void Arm(int pid, int timeoutMs) {
+        _pid = pid;
+        TimedOut = false;
+        if (_timer != null) {
+            _timer.Dispose();
+        }
+        _timer = new Timer(Callback, null, timeoutMs, Timeout.Infinite);
+    }
+
+    public void Disarm() {
+        if (_timer != null) {
+            _timer.Dispose();
+            _timer = null;
+        }
+    }
+
+    private void Callback(object state) {
+        TimedOut = true;
+        try {
+            Process proc = Process.GetProcessById(_pid);
+            if (!proc.HasExited) {
+                proc.Kill();
+            }
+        } catch {}
+    }
+
+    public void Dispose() {
+        Disarm();
+    }
+}
+"@
+
+$Script:Watchdog = New-Object ExcelWatchdog
+
+# Kiem tra file co dang bi tien trinh khac mo ghi hay khong
+function Test-FileWriteable([string]$path) {
+    try {
+        $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        if ($stream) {
+            $stream.Close()
+            $stream.Dispose()
+            return $true
+        }
+        return $false
+    } catch {
+        return $false
+    }
+}
 
 # ==============================================================================
 # QUAN LY TIEN TRINH EXCEL COM NGUYEN TU (ATOMIC PROCESS MANAGEMENT)
@@ -81,6 +157,9 @@ $Script:CurrentExcelApp = $null
 $Script:CurrentExcelPid = 0
 
 function Stop-CurrentExcel {
+    if ($null -ne $Script:Watchdog) {
+        $Script:Watchdog.Disarm()
+    }
     if ($null -ne $Script:CurrentExcelApp) {
         try { $Script:CurrentExcelApp.Quit() } catch {}
         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Script:CurrentExcelApp) | Out-Null } catch {}
@@ -104,10 +183,16 @@ function Start-FreshExcel {
     try {
         $pidsBefore = @(Get-Process excel -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
         $Script:CurrentExcelApp = New-Object -ComObject Excel.Application
-        $pidsAfter = @(Get-Process excel -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
         
-        $newPid = $pidsAfter | Where-Object { $pidsBefore -notcontains $_ } | Select-Object -First 1
-        if ($newPid) { $Script:CurrentExcelPid = $newPid }
+        # Lay chinh xac PID qua Win32 Hwnd
+        $exactPid = [ExcelWatchdog]::GetExcelPid($Script:CurrentExcelApp.Hwnd)
+        if ($exactPid -gt 0) {
+            $Script:CurrentExcelPid = $exactPid
+        } else {
+            $pidsAfter = @(Get-Process excel -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+            $newPid = $pidsAfter | Where-Object { $pidsBefore -notcontains $_ } | Select-Object -First 1
+            if ($newPid) { $Script:CurrentExcelPid = $newPid }
+        }
 
         $Script:CurrentExcelApp.Visible = $false
         $Script:CurrentExcelApp.DisplayAlerts = $false
@@ -132,7 +217,7 @@ if (-not (Start-FreshExcel)) {
     Read-Host | Out-Null
     exit 1
 }
-Write-Host "   -> [OK] Excel Worker da san sang (PID: $Script:CurrentExcelPid)" -ForegroundColor Green
+Write-Host "   -> [OK] Excel Worker v3.5.3 da san sang (PID: $Script:CurrentExcelPid)" -ForegroundColor Green
 
 # Bien dem thoi gian thuc
 $Script:TotalScanned = 0
@@ -144,14 +229,14 @@ $Script:TotalFolders = 0
 $excelExtensions = @(".xls", ".xlsx", ".xlsm", ".xlsb", ".xltx", ".xltm", ".xlt", ".xla", ".xlam")
 $virusKeywords   = @("Kangatang", "Kangaatang", "Kanga", "mypersonnel")
 
-# Ham quet va xu ly tung tep Excel voi phong thu da tang
+# Ham quet va xu ly tung tep Excel voi phong thu da tang & Watchdog 25s
 function Scan-SingleExcelFile($file) {
     $Script:TotalScanned++
     $filePath = $file.FullName
     $idx = $Script:TotalScanned
     
     # Cap nhat tieu de cua so thoi gian thuc
-    $Host.UI.RawUI.WindowTitle = "KangatangGuard v3.5.1 | Da quet: $Script:TotalScanned | Da diet: $Script:TotalCleaned | PID: $Script:CurrentExcelPid"
+    $Host.UI.RawUI.WindowTitle = "KangatangGuard v3.5.3 | Da quet: $Script:TotalScanned | Da diet: $Script:TotalCleaned | PID: $Script:CurrentExcelPid"
     
     # Dinh ky lam moi tien trinh Excel moi 30 tep de chong tran bo nho
     if ($Script:TotalScanned % 30 -eq 0) {
@@ -162,30 +247,30 @@ function Scan-SingleExcelFile($file) {
     $wb = $null
     $openSuccess = $false
 
+    # Kich hoat Watchdog 25 giay truoc khi mo tep
+    $Script:Watchdog.Arm($Script:CurrentExcelPid, 25000)
+
     try {
-        # Mo ReadOnly = $true voi 3 tham so chuan: FilePath, UpdateLinks=0, ReadOnly=$true
+        # Mo ReadOnly = $true voi 3 tham so nguyen ban on dinh tuyet doi
         $wb = $Script:CurrentExcelApp.Workbooks.Open($filePath, 0, $true)
         $openSuccess = $true
     } catch {
         $errMsg = $_.Exception.Message
-        Write-Host "  [$idx] Khong the mo: $($file.Name) | Loi: $errMsg" -ForegroundColor DarkYellow
-        Write-AuditLog "[SKIP] Khong the mo: $filePath | Loi: $errMsg"
         $Script:TotalErrors++
 
-        # Kiem tra neu Excel bi ngat ket noi thi lap tuc hoi sinh
-        $isAlive = $false
-        try {
-            if ($null -ne $Script:CurrentExcelApp -and $Script:CurrentExcelApp.Version) {
-                $isAlive = $true
-            }
-        } catch {}
-
-        if (-not $isAlive) {
-            Write-Host "  -> [AUTO-RECOVERY] Phat hien Excel COM bi ngat, dang tu dong khoi phuc..." -ForegroundColor Magenta
-            Write-AuditLog "[AUTO_RECOVERY] Tu dong khoi phuc Excel COM tai: $filePath"
+        if ($Script:Watchdog.TimedOut) {
+            Write-Host "  [$idx] [TIMEOUT] Tep bi treo qua 25s (bo qua an toan): $($file.Name)" -ForegroundColor Red
+            Write-AuditLog "[TIMEOUT] $filePath | Qua thoi gian 25s"
+            Start-FreshExcel | Out-Null
+        } else {
+            Write-Host "  [$idx] Khong the mo: $($file.Name) | Loi: $errMsg" -ForegroundColor DarkYellow
+            Write-AuditLog "[SKIP] Khong the mo: $filePath | Loi: $errMsg"
+            # Auto-Recovery ngay lap tuc de bao ve kenh COM cho cac tep tiep theo
             Start-FreshExcel | Out-Null
         }
         return
+    } finally {
+        $Script:Watchdog.Disarm()
     }
 
     if (-not $openSuccess -or $null -eq $wb) {
@@ -196,34 +281,37 @@ function Scan-SingleExcelFile($file) {
     $isInfected = $false
     $infectionDetails = [System.Collections.Generic.List[string]]::new()
 
-    # Kiem tra VBProject Components
-    try {
-        $vbProj = $wb.VBProject
-        if ($vbProj) {
-            foreach ($comp in $vbProj.VBComponents) {
-                foreach ($kw in $virusKeywords) {
-                    if ($comp.Name -like "*$kw*") {
-                        $isInfected = $true
-                        $infectionDetails.Add("Module doc hai: " + $comp.Name)
-                        break
-                    }
-                }
-                try {
-                    $cm = $comp.CodeModule
-                    if ($cm -and $cm.CountOfLines -gt 0) {
-                        $lines = $cm.Lines(1, $cm.CountOfLines)
-                        foreach ($kw in $virusKeywords) {
-                            if ($lines -like "*$kw*") {
-                                $isInfected = $true
-                                $infectionDetails.Add("Ma doc trong: " + $comp.Name)
-                                break
-                            }
+    # Kiem tra VBProject Components (Chi kiem tra voi tep macro, khong truy van voi .xlsx de tranh loi COM)
+    $ext = $file.Extension.ToLower()
+    if ($ext -ne ".xlsx" -and $ext -ne ".xltx") {
+        try {
+            $vbProj = $wb.VBProject
+            if ($vbProj) {
+                foreach ($comp in $vbProj.VBComponents) {
+                    foreach ($kw in $virusKeywords) {
+                        if ($comp.Name -like "*$kw*") {
+                            $isInfected = $true
+                            $infectionDetails.Add("Module doc hai: " + $comp.Name)
+                            break
                         }
                     }
-                } catch {}
+                    try {
+                        $cm = $comp.CodeModule
+                        if ($cm -and $cm.CountOfLines -gt 0) {
+                            $lines = $cm.Lines(1, $cm.CountOfLines)
+                            foreach ($kw in $virusKeywords) {
+                                if ($lines -like "*$kw*") {
+                                    $isInfected = $true
+                                    $infectionDetails.Add("Ma doc trong: " + $comp.Name)
+                                    break
+                                }
+                            }
+                        }
+                    } catch {}
+                }
             }
-        }
-    } catch {}
+        } catch {}
+    }
 
     # Kiem tra Sheet an
     try {
@@ -263,6 +351,14 @@ function Scan-SingleExcelFile($file) {
         try { $wb.Close($false) } catch {}
         $wb = $null
 
+        # Kiem tra khoa ghi truoc khi can thiep (Pre-flight Write Lock Check)
+        if (-not (Test-FileWriteable $filePath)) {
+            Write-Host "     [KHOA TEP] Tep dang duoc mo boi nguoi dung khac hoac he thong mang. Bo qua lam sach." -ForegroundColor Yellow
+            Write-AuditLog "[LOCKED_BY_USER] $filePath"
+            $Script:TotalErrors++
+            return
+        }
+
         # Tao ban sao luu an toan vao _Backup_Kangatang
         $parentDir = $file.DirectoryName
         $backupDir = Join-Path $parentDir "_Backup_Kangatang"
@@ -287,33 +383,48 @@ function Scan-SingleExcelFile($file) {
 
         if ($backupSuccess) {
             $cleaned = $false
+            # Kich hoat Watchdog 25 giay cho tien trinh lam sach
+            $Script:Watchdog.Arm($Script:CurrentExcelPid, 25000)
+
             try {
-                # Mo lai che do Read-Write de lam sach
-                $wb = $Script:CurrentExcelApp.Workbooks.Open($filePath, $false, $false, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, $true)
+                # Mo lai che do Read-Write bang 3 tham so on dinh
+                $wb = $Script:CurrentExcelApp.Workbooks.Open($filePath, $false, $false)
                 
-                $vbProj = $wb.VBProject
-                if ($vbProj) {
-                    for ($cIdx = $vbProj.VBComponents.Count; $cIdx -ge 1; $cIdx--) {
-                        $comp = $vbProj.VBComponents.Item($cIdx)
-                        if ($comp.Type -eq 1 -or $comp.Type -eq 2) {
-                            foreach ($kw in $virusKeywords) {
-                                if ($comp.Name -like "*$kw*") {
-                                    $vbProj.VBComponents.Remove($comp)
-                                    $cleaned = $true
-                                    break
-                                }
-                            }
-                        } elseif ($comp.CodeModule -and $comp.CodeModule.CountOfLines -gt 0) {
-                            $lines = $comp.CodeModule.Lines(1, $comp.CodeModule.CountOfLines)
-                            foreach ($kw in $virusKeywords) {
-                                if ($lines -like "*$kw*") {
-                                    $comp.CodeModule.DeleteLines(1, $comp.CodeModule.CountOfLines)
-                                    $cleaned = $true
-                                    break
+                if ($null -eq $wb) {
+                    Write-Host "     [LOI GHI] Khong the lay doi tuong Workbook khi mo Read-Write." -ForegroundColor Red
+                    Write-AuditLog "[CLEAN_ERROR] $filePath : Workbook is null"
+                    $Script:TotalErrors++
+                    Start-FreshExcel | Out-Null
+                    return
+                }
+
+                if ($ext -ne ".xlsx" -and $ext -ne ".xltx") {
+                    try {
+                        $vbProj = $wb.VBProject
+                        if ($vbProj) {
+                            for ($cIdx = $vbProj.VBComponents.Count; $cIdx -ge 1; $cIdx--) {
+                                $comp = $vbProj.VBComponents.Item($cIdx)
+                                if ($comp.Type -eq 1 -or $comp.Type -eq 2) {
+                                    foreach ($kw in $virusKeywords) {
+                                        if ($comp.Name -like "*$kw*") {
+                                            $vbProj.VBComponents.Remove($comp)
+                                            $cleaned = $true
+                                            break
+                                        }
+                                    }
+                                } elseif ($comp.CodeModule -and $comp.CodeModule.CountOfLines -gt 0) {
+                                    $lines = $comp.CodeModule.Lines(1, $comp.CodeModule.CountOfLines)
+                                    foreach ($kw in $virusKeywords) {
+                                        if ($lines -like "*$kw*") {
+                                            $comp.CodeModule.DeleteLines(1, $comp.CodeModule.CountOfLines)
+                                            $cleaned = $true
+                                            break
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
+                    } catch {}
                 }
                 
                 for ($sIdx = $wb.Sheets.Count; $sIdx -ge 1; $sIdx--) {
@@ -340,6 +451,10 @@ function Scan-SingleExcelFile($file) {
                     }
                 }
 
+                # Tat cac hop thoai xac nhan tuong thich / thong tin ca nhan khi luu qua mang
+                $wb.CheckCompatibility = $false
+                try { $wb.RemovePersonalInformation = $false } catch {}
+
                 if ($cleaned) {
                     $wb.Save()
                     Write-Host "     [DA TIEU DIET] Da lam sach va luu tep thanh cong!" -ForegroundColor Green
@@ -350,9 +465,22 @@ function Scan-SingleExcelFile($file) {
                 }
             } catch {
                 $errTxt = $_.Exception.Message
-                Write-Host "     [LOI] Loi trong qua trinh lam sach: $errTxt" -ForegroundColor Red
-                Write-AuditLog "[CLEAN_ERROR] $filePath : $errTxt"
+                if ($Script:Watchdog.TimedOut) {
+                    Write-Host "     [TIMEOUT LAM SACH] Qua trinh lam sach bi treo qua 25s: $($file.Name)" -ForegroundColor Red
+                    Write-AuditLog "[CLEAN_TIMEOUT] $filePath"
+                } else {
+                    Write-Host "     [LOI] Loi trong qua trinh lam sach: $errTxt" -ForegroundColor Red
+                    Write-AuditLog "[CLEAN_ERROR] $filePath : $errTxt"
+                }
                 $Script:TotalErrors++
+                # Auto-Recovery ngay trong khoi Catch cua tien trinh lam sach
+                Start-FreshExcel | Out-Null
+            } finally {
+                $Script:Watchdog.Disarm()
+                if ($null -ne $wb) {
+                    try { $wb.Close($false) } catch {}
+                    $wb = $null
+                }
             }
         }
     } else {
@@ -362,6 +490,7 @@ function Scan-SingleExcelFile($file) {
 
     if ($null -ne $wb) {
         try { $wb.Close($false) } catch {}
+        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wb) | Out-Null } catch {}
         $wb = $null
     }
 }
@@ -375,7 +504,7 @@ function Scan-FolderStream([string]$currentDir) {
     Write-Host "Folder [$Script:TotalFolders]: $currentDir" -ForegroundColor Yellow
     Write-Host "----------------------------------------------------------------------" -ForegroundColor DarkGray
     
-    Write-Progress -Activity "KangatangGuard v3.5.1 - Dang quet luong" -Status "Thu muc #$Script:TotalFolders: $currentDir" -CurrentOperation "Da quet: $Script:TotalScanned tep | Da diet: $Script:TotalCleaned"
+    Write-Progress -Activity "KangatangGuard v3.5.3 - Dang quet luong chong treo" -Status "Thu muc #$Script:TotalFolders: $currentDir" -CurrentOperation "Da quet: $Script:TotalScanned tep | Da diet: $Script:TotalCleaned"
 
     # 1. Quet ngay lap tuc tat ca tep Excel co trong thu muc nay
     try {
@@ -405,24 +534,24 @@ function Scan-FolderStream([string]$currentDir) {
 }
 
 # 3. Kich hoat quet luong ngay lap tuc!
-Write-Host "`nBAT DAU QUET LUONG TRUC TIEP..." -ForegroundColor Cyan
+Write-Host "`nBAT DAU QUET LUONG TRUC TIEP CHONG TREO (v3.5.3)..." -ForegroundColor Cyan
 Scan-FolderStream $TargetFolder
 
-Write-Progress -Activity "KangatangGuard v3.5.1" -Completed
+Write-Progress -Activity "KangatangGuard v3.5.3" -Completed
 
 # 4. Giai phong va dong tien trinh Excel COM
 Stop-CurrentExcel
 
 # 5. Bao cao tong ket
 Write-Host "`n======================================================================" -ForegroundColor Green
-Write-Host "   BAO CAO TONG KET QUET LUONG TRUC TIEP (v3.5.1)                    " -ForegroundColor Green
+Write-Host "   BAO CAO TONG KET QUET LUONG CHONG TREO (v3.5.3)                   " -ForegroundColor Green
 Write-Host "======================================================================" -ForegroundColor Green
 Write-Host "   Thu muc bat dau                 : $TargetFolder" -ForegroundColor White
 Write-Host "   Tong so thu muc da duyet qua    : $Script:TotalFolders" -ForegroundColor Yellow
 Write-Host "   Tong so tep Excel da kiem tra   : $Script:TotalScanned" -ForegroundColor Cyan
 Write-Host "   So tep an toan                  : $Script:TotalSafe" -ForegroundColor Green
 Write-Host "   So tep phat hien & da tieu diet : $Script:TotalCleaned" -ForegroundColor $(if ($Script:TotalCleaned -gt 0) { "Red" } else { "Green" })
-Write-Host "   So tep loi khong mo duoc        : $Script:TotalErrors" -ForegroundColor $(if ($Script:TotalErrors -gt 0) { "Yellow" } else { "Gray" })
+Write-Host "   So tep loi / bo qua / bi khoa   : $Script:TotalErrors" -ForegroundColor $(if ($Script:TotalErrors -gt 0) { "Yellow" } else { "Gray" })
 Write-Host "   Nhat ky chi tiet                : $logFile" -ForegroundColor DarkGray
 Write-Host "======================================================================" -ForegroundColor Green
 
