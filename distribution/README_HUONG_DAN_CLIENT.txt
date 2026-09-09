@@ -1,15 +1,14 @@
 ==============================================================================
    HƯỚNG DẪN CÀI ĐẶT ADD-IN DIỆT VIRUS KANGATANG CHO MÁY TRẠM (LAN CLIENT)
-   Hệ thống Quản lý Tập trung & Tự động Cập nhật - v3.7.0
+   Hệ thống Quản lý Tập trung & Tự động Cập nhật - v3.8.0
 ==============================================================================
 
 Dành cho các máy tính khác trong văn phòng muốn cài đặt Add-in bảo vệ Excel:
 
 BƯỚC 1:
 - Bấm tổ hợp phím Windows + R (mở hộp thoại Run).
-- Nhập vào:
-  \\CM-GA-MRKIENIT1\KangatangGuard_Hub
-  (Hoặc nếu không vào được tên máy, nhập: \\192.168.223.176\KangatangGuard_Hub)
+- Nhập vào đường dẫn máy chủ tệp:
+  \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang
 - Bấm Enter để mở thư mục chia sẻ.
 
 BƯỚC 2:

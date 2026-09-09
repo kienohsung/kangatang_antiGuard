@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_Client.ps1
 # PowerShell Installer cho May Client trong Mang LAN
-# Phien ban: v3.7.0 (Production-grade LAN Client Auto-Sync)
+# Phien ban: v3.8.0 (Dedicated LAN File Server & Dual-Mirror Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,35 +9,30 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.7.0)    " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.8.0)    " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
 # Xac dinh Nguon Cap nhat (UpdateSource UNC Path)
-$DefaultServerName = "CM-GA-MRKIENIT1"
-$DefaultServerIP   = "192.168.223.176"
-$ShareName         = "KangatangGuard_Hub"
+$PrimaryServerPath = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
+$BackupServerPath  = "\\192.168.223.176\KangatangGuard_Hub"
 
 $uncSource = ""
 if ($ScriptDir.StartsWith("\\")) {
     $uncSource = $ScriptDir
+} elseif (Test-Path $PrimaryServerPath) {
+    $uncSource = $PrimaryServerPath
+} elseif (Test-Path $BackupServerPath) {
+    $uncSource = $BackupServerPath
 } else {
-    $uncHost = "\\$DefaultServerName\$ShareName"
-    $uncIP   = "\\$DefaultServerIP\$ShareName"
-    if (Test-Path $uncHost) {
-        $uncSource = $uncHost
-    } elseif (Test-Path $uncIP) {
-        $uncSource = $uncIP
-    } else {
-        $uncSource = $ScriptDir
-    }
+    $uncSource = $ScriptDir
 }
 
 Write-Host "`n[1/5] May chu phan phoi (Hub): $uncSource" -ForegroundColor Yellow
 
 # Doc thong tin phien ban tu version.json neu co
-$versionInfo = "3.7.0"
+$versionInfo = "3.8.0"
 $versionJsonPath = Join-Path $uncSource "version.json"
 if (Test-Path $versionJsonPath) {
     try {
@@ -86,23 +81,30 @@ foreach ($ver in $officeVersions) {
     $secKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Security"
     if (Test-Path $secKey) {
         try {
-            # Cho phep macro tu vi tri mang (Trusted Locations tren mang)
             Set-ItemProperty -Path $secKey -Name "AllowNetworkLocations" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
             Set-ItemProperty -Path $secKey -Name "AccessVBOM" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
         } catch {}
 
-        # Them Trusted Locations
         $trustedRoot = "$secKey\Trusted Locations"
         if (-not (Test-Path $trustedRoot)) {
             New-Item -Path $trustedRoot -Force -ErrorAction SilentlyContinue | Out-Null
         }
 
-        # Trust LAN Hub
-        $locHub = "$trustedRoot\KangatangLANHub"
-        if (-not (Test-Path $locHub)) { New-Item -Path $locHub -Force -ErrorAction SilentlyContinue | Out-Null }
-        Set-ItemProperty -Path $locHub -Name "Path" -Value $uncSource -Type String -Force -ErrorAction SilentlyContinue
-        Set-ItemProperty -Path $locHub -Name "AllowSubfolders" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
-        Set-ItemProperty -Path $locHub -Name "Description" -Value "KangatangGuard LAN Hub" -Type String -Force -ErrorAction SilentlyContinue
+        # Trust Primary LAN File Server (192.168.223.7)
+        $locHubPrimary = "$trustedRoot\KangatangLANServer"
+        if (-not (Test-Path $locHubPrimary)) { New-Item -Path $locHubPrimary -Force -ErrorAction SilentlyContinue | Out-Null }
+        Set-ItemProperty -Path $locHubPrimary -Name "Path" -Value $PrimaryServerPath -Type String -Force -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $locHubPrimary -Name "AllowSubfolders" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $locHubPrimary -Name "Description" -Value "KangatangGuard LAN File Server" -Type String -Force -ErrorAction SilentlyContinue
+
+        # Trust uncSource neu khac
+        if ($uncSource -ne $PrimaryServerPath) {
+            $locHubCurrent = "$trustedRoot\KangatangLANCurrent"
+            if (-not (Test-Path $locHubCurrent)) { New-Item -Path $locHubCurrent -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $locHubCurrent -Name "Path" -Value $uncSource -Type String -Force -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $locHubCurrent -Name "AllowSubfolders" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $locHubCurrent -Name "Description" -Value "KangatangGuard LAN Current Source" -Type String -Force -ErrorAction SilentlyContinue
+        }
 
         # Trust local APPDATA KangatangGuard
         $locLocal = "$trustedRoot\KangatangLocal"
