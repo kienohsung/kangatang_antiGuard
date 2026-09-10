@@ -96,7 +96,14 @@ if (-not (Test-Path $PrimaryRemoteHub)) {
     Copy-Item -Path (Join-Path $LocalDist "Install_Client_Kangatang.bat") -Destination (Join-Path $PrimaryRemoteHub "Install_Client_Kangatang.bat") -Force
     Copy-Item -Path (Join-Path $LocalDist "Install_Client.ps1") -Destination (Join-Path $PrimaryRemoteHub "Install_Client.ps1") -Force
     Copy-Item -Path (Join-Path $LocalDist "README_HUONG_DAN_CLIENT.txt") -Destination (Join-Path $PrimaryRemoteHub "README_HUONG_DAN_CLIENT.txt") -Force
-    Write-Host "   -> [OK] Da dong bo toan bo goi cai dat len May chu 223.7 thanh cong!" -ForegroundColor Green
+
+    # Dong bo file zip phat hanh
+    $zipFileVer = Join-Path $AddinDir "addin_kangatang_v${ReleaseVersion}.zip"
+    if (Test-Path $zipFileVer) {
+        Copy-Item -Path $zipFileVer -Destination (Join-Path $PrimaryRemoteHub "addin_kangatang_v${ReleaseVersion}.zip") -Force
+        Copy-Item -Path $zipFileVer -Destination (Join-Path $PrimaryRemoteHub "addin_kangatang.zip") -Force
+    }
+    Write-Host "   -> [OK] Da dong bo toan bo goi cai dat & file zip len May chu 223.7 thanh cong!" -ForegroundColor Green
 }
 
 # 5. Dong bo sang Desktop Mirror
