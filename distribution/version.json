@@ -1,14 +1,16 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-09-09 23:29:03",
+    "release_timestamp":  "2026-09-10 11:57:07",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
-    "version":  "3.8.0",
-    "release_date":  "2026-09-09",
+    "version":  "3.8.1",
+    "release_date":  "2026-09-10",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
+                  "standalone":  "Kangatang_Standalone_Scanner.ps1",
                   "scanner":  "Kangatang_FolderScanner.ps1",
-                  "xlam":  "KangatangGuard.xlam"
+                  "xlam":  "KangatangGuard.xlam",
+                  "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.8.0 - Chuyen sang May chu Tep Chuyen dung LAN (\\\\192.168.223.7) \u0026 Co che Clone Kep tren 223.176",
+    "changelog":  "v3.8.1 - Bo sung Trinh diet virus ngoai doc lap (Standalone 1-Click) cho cac may khong cai duoc Add-in",
     "hub_ip":  "192.168.223.7"
 }
