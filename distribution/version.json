@@ -1,9 +1,9 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-09-10 11:57:07",
+    "release_timestamp":  "2026-09-11 17:52:46",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
-    "version":  "3.8.1",
-    "release_date":  "2026-09-10",
+    "version":  "3.8.2",
+    "release_date":  "2026-09-11",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
                   "standalone":  "Kangatang_Standalone_Scanner.ps1",
@@ -11,6 +11,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.8.1 - Bo sung Trinh diet virus ngoai doc lap (Standalone 1-Click) cho cac may khong cai duoc Add-in",
+    "changelog":  "v3.8.2 - Ban va chong treo toan dien: Full-Lifecycle Watchdog, IOleMessageFilter, Fast Names Filter, Diet Zombie Excel",
     "hub_ip":  "192.168.223.7"
 }

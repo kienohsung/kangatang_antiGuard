@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Deploy_To_Hub.ps1
 # Lenh Phat hanh va Dong bo Phien ban moi len May chu LAN & Tao Clone Cuc bo
 # Phien ban: v3.8.1 (Ho tro Bo cong cu Standalone & Dual-Mirror Release)
@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.8.1"
+$ReleaseVersion = "3.8.2"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,7 +51,7 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    changelog         = "v${ReleaseVersion} - Bo sung Trinh diet virus ngoai doc lap (Standalone 1-Click) cho cac may khong cai duoc Add-in"
+    changelog         = "v${ReleaseVersion} - Ban va chong treo toan dien: Full-Lifecycle Watchdog, IOleMessageFilter, Fast Names Filter, Diet Zombie Excel"
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4

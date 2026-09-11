@@ -83,7 +83,7 @@ Public bIsFolderScanning As Boolean
 ' Scan Cache chong lag: key=UCase(FullName), value=Date
 Private dicScanCache As Object
 
-Public Const CURRENT_VERSION As String = "3.8.1"
+Public Const CURRENT_VERSION As String = "3.8.2"
 Private Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Private Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 
