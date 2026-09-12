@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.8.3"
+$ReleaseVersion = "3.8.4"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,7 +51,7 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    changelog         = "v${ReleaseVersion} - Vaccine chong Document Recovery: Tu dong don dep Registry Resiliency, triet tieu AutoRecover tren worker, cach ly headless tuyet doi chong mo file tren Excel nguoi dung"
+    changelog         = "v${ReleaseVersion} - Khac phuc triet de loi Permission denied khi tu dong cap nhat tu client qua mang LAN, xoa bo co Read-Only va bo sung co che Retry Update chong khoa file"
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
@@ -70,7 +70,7 @@ if (Test-Path $targetLocalXlam) {
     try { Set-ItemProperty -Path $targetLocalXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
 }
 Copy-Item -Path $compiledXlam -Destination $targetLocalXlam -Force
-try { Set-ItemProperty -Path $targetLocalXlam -Name IsReadOnly -Value $true -ErrorAction SilentlyContinue } catch {}
+try { Set-ItemProperty -Path $targetLocalXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
 
 # Chep cac script vao distribution
 Copy-Item -Path (Join-Path $RootDir "Kangatang_Standalone_Scanner.ps1") -Destination (Join-Path $LocalDist "Kangatang_Standalone_Scanner.ps1") -Force
@@ -110,7 +110,7 @@ if (-not (Test-Path $PrimaryRemoteHub)) {
         try { Set-ItemProperty -Path $remoteXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
     }
     Copy-Item -Path $compiledXlam -Destination $remoteXlam -Force
-    try { Set-ItemProperty -Path $remoteXlam -Name IsReadOnly -Value $true -ErrorAction SilentlyContinue } catch {}
+    try { Set-ItemProperty -Path $remoteXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
     Write-Host "   -> [OK] Da chep KangatangGuard.xlam len May chu 223.7" -ForegroundColor Green
 
     # Chep cac tep ho tro

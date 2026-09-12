@@ -133,7 +133,15 @@ $sessionsDir = Join-Path $localAppData "Sessions"
 if (-not (Test-Path $sessionsDir)) { New-Item -ItemType Directory -Path $sessionsDir -Force | Out-Null }
 
 $updatesDir = Join-Path $localAppData "staged_update"
-if (-not (Test-Path $updatesDir)) { New-Item -ItemType Directory -Path $updatesDir -Force | Out-Null }
+if (-not (Test-Path $updatesDir)) { 
+    New-Item -ItemType Directory -Path $updatesDir -Force | Out-Null 
+} else {
+    # Don sach cac file cu trong staged_update va go bo co Read-Only
+    Get-ChildItem -Path $updatesDir -File -ErrorAction SilentlyContinue | ForEach-Object {
+        try { $_.IsReadOnly = $false } catch {}
+        Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+    }
+}
 
 # Sao chep KangatangGuard.xlam vao XLSTART
 $dstXlamXLSTART = Join-Path $xlStartPath "KangatangGuard.xlam"
@@ -142,7 +150,7 @@ if (Test-Path $dstXlamXLSTART) {
     Remove-Item -Path $dstXlamXLSTART -Force -ErrorAction SilentlyContinue
 }
 Copy-Item -Path $srcXlam -Destination $dstXlamXLSTART -Force
-try { Set-ItemProperty -Path $dstXlamXLSTART -Name IsReadOnly -Value $true -ErrorAction SilentlyContinue } catch {}
+try { Set-ItemProperty -Path $dstXlamXLSTART -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
 Write-Host "   -> [OK] Da cai dat vao XLSTART: $dstXlamXLSTART" -ForegroundColor Green
 
 # Sao chep sang AddIns (Dual-registration)
@@ -152,7 +160,7 @@ if (Test-Path $dstXlamAddIns) {
     Remove-Item -Path $dstXlamAddIns -Force -ErrorAction SilentlyContinue
 }
 Copy-Item -Path $srcXlam -Destination $dstXlamAddIns -Force
-try { Set-ItemProperty -Path $dstXlamAddIns -Name IsReadOnly -Value $true -ErrorAction SilentlyContinue } catch {}
+try { Set-ItemProperty -Path $dstXlamAddIns -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
 Write-Host "   -> [OK] Da cai dat vao AddIns: $dstXlamAddIns" -ForegroundColor Green
 
 # Sao chep Background Worker

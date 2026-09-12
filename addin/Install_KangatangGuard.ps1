@@ -9,9 +9,10 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+$InstallerVersion = "3.8.4"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - INSTALLER v3.8.0                                  " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 # ==============================================================================
@@ -180,9 +181,9 @@ try {
     $wb.SaveAs($xlamPath, 55)  # 55 = xlOpenXMLAddIn (.xlam)
     $wb.Close($false)
     
-    # Dat thuoc tinh Read-Only cho file trong XLSTART
+    # Dam bao file trong XLSTART khong bi danh dau Read-Only
     try {
-        Set-ItemProperty -Path $xlamPath -Name IsReadOnly -Value $true -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $xlamPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
     } catch {}
     
     Write-Host "   -> [OK] Da luu vao XLSTART: $xlamPath" -ForegroundColor Green
@@ -203,7 +204,7 @@ try {
     }
     
     Copy-Item -Path $xlamPath -Destination $xlamAddInsPath -Force
-    try { Set-ItemProperty -Path $xlamAddInsPath -Name IsReadOnly -Value $true -ErrorAction SilentlyContinue } catch {}
+    try { Set-ItemProperty -Path $xlamAddInsPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
     Write-Host "   -> [OK] Da sao chep sang AddIns: $xlamAddInsPath" -ForegroundColor Green
     
     # Dang ky khoa OPEN* trong Registry Options cho Office 16.0, 15.0, 14.0
@@ -299,10 +300,10 @@ if (Test-Path $srcWorker) {
         New-Item -Path $guardRegKey -Force | Out-Null
     }
     Set-ItemProperty -Path $guardRegKey -Name "ScannerScript" -Value $srcWorker -Force
-    Set-ItemProperty -Path $guardRegKey -Name "InstalledVersion" -Value "3.8.0" -Force
+    Set-ItemProperty -Path $guardRegKey -Name "InstalledVersion" -Value $InstallerVersion -Force
     Set-ItemProperty -Path $guardRegKey -Name "UpdateSource" -Value "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang" -Force
     Write-Host "   -> [OK] Da dang ky ScannerScript vao Registry: $srcWorker" -ForegroundColor Green
-    Write-Host "   -> [OK] Da dang ky InstalledVersion: v3.8.0" -ForegroundColor Green
+    Write-Host "   -> [OK] Da dang ky InstalledVersion: v$InstallerVersion" -ForegroundColor Green
     Write-Host "   -> [OK] Da dang ky UpdateSource: \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang" -ForegroundColor Green
 } else {
     Write-Host "   -> [CANH BAO] Khong tim thay $srcWorker de sao chep." -ForegroundColor DarkYellow

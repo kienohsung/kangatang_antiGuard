@@ -84,7 +84,7 @@ Public bIsFolderScanning As Boolean
 ' Scan Cache chong lag: key=UCase(FullName), value=Date
 Private dicScanCache As Object
 
-Public Const CURRENT_VERSION As String = "3.8.2"
+Public Const CURRENT_VERSION As String = "3.8.4"
 Private Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Private Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 
@@ -1220,14 +1220,38 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     
     ' Sao chep tap tin tu Hub vao bo dem tam staged_update
     Dim srcXlam As String, srcPs1 As String
+    Dim targetXlam As String, targetPs1 As String
     srcXlam = updateSource & "\KangatangGuard.xlam"
     srcPs1 = updateSource & "\Kangatang_FolderScanner.ps1"
+    targetXlam = stagedDir & "\KangatangGuard.xlam"
+    targetPs1 = stagedDir & "\Kangatang_FolderScanner.ps1"
     
+    ' Phong thu triet de: Go bo thuoc tinh Read-Only neu ton tai va xoa file cu
+    If fso.FileExists(targetXlam) Then
+        On Error Resume Next
+        fso.GetFile(targetXlam).Attributes = 0
+        fso.DeleteFile targetXlam, True
+        On Error GoTo InstallErr
+    End If
+    If fso.FileExists(targetPs1) Then
+        On Error Resume Next
+        fso.GetFile(targetPs1).Attributes = 0
+        fso.DeleteFile targetPs1, True
+        On Error GoTo InstallErr
+    End If
+    
+    ' Sao chep va chuan hoa thuoc tinh ve Normal/Archive (khong co Read-Only)
     If fso.FileExists(srcXlam) Then
-        fso.CopyFile srcXlam, stagedDir & "\KangatangGuard.xlam", True
+        fso.CopyFile srcXlam, targetXlam, True
+        On Error Resume Next
+        If fso.FileExists(targetXlam) Then fso.GetFile(targetXlam).Attributes = 0
+        On Error GoTo InstallErr
     End If
     If fso.FileExists(srcPs1) Then
-        fso.CopyFile srcPs1, stagedDir & "\Kangatang_FolderScanner.ps1", True
+        fso.CopyFile srcPs1, targetPs1, True
+        On Error Resume Next
+        If fso.FileExists(targetPs1) Then fso.GetFile(targetPs1).Attributes = 0
+        On Error GoTo InstallErr
     End If
     
     ' Tao script ap dung cap nhat ngoai tien trinh (Out-of-Process Updater)
@@ -1244,12 +1268,23 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     ts.WriteLine "@echo off"
     ts.WriteLine "timeout /t 2 /nobreak > nul"
     ts.WriteLine "attrib -r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
-    ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & xlStartDir & "\KangatangGuard.xlam"" > nul"
-    ts.WriteLine "attrib +r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "attrib -r """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
-    ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & addInsDir & "\KangatangGuard.xlam"" > nul"
-    ts.WriteLine "attrib +r """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
-    ts.WriteLine "copy /y """ & stagedDir & "\Kangatang_FolderScanner.ps1"" """ & guardDir & "\Kangatang_FolderScanner.ps1"" > nul"
+    ts.WriteLine "attrib -r """ & stagedDir & "\KangatangGuard.xlam"" >nul 2>&1"
+    ts.WriteLine "attrib -r """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1"
+    ts.WriteLine "set RETRY_COUNT=0"
+    ts.WriteLine ":RETRY_XLSTART"
+    ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & xlStartDir & "\KangatangGuard.xlam"" > nul 2>&1"
+    ts.WriteLine "if errorlevel 1 ("
+    ts.WriteLine "    set /a RETRY_COUNT+=1"
+    ts.WriteLine "    if %RETRY_COUNT% leq 10 ("
+    ts.WriteLine "        timeout /t 2 /nobreak > nul"
+    ts.WriteLine "        goto RETRY_XLSTART"
+    ts.WriteLine "    )"
+    ts.WriteLine ")"
+    ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & addInsDir & "\KangatangGuard.xlam"" > nul 2>&1"
+    ts.WriteLine "copy /y """ & stagedDir & "\Kangatang_FolderScanner.ps1"" """ & guardDir & "\Kangatang_FolderScanner.ps1"" > nul 2>&1"
+    ts.WriteLine "attrib -r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
+    ts.WriteLine "attrib -r """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""InstalledVersion"" /t REG_SZ /d """ & serverVer & """ /f > nul"
     ts.Close
     Set ts = Nothing
@@ -1268,7 +1303,7 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     Exit Sub
     
 InstallErr:
-    MsgBoxW Uni("L\u1ed7i khi c\u00e0i \u0111\u1eb7t b\u1ea3n c\u1eadp nh\u1eadt: ") & Err.Description, vbCritical, Uni("KangatangGuard v3.8.0 - L\u1ed7i")
+    MsgBoxW Uni("L\u1ed7i khi c\u00e0i \u0111\u1eb7t b\u1ea3n c\u1eadp nh\u1eadt: ") & Err.Description, vbCritical, Uni("KangatangGuard - L\u1ed7i c\u1eadp nh\u1eadt")
     On Error GoTo 0
 End Sub
 

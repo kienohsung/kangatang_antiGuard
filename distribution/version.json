@@ -1,8 +1,8 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-09-12 08:06:15",
+    "release_timestamp":  "2026-09-12 08:34:50",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
-    "version":  "3.8.3",
+    "version":  "3.8.4",
     "release_date":  "2026-09-12",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
@@ -11,6 +11,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.8.3 - Vaccine chong Document Recovery: Tu dong don dep Registry Resiliency, triet tieu AutoRecover tren worker, cach ly headless tuyet doi chong mo file tren Excel nguoi dung",
+    "changelog":  "v3.8.4 - Khac phuc triet de loi Permission denied khi tu dong cap nhat tu client qua mang LAN, xoa bo co Read-Only va bo sung co che Retry Update chong khoa file",
     "hub_ip":  "192.168.223.7"
 }
