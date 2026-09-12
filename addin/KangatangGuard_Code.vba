@@ -16,6 +16,7 @@
 Option Explicit
 
 Private Sub Workbook_Open()
+    Call CleanDocumentRecoveryRegistry
     Call InitializeGuard
     ' Kiem tra cap nhat tu May chu LAN ngam sau 3 giay (Async / Non-blocking)
     ' Giup Excel mo tuc thi trong 0.05 giay ma khong bi cham tre du chi 1 ms
@@ -600,6 +601,9 @@ Public Sub LaunchBackgroundScanner(ByVal folderPath As String, Optional ByVal bR
         cmd = "powershell.exe -NoExit -ExecutionPolicy Bypass -File """ & scannerScript & """ -TargetFolder """ & cleanFolder & """"
     End If
     
+    ' VACCINE v3.8.3: Don sach DocumentRecovery truoc khi khoi chay quet
+    Call CleanDocumentRecoveryRegistry
+    
     ' Tham so 1 = Normal window, False = Asynchronous non-blocking (Khong cho, thoat ngay lap tuc!)
     wsh.Run cmd, 1, False
     Set wsh = Nothing
@@ -933,6 +937,64 @@ Private Function ExtractJsonValue(ByVal json As String, ByVal key As String) As 
         ExtractJsonValue = Trim(Mid(json, p1, p2 - p1))
     End If
 End Function
+
+' ===========================================================================
+' VACCINE v3.8.3: Tu dong don dep Document Recovery gay phien nguoi dung
+' ===========================================================================
+Public Sub CleanDocumentRecoveryRegistry()
+    On Error Resume Next
+    Dim reg As Object
+    Set reg = GetObject("winmgmts:\\.\root\default:StdRegProv")
+    If reg Is Nothing Then Exit Sub
+    
+    Const HKEY_CURRENT_USER = &H80000001
+    Dim regPath As String
+    regPath = "Software\Microsoft\Office\16.0\Excel\Resiliency\DocumentRecovery"
+    
+    Dim subKeys As Variant
+    reg.EnumKey HKEY_CURRENT_USER, regPath, subKeys
+    If Not IsArray(subKeys) Then Exit Sub
+    
+    Dim k As Variant
+    For Each k In subKeys
+        Dim valNames As Variant
+        reg.EnumValues HKEY_CURRENT_USER, regPath & "\" & k, valNames
+        Dim bDelete As Boolean
+        bDelete = False
+        
+        If IsArray(valNames) Then
+            Dim vn As Variant
+            For Each vn In valNames
+                Dim binVal As Variant
+                reg.GetBinaryValue HKEY_CURRENT_USER, regPath & "\" & k, CStr(vn), binVal
+                If IsArray(binVal) Then
+                    Dim strVal As String
+                    strVal = ""
+                    Dim i As Long
+                    For i = 0 To UBound(binVal) Step 2
+                        If i <= UBound(binVal) Then
+                            If binVal(i) > 31 And binVal(i) < 127 Then
+                                strVal = strVal & Chr(binVal(i))
+                            End If
+                        End If
+                    Next i
+                    If InStr(1, strVal, "192.168.", vbTextCompare) > 0 Or _
+                       InStr(1, strVal, "file_shared", vbTextCompare) > 0 Or _
+                       InStr(1, strVal, "_Backup_Kangatang", vbTextCompare) > 0 Or _
+                       InStr(1, strVal, "TBEX", vbTextCompare) > 0 Then
+                        bDelete = True
+                        Exit For
+                    End If
+                End If
+            Next vn
+        End If
+        
+        If bDelete Then
+            reg.DeleteKey HKEY_CURRENT_USER, regPath & "\" & k
+        End If
+    Next k
+    On Error GoTo 0
+End Sub
 
 ' ===========================================================================
 ' HAM MENU: Mo thu muc Log

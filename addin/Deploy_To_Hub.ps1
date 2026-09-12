@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.8.2"
+$ReleaseVersion = "3.8.3"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,7 +51,7 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    changelog         = "v${ReleaseVersion} - Ban va chong treo toan dien: Full-Lifecycle Watchdog, IOleMessageFilter, Fast Names Filter, Diet Zombie Excel"
+    changelog         = "v${ReleaseVersion} - Vaccine chong Document Recovery: Tu dong don dep Registry Resiliency, triet tieu AutoRecover tren worker, cach ly headless tuyet doi chong mo file tren Excel nguoi dung"
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4

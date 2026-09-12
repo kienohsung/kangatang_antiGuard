@@ -24,7 +24,7 @@ param (
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
-$Script:AppVersion = "3.8.2"
+$Script:AppVersion = "3.8.3"
 $Host.UI.RawUI.WindowTitle = "KangatangGuard v$($Script:AppVersion) - Trinh quet luong chong treo & Fast Resume"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
@@ -254,6 +254,35 @@ if ($TargetFolder -match '^[a-zA-Z]:$') {
 Write-Host "`n[THU MUC BAT DAU] : $TargetFolder" -ForegroundColor Yellow
 Write-AuditLog "[STREAM_SCAN_START] Bat dau quet luong v$($Script:AppVersion) tai: $TargetFolder (Resume: $Resume)"
 
+# VACCINE v3.8.3: Tu dong don dep Document Recovery Registry cua Excel
+function Clean-DocumentRecovery {
+    try {
+        $regPath = "HKCU:\Software\Microsoft\Office\16.0\Excel\Resiliency\DocumentRecovery"
+        if (Test-Path $regPath) {
+            $items = Get-ChildItem -Path $regPath -ErrorAction SilentlyContinue
+            foreach ($item in $items) {
+                $isScanItem = $false
+                foreach ($vn in $item.GetValueNames()) {
+                    try {
+                        $bytes = $item.GetValue($vn)
+                        $str = [System.Text.Encoding]::Unicode.GetString($bytes)
+                        if ($str -like "*192.168.*" -or $str -like "*file_shared*" -or $str -like "*_Backup_Kangatang*" -or $str -like "*TBEX*" -or ($TargetFolder -and $str -like "*$($TargetFolder.TrimEnd('\'))*")) {
+                            $isScanItem = $true
+                            break
+                        }
+                    } catch {}
+                }
+                if ($isScanItem) {
+                    Remove-Item -Path $item.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    } catch {}
+}
+
+# Don dep ton du DocumentRecovery ngay khi khoi chay
+Clean-DocumentRecovery
+
 # Kiem tra file co dang bi tien trinh khac mo ghi hay khong
 function Test-FileWriteable([string]$path) {
     try {
@@ -310,6 +339,7 @@ function Stop-CurrentExcel {
     }
     # Don sach moi zombie Excel /automation -Embedding
     Stop-OrphanExcelProcesses
+    Clean-DocumentRecovery
     [System.GC]::Collect()
     [System.GC]::WaitForPendingFinalizers()
 }
@@ -346,6 +376,10 @@ function Start-FreshExcel {
             try { $Script:CurrentExcelApp.AlertBeforeOverwriting = $false } catch {}
             try { $Script:CurrentExcelApp.FeatureInstall = 0 } catch {}
             try { $Script:CurrentExcelApp.AutomationSecurity = 3 } catch {}
+            # VACCINE v3.8.3: Triet tieu Document Recovery & Che do Headless tuyet doi
+            try { $Script:CurrentExcelApp.AutoRecover.Enabled = $false } catch {}
+            try { $Script:CurrentExcelApp.ShowWindowsInTaskbar = $false } catch {}
+            try { $Script:CurrentExcelApp.UserControl = $false } catch {}
             
             if ($null -ne $Script:CurrentExcelApp) {
                 return $true
@@ -502,9 +536,12 @@ function Scan-SingleExcelFile($file) {
     $wb = $null
 
     try {
-        # 1. MO TEP READ-ONLY
+        # 1. MO TEP READ-ONLY (AddToMru = $false, EnableAutoRecover = $false)
         try {
-            $wb = $Script:CurrentExcelApp.Workbooks.Open($filePath, 0, $true)
+            $wb = $Script:CurrentExcelApp.Workbooks.Open($filePath, 0, $true, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, $false)
+            if ($null -ne $wb) {
+                try { $wb.EnableAutoRecover = $false } catch {}
+            }
         } catch {
             $errMsg = $_.Exception.Message
             $Script:TotalErrors++
@@ -661,8 +698,11 @@ function Scan-SingleExcelFile($file) {
                 $openAttempts = 2
                 for ($oa = 1; $oa -le $openAttempts; $oa++) {
                     try {
-                        $wb = $Script:CurrentExcelApp.Workbooks.Open($filePath, $false, $false)
-                        if ($null -ne $wb) { break }
+                        $wb = $Script:CurrentExcelApp.Workbooks.Open($filePath, $false, $false, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, $false)
+                        if ($null -ne $wb) {
+                            try { $wb.EnableAutoRecover = $false } catch {}
+                            break
+                        }
                     } catch {
                         if ($oa -lt $openAttempts) {
                             Start-Sleep -Milliseconds 400
@@ -780,6 +820,8 @@ function Scan-SingleExcelFile($file) {
     } finally {
         $Script:Watchdog.Disarm()
         if ($null -ne $wb) {
+            try { $wb.EnableAutoRecover = $false } catch {}
+            try { $wb.Saved = $true } catch {}
             try { $wb.Close($false) } catch {}
             try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wb) | Out-Null } catch {}
             $wb = $null
@@ -847,6 +889,7 @@ Write-Progress -Activity "KangatangGuard v$($Script:AppVersion)" -Completed
 # Giai phong tai nguyen
 Stop-CurrentExcel
 [ComMessageFilter]::Revoke()
+Clean-DocumentRecovery
 
 Save-SessionMeta "Completed"
 
