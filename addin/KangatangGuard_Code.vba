@@ -84,9 +84,10 @@ Public bIsFolderScanning As Boolean
 ' Scan Cache chong lag: key=UCase(FullName), value=Date
 Private dicScanCache As Object
 
-Public Const CURRENT_VERSION As String = "3.8.4"
+Public Const CURRENT_VERSION As String = "3.8.5"
 Private Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Private Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
+Private Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
 
 Private Const ADDIN_NAME As String = "KangatangGuard.xlam"
 Private Const BACKUP_FOLDER_NAME As String = "_Backup_Kangatang"
@@ -471,9 +472,10 @@ Public Sub ScanWorkbook(ByVal wb As Workbook)
                             "T\u1ec7p: ") & wb.Name & vbCrLf & vbCrLf & _
                             Uni("Chi ti\u1ebft:") & vbCrLf & detailMsg & vbCrLf & _
                             Uni("Tr\u1ea1ng th\u00e1i: \u0110\u00c3 TI\u00caU DI\u1ec6T TH\u00c0NH C\u00d4NG!" & vbCrLf & _
-                            "B\u1ea3n sao l\u01b0u g\u1ed1c \u0111\u00e3 \u0111\u01b0\u1ee3c t\u1ea1o t\u1ea1i: ") & BACKUP_FOLDER_NAME & "\" & vbCrLf & vbCrLf & _
-                            Uni("Ti\u1ebfn tr\u00ecnh qu\u00e9t ng\u1ea7m \u0111\u1ed9c l\u1eadp s\u1ebd T\u1ef0 \u0110\u1ed8NG QU\u00c9T TO\u00c0N B\u1ed8 TH\u01af M\u1ee4C ch\u1ee9a t\u1ec7p n\u00e0y m\u00e0 kh\u00f4ng l\u00e0m gi\u00e1n \u0111o\u1ea1n Excel c\u1ee7a b\u1ea1n!"), _
-                        vbExclamation, Uni("KangatangGuard v3.6.0 - Th\u00e0nh c\u00f4ng")
+                            "B\u1ea3n sao l\u01b0u g\u1ed1c \u0111\u00e3 \u0111\u01b0\u1ee3c c\u00e1ch ly an to\u00e0n v\u1ec1 Kho M\u00e1y ch\u1ee7 LAN:" & vbCrLf & _
+                            "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT" & vbCrLf & vbCrLf & _
+                            "Ti\u1ebfn tr\u00ecnh qu\u00e9t ng\u1ea7m \u0111\u1ed9c l\u1eadp s\u1ebd T\u1ef0 \u0110\u1ed8NG QU\u00c9T TO\u00c0N B\u1ed8 TH\u01af M\u1ee4C ch\u1ee9a t\u1ec7p n\u00e0y m\u00e0 kh\u00f4ng l\u00e0m gi\u00e1n \u0111o\u1ea1n Excel c\u1ee7a b\u1ea1n!"), _
+                        vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")
                 
                 ' v3.6.0: Khoi chay tien trinh quet ngam doc lap (khong lam treo Excel)
                 Dim parentDir As String
@@ -617,8 +619,9 @@ LaunchErr:
 End Sub
 
 ' ===========================================================================
-' HAM BACKUP: Tao ban sao file truoc khi lam sach (v3.5.4)
-' Ho tro ten file Unicode khong bi loi Bad file name or number
+' HAM BACKUP: Tao ban sao file truoc khi lam sach (v3.8.5 Centralized Quarantine)
+' Chuyen toan bo ban sao ve Kho cach ly tap trung tren May chu LAN
+' Khong tao thu muc _Backup_Kangatang tai vi tri lam viec cua nguoi dung
 ' ===========================================================================
 Public Function BackupBeforeClean(ByVal wb As Workbook) As Boolean
     On Error GoTo BackupError
@@ -631,40 +634,69 @@ Public Function BackupBeforeClean(ByVal wb As Workbook) As Boolean
         Exit Function
     End If
     
-    Dim parentFolder As String
-    parentFolder = Left(filePath, InStrRev(filePath, "\"))
-    
-    Dim backupDir As String
-    backupDir = parentFolder & BACKUP_FOLDER_NAME & "\"
-    
     Dim fso As Object
     Set fso = CreateObject("Scripting.FileSystemObject")
     
-    If Not fso.FolderExists(backupDir) Then
-        fso.CreateFolder backupDir
+    ' Xac dinh vi tri luu tru tap trung tren Hub LAN
+    Dim backupDir As String
+    Dim isCentral As Boolean
+    isCentral = False
+    
+    If fso.FolderExists(CENTRAL_BACKUP_HUB) Then
+        backupDir = CENTRAL_BACKUP_HUB & "\"
+        isCentral = True
+    Else
+        ' Fallback phong thu khi laptop mang ra ngoai mat ket noi LAN:
+        ' Luu tam vao thu muc an Quarantine trong APPDATA (Khong tao folder o thu muc lam viec cua user)
+        backupDir = Environ("APPDATA") & "\KangatangGuard\Quarantine_Backup\"
+        If Not fso.FolderExists(backupDir) Then
+            fso.CreateFolder backupDir
+        End If
     End If
     
     Dim timestamp As String
     timestamp = Format(Now, "yyyyMMdd_HHmmss")
     
+    Dim compName As String
+    compName = Environ("COMPUTERNAME")
+    If Len(compName) = 0 Then compName = "UNKNOWN_PC"
+    
     Dim originalName As String
     originalName = wb.Name
     
-    Dim baseName As String
-    Dim extName As String
+    Dim baseName As String, extName As String
     baseName = fso.GetBaseName(originalName)
     extName = fso.GetExtensionName(originalName)
     
     Dim backupName As String
-    backupName = baseName & "_backup_" & timestamp & "." & extName
+    backupName = baseName & "_backup_" & compName & "_" & timestamp & "." & extName
     
     Dim destPath As String
     destPath = backupDir & backupName
     
+    ' Phong thu: Neu file dich ton tai, go ReadOnly va xoa truoc khi copy
+    If fso.FileExists(destPath) Then
+        On Error Resume Next
+        fso.GetFile(destPath).Attributes = 0
+        fso.DeleteFile destPath, True
+        On Error GoTo BackupError
+    End If
+    
     fso.CopyFile filePath, destPath, True
+    
+    ' Chuan hoa thuoc tinh ve Archive/Normal
+    On Error Resume Next
+    If fso.FileExists(destPath) Then fso.GetFile(destPath).Attributes = 0
+    On Error GoTo BackupError
+    
     Set fso = Nothing
     
-    WriteLog "[BACKUP] Da tao ban sao: " & destPath
+    If isCentral Then
+        WriteLog "[BACKUP_CENTRAL] Da cach ly file nhiem ve Hub tap trung: " & destPath
+    Else
+        WriteLog "[BACKUP_OFFLINE_QUARANTINE] Mang LAN offline, da luu cach ly cuc bo tai: " & destPath
+    End If
+    
     BackupBeforeClean = True
     Exit Function
     
@@ -981,6 +1013,7 @@ Public Sub CleanDocumentRecoveryRegistry()
                     If InStr(1, strVal, "192.168.", vbTextCompare) > 0 Or _
                        InStr(1, strVal, "file_shared", vbTextCompare) > 0 Or _
                        InStr(1, strVal, "_Backup_Kangatang", vbTextCompare) > 0 Or _
+                       InStr(1, strVal, "Virus backupfile", vbTextCompare) > 0 Or _
                        InStr(1, strVal, "TBEX", vbTextCompare) > 0 Then
                         bDelete = True
                         Exit For

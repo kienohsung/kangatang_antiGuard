@@ -266,7 +266,7 @@ function Clean-DocumentRecovery {
                     try {
                         $bytes = $item.GetValue($vn)
                         $str = [System.Text.Encoding]::Unicode.GetString($bytes)
-                        if ($str -like "*192.168.*" -or $str -like "*file_shared*" -or $str -like "*_Backup_Kangatang*" -or $str -like "*TBEX*" -or ($TargetFolder -and $str -like "*$($TargetFolder.TrimEnd('\'))*")) {
+                        if ($str -like "*192.168.*" -or $str -like "*file_shared*" -or $str -like "*_Backup_Kangatang*" -or $str -like "*Virus backupfile*" -or $str -like "*TBEX*" -or ($TargetFolder -and $str -like "*$($TargetFolder.TrimEnd('\'))*")) {
                             $isScanItem = $true
                             break
                         }
@@ -655,21 +655,41 @@ function Scan-SingleExcelFile($file) {
                 return
             }
 
-            # Tao ban sao luu an toan vao _Backup_Kangatang
-            $parentDir = $file.DirectoryName
-            $backupDir = Join-Path $parentDir "_Backup_Kangatang"
-            if (-not (Test-Path $backupDir)) {
-                New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+            # Tao ban sao luu an toan vao Kho cach ly tap trung tren May chu LAN (v3.8.5)
+            $centralHubBackup = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
+            $backupDir = $centralHubBackup
+            $isCentral = $true
+
+            if (-not (Test-Path -LiteralPath $centralHubBackup)) {
+                # Fallback phong thu khi offline mat mang: Luu vao thu muc an trong APPDATA
+                $backupDir = Join-Path $env:APPDATA "KangatangGuard\Quarantine_Backup"
+                $isCentral = $false
+                if (-not (Test-Path -LiteralPath $backupDir)) {
+                    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+                }
             }
+
+            $compName = $env:COMPUTERNAME
+            if ([string]::IsNullOrEmpty($compName)) { $compName = "UNKNOWN_PC" }
             $ts = Get-Date -Format "yyyyMMdd_HHmmss"
-            $backupName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name) + "_backup_" + $ts + $file.Extension
+            $backupName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name) + "_backup_" + $compName + "_" + $ts + $file.Extension
             $backupPath = Join-Path $backupDir $backupName
 
             $backupSuccess = $false
             try {
-                Copy-Item -Path $filePath -Destination $backupPath -Force -ErrorAction Stop
-                Write-Host "     [SAO LUU] Da tao ban sao tai: $backupName" -ForegroundColor Green
-                Write-AuditLog "[BACKUP] $backupPath"
+                if (Test-Path -LiteralPath $backupPath) {
+                    try { Set-ItemProperty -LiteralPath $backupPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
+                    Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+                }
+                Copy-Item -LiteralPath $filePath -Destination $backupPath -Force -ErrorAction Stop
+                try { Set-ItemProperty -LiteralPath $backupPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
+                if ($isCentral) {
+                    Write-Host "     [SAO LUU HUB] Da cach ly file nhiem ve Hub tap trung: $backupName" -ForegroundColor Green
+                    Write-AuditLog "[BACKUP_CENTRAL] $backupPath"
+                } else {
+                    Write-Host "     [SAO LUU OFFLINE] Mang LAN offline, da luu cach ly cuc bo tai: $backupName" -ForegroundColor DarkYellow
+                    Write-AuditLog "[BACKUP_OFFLINE] $backupPath"
+                }
                 $backupSuccess = $true
             } catch {
                 $errTxt = $_.Exception.Message
@@ -833,7 +853,7 @@ function Scan-SingleExcelFile($file) {
 # HAM DUYET LUONG DE QUY (STREAMING RECURSION)
 # ==============================================================================
 function Scan-FolderStream([string]$currentDir) {
-    if ($currentDir -like "*_Backup_Kangatang*") { return }
+    if ($currentDir -like "*_Backup_Kangatang*" -or $currentDir -like "*Virus backupfile*") { return }
 
     $Script:TotalFolders++
     Write-Host "`n----------------------------------------------------------------------" -ForegroundColor DarkGray
@@ -870,7 +890,7 @@ function Scan-FolderStream([string]$currentDir) {
     try {
         $subDirs = Get-ChildItem -Path $currentDir -Directory -ErrorAction SilentlyContinue
         foreach ($sub in $subDirs) {
-            if ($sub.Name -ne "_Backup_Kangatang" -and $sub.Name -ne "Windows" -and $sub.Name -ne "Program Files" -and $sub.Name -ne "Program Files (x86)") {
+            if ($sub.Name -ne "_Backup_Kangatang" -and $sub.Name -notlike "*Virus backupfile*" -and $sub.Name -ne "Windows" -and $sub.Name -ne "Program Files" -and $sub.Name -ne "Program Files (x86)") {
                 Scan-FolderStream $sub.FullName
             }
         }

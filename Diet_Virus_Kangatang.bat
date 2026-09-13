@@ -125,23 +125,41 @@ function Restore-AccessVBOM {
 function Backup-ExcelFile {
     param ([string]$FilePath)
     
-    $parentDir = Split-Path -Parent $FilePath
-    $backupDir = Join-Path $parentDir "_Backup_Kangatang"
-    if (-not (Test-Path $backupDir)) {
-        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+    $centralHubBackup = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
+    $backupDir = $centralHubBackup
+    $isCentral = $true
+
+    if (-not (Test-Path -LiteralPath $centralHubBackup)) {
+        $backupDir = Join-Path $env:APPDATA "KangatangGuard\Quarantine_Backup"
+        $isCentral = $false
+        if (-not (Test-Path -LiteralPath $backupDir)) {
+            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+        }
     }
     
+    $compName = $env:COMPUTERNAME
+    if ([string]::IsNullOrEmpty($compName)) { $compName = "UNKNOWN_PC" }
     $fileName = Split-Path -Leaf $FilePath
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
     $ext = [System.IO.Path]::GetExtension($fileName)
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $backupName = $baseName + "_backup_" + $timestamp + $ext
+    $backupName = $baseName + "_backup_" + $compName + "_" + $timestamp + $ext
     $backupPath = Join-Path $backupDir $backupName
     
     try {
-        Copy-Item -Path $FilePath -Destination $backupPath -Force -ErrorAction Stop
-        Write-Host "   📦 [BACKUP] Đã sao lưu: $backupName" -ForegroundColor Cyan
-        Write-ScanLog "BACKUP: $FilePath -> $backupPath"
+        if (Test-Path -LiteralPath $backupPath) {
+            try { Set-ItemProperty -LiteralPath $backupPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
+            Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+        }
+        Copy-Item -LiteralPath $FilePath -Destination $backupPath -Force -ErrorAction Stop
+        try { Set-ItemProperty -LiteralPath $backupPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
+        if ($isCentral) {
+            Write-Host "   📦 [SAO LƯU HUB] Đã cách ly về Hub tập trung: $backupName" -ForegroundColor Cyan
+            Write-ScanLog "BACKUP_CENTRAL: $FilePath -> $backupPath"
+        } else {
+            Write-Host "   📦 [SAO LƯU OFFLINE] Mạng LAN offline, đã lưu cách ly tại: $backupName" -ForegroundColor DarkYellow
+            Write-ScanLog "BACKUP_OFFLINE: $FilePath -> $backupPath"
+        }
         return $true
     } catch {
         Write-Host "   ⚠️ [BACKUP LỖI] Không thể sao lưu: $($_.Exception.Message)" -ForegroundColor DarkYellow

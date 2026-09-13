@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.8.4"
+$ReleaseVersion = "3.8.5"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,7 +51,7 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    changelog         = "v${ReleaseVersion} - Khac phuc triet de loi Permission denied khi tu dong cap nhat tu client qua mang LAN, xoa bo co Read-Only va bo sung co che Retry Update chong khoa file"
+    changelog         = "v${ReleaseVersion} - Centralized Virus Quarantine: Chuyen toan bo ban sao luu file nhiem ve Hub tap trung (2. Virus backupfile), triet tieu thu muc _Backup_Kangatang tai cho, bo sung danh tinh ComputerName va offline fallback"
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
