@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao XLSTART
-# Phien ban: v3.8.7 (Modern HD Large Icon Ribbon & Refined Toolbar Icons)
+# Phien ban: v3.8.8 (Deduplicate UI & Dedicated Ribbon Tab)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.8.7"
+$InstallerVersion = "3.8.8"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
@@ -179,32 +179,21 @@ try {
                 $newRelsStream.Close()
             }
 
-            # 2. Tao customUI/customUI14.xml voi 2 tabs: Tab Kangatang Guard chuyen biet & Tab AddIns
+            # 2. Tao customUI/customUI14.xml voi 1 tab duy nhat: Tab "Kangatang Guard" chuyen biet tren Ribbon
             $customUiXml = @'
 <customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
   <ribbon>
     <tabs>
       <tab id="tabKangatangGuard" label="Kangatang Guard">
         <group id="grpScan" label="Diệt Virus &amp; Bảo vệ">
-          <button id="btnScanFile" label="Quét tệp này" size="large" imageMso="FileCheckOut" onAction="Ribbon_ScanActiveWorkbook" screentip="Quét tệp này" supertip="Quét và tiêu diệt virus macro trên tệp Excel đang mở." />
-          <button id="btnScanFolder" label="Quét thư mục..." size="large" imageMso="FolderBrowse" onAction="Ribbon_ScanFolderDialog" screentip="Quét thư mục..." supertip="Quét ngầm toàn bộ thư mục mà không làm gián đoạn Excel." />
+          <button id="btnScanFile" label="Quét tệp này" size="large" imageMso="TrustCenter" onAction="Ribbon_ScanActiveWorkbook" screentip="Quét tệp này" supertip="Quét và tiêu diệt virus macro trên tệp Excel đang mở." />
+          <button id="btnScanFolder" label="Quét thư mục..." size="large" imageMso="Folder" onAction="Ribbon_ScanFolderDialog" screentip="Quét thư mục..." supertip="Quét ngầm toàn bộ thư mục mà không làm gián đoạn Excel." />
           <button id="btnResume" label="Tiếp tục quét" size="large" imageMso="PlayMacro" onAction="Ribbon_ResumeScanDialog" screentip="Tiếp tục phiên quét" supertip="Tiếp tục phiên quét dở dang trước đó với tốc độ cao." />
         </group>
         <group id="grpTools" label="Hệ thống &amp; Tiện ích">
-          <button id="btnLog" label="Nhật ký (Log)" size="large" imageMso="OpenReportDetails" onAction="Ribbon_OpenLogFolder" screentip="Nhật ký kiểm toán" supertip="Mở thư mục chứa nhật ký quét và diệt virus." />
-          <button id="btnUpdate" label="Cập nhật LAN" size="large" imageMso="ServerRefresh" onAction="Ribbon_CheckForLanUpdates" screentip="Cập nhật mạng LAN" supertip="Kiểm tra và cập nhật phiên bản mới từ máy chủ LAN." />
+          <button id="btnLog" label="Nhật ký (Log)" size="large" imageMso="ImportTextFile" onAction="Ribbon_OpenLogFolder" screentip="Nhật ký kiểm toán" supertip="Mở thư mục chứa nhật ký quét và diệt virus." />
+          <button id="btnUpdate" label="Cập nhật LAN" size="large" imageMso="Synchronize" onAction="Ribbon_CheckForLanUpdates" screentip="Cập nhật mạng LAN" supertip="Kiểm tra và cập nhật phiên bản mới từ máy chủ LAN." />
           <button id="btnAbout" label="Thông tin" size="large" imageMso="Info" onAction="Ribbon_ShowAbout" screentip="Thông tin" supertip="Thông tin phiên bản và xuất xứ KangatangGuard." />
-        </group>
-      </tab>
-      <tab idMso="TabAddIns">
-        <group id="grpKangatangAddins" label="Kangatang Guard v3.8.7">
-          <button id="btnScanFileA" label="Quét tệp này" size="large" imageMso="FileCheckOut" onAction="Ribbon_ScanActiveWorkbook" screentip="Quét tệp này" supertip="Quét và tiêu diệt virus macro trên tệp Excel đang mở." />
-          <button id="btnScanFolderA" label="Quét thư mục..." size="large" imageMso="FolderBrowse" onAction="Ribbon_ScanFolderDialog" screentip="Quét thư mục..." supertip="Quét ngầm toàn bộ thư mục mà không làm gián đoạn Excel." />
-          <button id="btnResumeA" label="Tiếp tục quét" size="large" imageMso="PlayMacro" onAction="Ribbon_ResumeScanDialog" screentip="Tiếp tục phiên quét" supertip="Tiếp tục phiên quét dở dang trước đó với tốc độ cao." />
-          <separator id="sepA1" />
-          <button id="btnLogA" label="Nhật ký" size="large" imageMso="OpenReportDetails" onAction="Ribbon_OpenLogFolder" screentip="Nhật ký kiểm toán" supertip="Mở thư mục chứa nhật ký quét và diệt virus." />
-          <button id="btnUpdateA" label="Cập nhật LAN" size="large" imageMso="ServerRefresh" onAction="Ribbon_CheckForLanUpdates" screentip="Cập nhật mạng LAN" supertip="Kiểm tra và cập nhật phiên bản mới từ máy chủ LAN." />
-          <button id="btnAboutA" label="Thông tin" size="large" imageMso="Info" onAction="Ribbon_ShowAbout" screentip="Thông tin" supertip="Thông tin phiên bản và xuất xứ KangatangGuard." />
         </group>
       </tab>
     </tabs>

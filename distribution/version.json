@@ -1,8 +1,8 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-09-17 11:53:10",
+    "release_timestamp":  "2026-09-17 13:10:18",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
-    "version":  "3.8.7",
+    "version":  "3.8.8",
     "release_date":  "2026-09-17",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
@@ -11,6 +11,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.8.7 - Modern HD Large Icon Ribbon \u0026 Refined Toolbar Icons: Tich hop CustomUI Ribbon XML chuan Office voi bo bieu tuong HD 32x32 pixels tren Tab rieng Kangatang Guard va Tab Add-ins; thay the icon FaceId 1088 chu X do bang 1087 tich xanh bao ve, 297 play xanh va bo icon truc quan moi",
+    "changelog":  "v3.8.8 - Deduplicate UI \u0026 Dedicated Ribbon Tab: Loai bo hoan toan cac muc trung lap tren tab Add-ins (Custom Toolbars \u0026 nhom Add-ins), chuan hoa duy nhat 1 Tab chuyen biet \u0027Kangatang Guard\u0027 tren thanh Ribbon chinh voi bo 6 icon Office vector HD 32x32 pixels sac net 100%",
     "hub_ip":  "192.168.223.7"
 }

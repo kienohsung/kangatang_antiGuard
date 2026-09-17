@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.8.7"
+$ReleaseVersion = "3.8.8"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,7 +51,7 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    changelog         = "v${ReleaseVersion} - Modern HD Large Icon Ribbon & Refined Toolbar Icons: Tich hop CustomUI Ribbon XML chuan Office voi bo bieu tuong HD 32x32 pixels tren Tab rieng Kangatang Guard va Tab Add-ins; thay the icon FaceId 1088 chu X do bang 1087 tich xanh bao ve, 297 play xanh va bo icon truc quan moi"
+    changelog         = "v${ReleaseVersion} - Deduplicate UI & Dedicated Ribbon Tab: Loai bo hoan toan cac muc trung lap tren tab Add-ins (Custom Toolbars & nhom Add-ins), chuan hoa duy nhat 1 Tab chuyen biet 'Kangatang Guard' tren thanh Ribbon chinh voi bo 6 icon Office vector HD 32x32 pixels sac net 100%"
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
