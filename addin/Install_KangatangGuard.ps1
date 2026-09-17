@@ -1,7 +1,7 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao XLSTART
-# Phien ban: v3.8.6 (Core-Only Zero-Delay Startup & Horizontal Icon Toolbar)
+# Phien ban: v3.8.7 (Modern HD Large Icon Ribbon & Refined Toolbar Icons)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.8.6"
+$InstallerVersion = "3.8.7"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
@@ -141,6 +141,92 @@ try {
         $cm.AddFromString($finalCode)
     }
 
+    # Ham helper tich hop Ribbon CustomUI XML (Icon HD Large 32x32)
+    function Add-RibbonCustomUI([string]$targetXlam) {
+        Write-Host "   -> Tich hop Ribbon CustomUI XML (Icon HD 32x32)..." -ForegroundColor Gray
+        Add-Type -AssemblyName System.IO.Compression -ErrorAction SilentlyContinue
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+        
+        $zip = [System.IO.Compression.ZipFile]::Open($targetXlam, [System.IO.Compression.ZipArchiveMode]::Update)
+        try {
+            # 1. Cap nhat _rels/.rels
+            $relsEntry = $zip.GetEntry("_rels/.rels")
+            $relsDoc = New-Object System.Xml.XmlDocument
+            $relsStream = $relsEntry.Open()
+            $relsDoc.Load($relsStream)
+            $relsStream.Close()
+
+            $ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+            $hasCustomUi = $false
+            foreach ($rel in $relsDoc.Relationships.Relationship) {
+                if ($rel.Type -like "*customui*") {
+                    $hasCustomUi = $true
+                    break
+                }
+            }
+
+            if (-not $hasCustomUi) {
+                $newRel = $relsDoc.CreateElement("Relationship", $ns)
+                $newRel.SetAttribute("Id", "rIdCustomUI14")
+                $newRel.SetAttribute("Type", "http://schemas.microsoft.com/office/2007/relationships/ui/extensibility")
+                $newRel.SetAttribute("Target", "customUI/customUI14.xml")
+                $relsDoc.Relationships.AppendChild($newRel) | Out-Null
+
+                $relsEntry.Delete()
+                $newRelsEntry = $zip.CreateEntry("_rels/.rels", [System.IO.Compression.CompressionLevel]::Optimal)
+                $newRelsStream = $newRelsEntry.Open()
+                $relsDoc.Save($newRelsStream)
+                $newRelsStream.Close()
+            }
+
+            # 2. Tao customUI/customUI14.xml voi 2 tabs: Tab Kangatang Guard chuyen biet & Tab AddIns
+            $customUiXml = @'
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
+  <ribbon>
+    <tabs>
+      <tab id="tabKangatangGuard" label="Kangatang Guard">
+        <group id="grpScan" label="Diệt Virus &amp; Bảo vệ">
+          <button id="btnScanFile" label="Quét tệp này" size="large" imageMso="FileCheckOut" onAction="Ribbon_ScanActiveWorkbook" screentip="Quét tệp này" supertip="Quét và tiêu diệt virus macro trên tệp Excel đang mở." />
+          <button id="btnScanFolder" label="Quét thư mục..." size="large" imageMso="FolderBrowse" onAction="Ribbon_ScanFolderDialog" screentip="Quét thư mục..." supertip="Quét ngầm toàn bộ thư mục mà không làm gián đoạn Excel." />
+          <button id="btnResume" label="Tiếp tục quét" size="large" imageMso="PlayMacro" onAction="Ribbon_ResumeScanDialog" screentip="Tiếp tục phiên quét" supertip="Tiếp tục phiên quét dở dang trước đó với tốc độ cao." />
+        </group>
+        <group id="grpTools" label="Hệ thống &amp; Tiện ích">
+          <button id="btnLog" label="Nhật ký (Log)" size="large" imageMso="OpenReportDetails" onAction="Ribbon_OpenLogFolder" screentip="Nhật ký kiểm toán" supertip="Mở thư mục chứa nhật ký quét và diệt virus." />
+          <button id="btnUpdate" label="Cập nhật LAN" size="large" imageMso="ServerRefresh" onAction="Ribbon_CheckForLanUpdates" screentip="Cập nhật mạng LAN" supertip="Kiểm tra và cập nhật phiên bản mới từ máy chủ LAN." />
+          <button id="btnAbout" label="Thông tin" size="large" imageMso="Info" onAction="Ribbon_ShowAbout" screentip="Thông tin" supertip="Thông tin phiên bản và xuất xứ KangatangGuard." />
+        </group>
+      </tab>
+      <tab idMso="TabAddIns">
+        <group id="grpKangatangAddins" label="Kangatang Guard v3.8.7">
+          <button id="btnScanFileA" label="Quét tệp này" size="large" imageMso="FileCheckOut" onAction="Ribbon_ScanActiveWorkbook" screentip="Quét tệp này" supertip="Quét và tiêu diệt virus macro trên tệp Excel đang mở." />
+          <button id="btnScanFolderA" label="Quét thư mục..." size="large" imageMso="FolderBrowse" onAction="Ribbon_ScanFolderDialog" screentip="Quét thư mục..." supertip="Quét ngầm toàn bộ thư mục mà không làm gián đoạn Excel." />
+          <button id="btnResumeA" label="Tiếp tục quét" size="large" imageMso="PlayMacro" onAction="Ribbon_ResumeScanDialog" screentip="Tiếp tục phiên quét" supertip="Tiếp tục phiên quét dở dang trước đó với tốc độ cao." />
+          <separator id="sepA1" />
+          <button id="btnLogA" label="Nhật ký" size="large" imageMso="OpenReportDetails" onAction="Ribbon_OpenLogFolder" screentip="Nhật ký kiểm toán" supertip="Mở thư mục chứa nhật ký quét và diệt virus." />
+          <button id="btnUpdateA" label="Cập nhật LAN" size="large" imageMso="ServerRefresh" onAction="Ribbon_CheckForLanUpdates" screentip="Cập nhật mạng LAN" supertip="Kiểm tra và cập nhật phiên bản mới từ máy chủ LAN." />
+          <button id="btnAboutA" label="Thông tin" size="large" imageMso="Info" onAction="Ribbon_ShowAbout" screentip="Thông tin" supertip="Thông tin phiên bản và xuất xứ KangatangGuard." />
+        </group>
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>
+'@
+            $uiEntry = $zip.GetEntry("customUI/customUI14.xml")
+            if ($uiEntry) { $uiEntry.Delete() }
+            $newUiEntry = $zip.CreateEntry("customUI/customUI14.xml", [System.IO.Compression.CompressionLevel]::Optimal)
+            $uiStream = $newUiEntry.Open()
+            $uiWriter = New-Object System.IO.StreamWriter($uiStream, [System.Text.Encoding]::UTF8)
+            $uiWriter.Write($customUiXml)
+            $uiWriter.Flush()
+            $uiWriter.Close()
+            Write-Host "   -> [OK] Da tich hop Ribbon CustomUI XML (Large 32x32 Icons) thanh cong!" -ForegroundColor Green
+        } catch {
+            Write-Host "   -> [CANH BAO] Khong the tich hop Ribbon XML: $($_.Exception.Message)" -ForegroundColor Yellow
+        } finally {
+            $zip.Dispose()
+        }
+    }
+
     # --- Inject ThisWorkbook code ---
     Write-Host "   -> Inject code vao ThisWorkbook..." -ForegroundColor Gray
     $twb = $wb.VBProject.VBComponents.Item("ThisWorkbook")
@@ -187,6 +273,9 @@ try {
     } catch {}
     
     Write-Host "   -> [OK] Da luu vao XLSTART: $xlamPath" -ForegroundColor Green
+    
+    # Tich hop Ribbon CustomUI XML (Icon HD 32x32)
+    Add-RibbonCustomUI -targetXlam $xlamPath
     
     # ==============================================================================
     # DUAL REGISTRATION: SAO CHEP VA DANG KY VAO ADDINS CHO OFFICE 365

@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Deploy_To_Hub.ps1
 # Lenh Phat hanh va Dong bo Phien ban moi len May chu LAN & Tao Clone Cuc bo
 # Phien ban: v3.8.1 (Ho tro Bo cong cu Standalone & Dual-Mirror Release)
@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.8.6"
+$ReleaseVersion = "3.8.7"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,7 +51,7 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    changelog         = "v${ReleaseVersion} - Core-Only Zero-Delay Startup & Horizontal Icon Toolbar: Khoi dong Excel tuc thi (<0.05s), loai bo WMI/SMB gay lag, rate-limit kiem tra cap nhat 24h, thiet ke lai thanh cong cu ngang voi 6 icon truc quan tren tab Add-ins"
+    changelog         = "v${ReleaseVersion} - Modern HD Large Icon Ribbon & Refined Toolbar Icons: Tich hop CustomUI Ribbon XML chuan Office voi bo bieu tuong HD 32x32 pixels tren Tab rieng Kangatang Guard va Tab Add-ins; thay the icon FaceId 1088 chu X do bang 1087 tich xanh bao ve, 297 play xanh va bo icon truc quan moi"
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4

@@ -1,6 +1,6 @@
 '==============================================================================
 ' KangatangGuard - Excel Add-in Diet Virus Macro Kangatang
-' Phien ban: v3.8.6 (Core-Only Zero-Delay Startup & Horizontal Icon Toolbar)
+' Phien ban: v3.8.7 (Modern HD Large Icon Ribbon & Refined Toolbar Icons)
 ' Mo ta: Tu dong quet va tieu diet virus macro Kangatang/Laroux/mypersonnel
 '         ngay khi mo file Excel. Ho tro Trung tam Phan phoi May chu Tep LAN:
 '         \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang
@@ -83,7 +83,7 @@ Public bIsFolderScanning As Boolean
 ' Scan Cache chong lag: key=UCase(FullName), value=Date
 Private dicScanCache As Object
 
-Public Const CURRENT_VERSION As String = "3.8.6"
+Public Const CURRENT_VERSION As String = "3.8.7"
 Private Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Private Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Private Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
@@ -201,8 +201,8 @@ Public Sub TerminateGuard()
 End Sub
 
 ' ===========================================================================
-' v3.8.6: GIAO DIEN THANH CONG CU NGANG TRAI DAI (HORIZONTAL ICON TOOLBAR)
-' Moi tinh nang la 1 icon kem tieu de, hien thi ngang dep mat tren tab Add-ins
+' v3.8.7: GIAO DIEN THANH CONG CU NGANG TRAI DAI (HORIZONTAL ICON TOOLBAR)
+' Bo bieu tuong FaceId duoc lam moi sac net, truc quan (1087 tich xanh, 297 play...)
 ' ===========================================================================
 Public Sub CreateMenu()
     On Error Resume Next
@@ -213,12 +213,12 @@ Public Sub CreateMenu()
     Set cb = Application.CommandBars.Add(TOOLBAR_NAME, 1, False, True)
     cb.Visible = True
     
-    ' Nut 1: Quet tep hien tai (Icon: La chan bao ve 1088)
+    ' Nut 1: Quet tep hien tai (Icon: Dau tich xanh bao ve 1087)
     Dim btn1 As Object
     Set btn1 = cb.Controls.Add(1) ' 1 = msoControlButton
     btn1.Style = 3               ' 3 = msoButtonIconAndCaption
     btn1.Caption = Uni("Qu\u00e9t t\u1ec7p n\u00e0y")
-    btn1.FaceId = 1088
+    btn1.FaceId = 1087
     btn1.OnAction = "ScanActiveWorkbook"
     btn1.TooltipText = Uni("Qu\u00e9t v\u00e0 di\u1ec7t virus tr\u00ean t\u1ec7p Excel \u0111ang m\u1edf")
     btn1.Tag = "KG_ScanCurrent"
@@ -233,37 +233,37 @@ Public Sub CreateMenu()
     btn2.TooltipText = Uni("Qu\u00e9t ng\u1ea7m to\u00e0n b\u1ed8 th\u01b0 m\u1ee5c kh\u00f4ng l\u00e0m treo Excel")
     btn2.Tag = "KG_ScanFolder"
     
-    ' Nut 3: Tiep tuc phien quet truoc do (Icon: Play tiep tuc 38)
+    ' Nut 3: Tiep tuc phien quet truoc do (Icon: Play tiep tuc 297)
     Dim btn3 As Object
     Set btn3 = cb.Controls.Add(1)
     btn3.Style = 3
     btn3.Caption = Uni("Ti\u1ebfp t\u1ee5c qu\u00e9t")
-    btn3.FaceId = 38
+    btn3.FaceId = 297
     btn3.OnAction = "ResumeScanDialog"
     btn3.TooltipText = Uni("Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t d\u1edf dang tr\u01b0\u1edbc \u0111\u00f3 si\u00eau t\u1ed1c")
     btn3.Tag = "KG_ResumeScan"
     
-    ' Nut 4: Mo thu muc Nhat ky (Icon: So nhat ky 40)
+    ' Nut 4: Mo thu muc Nhat ky (Icon: Dong ho lich su 269)
     Dim btn4 As Object
     Set btn4 = cb.Controls.Add(1)
     btn4.Style = 3
     btn4.Caption = Uni("Nh\u1eadt k\u00fd (Log)")
-    btn4.FaceId = 40
+    btn4.FaceId = 269
     btn4.OnAction = "OpenLogFolder"
     btn4.TooltipText = Uni("M\u1edf th\u01b0 m\u1ee5c ch\u1ee9a nh\u1eadt k\u00fd qu\u00e9t v\u00e0 di\u1ec7t virus")
     btn4.Tag = "KG_OpenLog"
     
-    ' Nut 5: Kiem tra cap nhat tu May chu LAN (Icon: Dong bo mang 463)
+    ' Nut 5: Kiem tra cap nhat tu May chu LAN (Icon: Dong bo mang 184)
     Dim btn5 As Object
     Set btn5 = cb.Controls.Add(1)
     btn5.Style = 3
     btn5.Caption = Uni("C\u1eadp nh\u1eadt LAN")
-    btn5.FaceId = 463
+    btn5.FaceId = 184
     btn5.OnAction = "CheckForLanUpdatesManual"
     btn5.TooltipText = Uni("Ki\u1ec3m tra v\u00e0 c\u1eadp nh\u1eadt phi\u00ean b\u1ea3n m\u1edbi t\u1eeb M\u00e1y ch\u1ee7 LAN")
     btn5.Tag = "KG_CheckUpdate"
     
-    ' Nut 6: Thong tin / Gioi thieu (Icon: Dau hoi / Thong tin 487)
+    ' Nut 6: Thong tin / Gioi thieu (Icon: Thong tin 487)
     Dim btn6 As Object
     Set btn6 = cb.Controls.Add(1)
     btn6.Style = 3
@@ -288,6 +288,34 @@ Public Sub RemoveMenu()
         End If
     Next ctrl
     On Error GoTo 0
+End Sub
+
+' ===========================================================================
+' RIBBON UI CALLBACKS (v3.8.7)
+' Dành riêng cho Tab Kangatang Guard và Tab Add-ins trên Modern Office Ribbon
+' ===========================================================================
+Public Sub Ribbon_ScanActiveWorkbook(ByVal control As Object)
+    Call ScanActiveWorkbook
+End Sub
+
+Public Sub Ribbon_ScanFolderDialog(ByVal control As Object)
+    Call ScanFolderDialog
+End Sub
+
+Public Sub Ribbon_ResumeScanDialog(ByVal control As Object)
+    Call ResumeScanDialog
+End Sub
+
+Public Sub Ribbon_OpenLogFolder(ByVal control As Object)
+    Call OpenLogFolder
+End Sub
+
+Public Sub Ribbon_CheckForLanUpdates(ByVal control As Object)
+    Call CheckForLanUpdatesManual
+End Sub
+
+Public Sub Ribbon_ShowAbout(ByVal control As Object)
+    Call ShowAbout
 End Sub
 
 ' ===========================================================================

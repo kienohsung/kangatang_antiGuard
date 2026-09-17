@@ -1,7 +1,7 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Install_Client.ps1
 # PowerShell Installer cho May Client trong Mang LAN
-# Phien ban: v3.8.0 (Dedicated LAN File Server & Dual-Mirror Architecture)
+# Phien ban: v3.8.7 (Modern HD Large Icon Ribbon & Dedicated LAN Server)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.8.0)    " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.8.7)    " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -32,7 +32,7 @@ if ($ScriptDir.StartsWith("\\")) {
 Write-Host "`n[1/5] May chu phan phoi (Hub): $uncSource" -ForegroundColor Yellow
 
 # Doc thong tin phien ban tu version.json neu co
-$versionInfo = "3.8.6"
+$versionInfo = "3.8.7"
 $versionJsonPath = Join-Path $uncSource "version.json"
 if (Test-Path $versionJsonPath) {
     try {
