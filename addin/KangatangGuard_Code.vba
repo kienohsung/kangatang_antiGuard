@@ -1,6 +1,6 @@
 '==============================================================================
 ' KangatangGuard - Excel Add-in Diet Virus Macro Kangatang
-' Phien ban: v3.8.0 (Dedicated LAN File Server & Dual-Mirror Architecture)
+' Phien ban: v3.8.6 (Core-Only Zero-Delay Startup & Horizontal Icon Toolbar)
 ' Mo ta: Tu dong quet va tieu diet virus macro Kangatang/Laroux/mypersonnel
 '         ngay khi mo file Excel. Ho tro Trung tam Phan phoi May chu Tep LAN:
 '         \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang
@@ -16,12 +16,11 @@
 Option Explicit
 
 Private Sub Workbook_Open()
-    Call CleanDocumentRecoveryRegistry
+    ' v3.8.6: Core-Only Startup - Chi nap code cot loi, loai bo moi tac vu WMI/Network chan UI
     Call InitializeGuard
-    ' Kiem tra cap nhat tu May chu LAN ngam sau 3 giay (Async / Non-blocking)
-    ' Giup Excel mo tuc thi trong 0.05 giay ma khong bi cham tre du chi 1 ms
+    ' Tri hoan kiem tra cap nhat LAN 45 giay de Excel nhan roi hoan toan va rate-limit 24h
     On Error Resume Next
-    Application.OnTime Now + TimeValue("00:00:03"), "CheckForLanUpdatesSilent"
+    Application.OnTime Now + TimeValue("00:00:45"), "'" & ThisWorkbook.Name & "'!CheckForLanUpdatesSilent"
     On Error GoTo 0
 End Sub
 
@@ -84,12 +83,13 @@ Public bIsFolderScanning As Boolean
 ' Scan Cache chong lag: key=UCase(FullName), value=Date
 Private dicScanCache As Object
 
-Public Const CURRENT_VERSION As String = "3.8.5"
+Public Const CURRENT_VERSION As String = "3.8.6"
 Private Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Private Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Private Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
 
 Private Const ADDIN_NAME As String = "KangatangGuard.xlam"
+Private Const TOOLBAR_NAME As String = "KangatangGuard"
 Private Const BACKUP_FOLDER_NAME As String = "_Backup_Kangatang"
 Private Const LOG_SUBFOLDER As String = "KangatangGuard"
 Private Const SCAN_CACHE_MINUTES As Long = 5
@@ -129,7 +129,7 @@ Public Function MsgBoxW(ByVal prompt As String, Optional ByVal buttons As VbMsgB
     On Error GoTo 0
     
     If Len(title) = 0 Then
-        title = Uni("KangatangGuard v3.8.0")
+        title = Uni("KangatangGuard v" & CURRENT_VERSION)
     End If
     
     MsgBoxW = MessageBoxW(h, StrPtr(prompt), StrPtr(title), buttons)
@@ -173,25 +173,20 @@ Private Sub UpdateScanCache(ByVal wb As Workbook)
 End Sub
 
 ' ===========================================================================
-' Ham khoi tao va huy event handler
+'' Ham khoi tao va huy event handler (v3.8.6: Core-Only Zero-Delay Startup)
 ' ===========================================================================
 Public Sub InitializeGuard()
     On Error Resume Next
+    ' 1. Khoi tao Scan Cache trong bo nho RAM (< 1ms)
     Set dicScanCache = CreateObject("Scripting.Dictionary")
     bIsFolderScanning = False
     
+    ' 2. Dang ky lang nghe su kien WorkbookOpen/BeforeSave cua ung dung (< 1ms)
     Set oAppEvents = New clsAppEvents
     Set oAppEvents.xlApp = Application
     
+    ' 3. Tao Thanh cong cu Ngang tren tab Add-ins (< 10ms)
     Call CreateMenu
-    
-    WriteLog "KangatangGuard v3.8.0 da khoi dong thanh cong."
-    
-    Dim openWb As Workbook
-    For Each openWb In Application.Workbooks
-        Call ScanWorkbook(openWb)
-    Next openWb
-    
     On Error GoTo 0
 End Sub
 
@@ -206,74 +201,87 @@ Public Sub TerminateGuard()
 End Sub
 
 ' ===========================================================================
-' Ham tao va xoa menu tren thanh cong cu (Add-ins tab)
+' v3.8.6: GIAO DIEN THANH CONG CU NGANG TRAI DAI (HORIZONTAL ICON TOOLBAR)
+' Moi tinh nang la 1 icon kem tieu de, hien thi ngang dep mat tren tab Add-ins
 ' ===========================================================================
-Private Sub CreateMenu()
+Public Sub CreateMenu()
     On Error Resume Next
     Call RemoveMenu
     
-    Dim cmdBar As CommandBar
-    Set cmdBar = Application.CommandBars("Worksheet Menu Bar")
+    Dim cb As Object
+    ' Position 1 = msoBarTop, MenuBar False, Temporary True
+    Set cb = Application.CommandBars.Add(TOOLBAR_NAME, 1, False, True)
+    cb.Visible = True
     
-    Dim menuItem As CommandBarPopup
-    Set menuItem = cmdBar.Controls.Add(Type:=msoControlPopup, Temporary:=True)
-    menuItem.Caption = "KangatangGuard"
-    menuItem.Tag = "KangatangGuardMenu"
-    
-    ' Nut 1: Quet tep hien tai
-    Dim btn1 As CommandBarButton
-    Set btn1 = menuItem.Controls.Add(Type:=msoControlButton)
-    btn1.Caption = Uni("Qu\u00e9t t\u1ec7p hi\u1ec7n t\u1ea1i")
+    ' Nut 1: Quet tep hien tai (Icon: La chan bao ve 1088)
+    Dim btn1 As Object
+    Set btn1 = cb.Controls.Add(1) ' 1 = msoControlButton
+    btn1.Style = 3               ' 3 = msoButtonIconAndCaption
+    btn1.Caption = Uni("Qu\u00e9t t\u1ec7p n\u00e0y")
     btn1.FaceId = 1088
     btn1.OnAction = "ScanActiveWorkbook"
+    btn1.TooltipText = Uni("Qu\u00e9t v\u00e0 di\u1ec7t virus tr\u00ean t\u1ec7p Excel \u0111ang m\u1edf")
     btn1.Tag = "KG_ScanCurrent"
     
-    ' Nut 2: Quet thu muc moi (Out-of-process)
-    Dim btn2 As CommandBarButton
-    Set btn2 = menuItem.Controls.Add(Type:=msoControlButton)
-    btn2.Caption = Uni("Qu\u00e9t th\u01b0 m\u1ee5c m\u1edbi...")
+    ' Nut 2: Quet thu muc moi (Icon: Thu muc mo 23)
+    Dim btn2 As Object
+    Set btn2 = cb.Controls.Add(1)
+    btn2.Style = 3
+    btn2.Caption = Uni("Qu\u00e9t th\u01b0 m\u1ee5c...")
     btn2.FaceId = 23
     btn2.OnAction = "ScanFolderDialog"
+    btn2.TooltipText = Uni("Qu\u00e9t ng\u1ea7m to\u00e0n b\u1ed8 th\u01b0 m\u1ee5c kh\u00f4ng l\u00e0m treo Excel")
     btn2.Tag = "KG_ScanFolder"
     
-    ' Nut 2b: Tiep tuc phien quet truoc do (v3.6.0 Fast Resume)
-    Dim btn2b As CommandBarButton
-    Set btn2b = menuItem.Controls.Add(Type:=msoControlButton)
-    btn2b.Caption = Uni("Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t tr\u01b0\u1edbc...")
-    btn2b.FaceId = 38
-    btn2b.OnAction = "ResumeScanDialog"
-    btn2b.Tag = "KG_ResumeScan"
+    ' Nut 3: Tiep tuc phien quet truoc do (Icon: Play tiep tuc 38)
+    Dim btn3 As Object
+    Set btn3 = cb.Controls.Add(1)
+    btn3.Style = 3
+    btn3.Caption = Uni("Ti\u1ebfp t\u1ee5c qu\u00e9t")
+    btn3.FaceId = 38
+    btn3.OnAction = "ResumeScanDialog"
+    btn3.TooltipText = Uni("Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t d\u1edf dang tr\u01b0\u1edbc \u0111\u00f3 si\u00eau t\u1ed1c")
+    btn3.Tag = "KG_ResumeScan"
     
-    ' Nut 3: Mo thu muc Nhat ky
-    Dim btn3 As CommandBarButton
-    Set btn3 = menuItem.Controls.Add(Type:=msoControlButton)
-    btn3.Caption = Uni("M\u1edf th\u01b0 m\u1ee5c nh\u1eadt k\u00fd (Log)")
-    btn3.FaceId = 40
-    btn3.OnAction = "OpenLogFolder"
-    btn3.Tag = "KG_OpenLog"
+    ' Nut 4: Mo thu muc Nhat ky (Icon: So nhat ky 40)
+    Dim btn4 As Object
+    Set btn4 = cb.Controls.Add(1)
+    btn4.Style = 3
+    btn4.Caption = Uni("Nh\u1eadt k\u00fd (Log)")
+    btn4.FaceId = 40
+    btn4.OnAction = "OpenLogFolder"
+    btn4.TooltipText = Uni("M\u1edf th\u01b0 m\u1ee5c ch\u1ee9a nh\u1eadt k\u00fd qu\u00e9t v\u00e0 di\u1ec7t virus")
+    btn4.Tag = "KG_OpenLog"
     
-    ' Nut 3b: Kiem tra cap nhat tu May chu LAN (v3.8.0)
-    Dim btn3b As CommandBarButton
-    Set btn3b = menuItem.Controls.Add(Type:=msoControlButton)
-    btn3b.Caption = Uni("Ki\u1ec3m tra c\u1eadp nh\u1eadt t\u1eeb M\u00e1y ch\u1ee7...")
-    btn3b.FaceId = 463
-    btn3b.OnAction = "CheckForLanUpdatesManual"
-    btn3b.Tag = "KG_CheckUpdate"
+    ' Nut 5: Kiem tra cap nhat tu May chu LAN (Icon: Dong bo mang 463)
+    Dim btn5 As Object
+    Set btn5 = cb.Controls.Add(1)
+    btn5.Style = 3
+    btn5.Caption = Uni("C\u1eadp nh\u1eadt LAN")
+    btn5.FaceId = 463
+    btn5.OnAction = "CheckForLanUpdatesManual"
+    btn5.TooltipText = Uni("Ki\u1ec3m tra v\u00e0 c\u1eadp nh\u1eadt phi\u00ean b\u1ea3n m\u1edbi t\u1eeb M\u00e1y ch\u1ee7 LAN")
+    btn5.Tag = "KG_CheckUpdate"
     
-    ' Nut 4: Thong tin
-    Dim btn4 As CommandBarButton
-    Set btn4 = menuItem.Controls.Add(Type:=msoControlButton)
-    btn4.Caption = Uni("Th\u00f4ng tin KangatangGuard v3.8.0")
-    btn4.FaceId = 487
-    btn4.OnAction = "ShowAbout"
-    btn4.Tag = "KG_About"
+    ' Nut 6: Thong tin / Gioi thieu (Icon: Dau hoi / Thong tin 487)
+    Dim btn6 As Object
+    Set btn6 = cb.Controls.Add(1)
+    btn6.Style = 3
+    btn6.Caption = Uni("Th\u00f4ng tin")
+    btn6.FaceId = 487
+    btn6.OnAction = "ShowAbout"
+    btn6.TooltipText = Uni("Th\u00f4ng tin phi\u00ean b\u1ea3n v\u00e0 ngu\u1ed3n g\u1ed1c ph\u00e1t h\u00e0nh")
+    btn6.Tag = "KG_About"
     
     On Error GoTo 0
 End Sub
 
-Private Sub RemoveMenu()
+Public Sub RemoveMenu()
     On Error Resume Next
-    Dim ctrl As CommandBarControl
+    Application.CommandBars(TOOLBAR_NAME).Delete
+    
+    ' Don sach ca control cu tren Worksheet Menu Bar neu co
+    Dim ctrl As Object
     For Each ctrl In Application.CommandBars("Worksheet Menu Bar").Controls
         If ctrl.Tag = "KangatangGuardMenu" Then
             ctrl.Delete
@@ -1076,7 +1084,7 @@ Public Sub ShowAbout()
 End Sub
 
 ' ===========================================================================
-' KIEM TRA VA DONG BO CAP NHAT TU TRUNG TAM LAN HUB (v3.8.0)
+' KIEM TRA VA DONG BO CAP NHAT TU TRUNG TAM LAN HUB (v3.8.6)
 ' ===========================================================================
 Public Sub CheckForLanUpdatesManual()
     Call CheckForLanUpdates(bSilent:=False)
@@ -1096,6 +1104,23 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
     Dim jsonText As String
     
     Set wsh = CreateObject("WScript.Shell")
+    
+    ' v3.8.6: Rate-limit 24h khi chay ngam de Excel khoi dong tuc thi, khong bao gio bi timeout mang
+    If bSilent Then
+        Dim lastCheck As String
+        On Error Resume Next
+        lastCheck = wsh.RegRead("HKCU\Software\KangatangGuard\LastUpdateCheck")
+        On Error GoTo UpdateErr
+        If Len(lastCheck) > 0 Then
+            If IsDate(lastCheck) Then
+                If DateDiff("h", CDate(lastCheck), Now) < 24 Then
+                    Set wsh = Nothing
+                    Exit Sub
+                End If
+            End If
+        End If
+    End If
+    
     Set fso = CreateObject("Scripting.FileSystemObject")
     
     ' 1. Doc UpdateSource tu Registry HKCU\Software\KangatangGuard
@@ -1116,7 +1141,7 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
         If Not bSilent Then
             MsgBoxW Uni("Ch\u01b0a c\u1ea5u h\u00ecnh \u0111\u01b0\u1eddng d\u1eabn M\u00e1y ch\u1ee7 ph\u00e2n ph\u1ed1i (UpdateSource)!" & vbCrLf & vbCrLf & _
                         "Vui l\u00f2ng ch\u1ea1y file 'Install_Client_Kangatang.bat' t\u1eeb M\u00e1y ch\u1ee7 \u0111\u1ec3 \u0111\u0103ng k\u00fd."), _
-                    vbExclamation, Uni("KangatangGuard v3.8.0 - C\u1eadp nh\u1eadt")
+                    vbExclamation, Uni("KangatangGuard v" & CURRENT_VERSION & " - C\u1eadp nh\u1eadt")
         End If
         Exit Sub
     End If
@@ -1138,11 +1163,14 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
     End If
     
     If Not fso.FileExists(versionFile) Then
-        If Not bSilent Then
+        If bSilent Then
+            On Error Resume Next
+            wsh.RegWrite "HKCU\Software\KangatangGuard\LastUpdateCheck", Format(Now, "yyyy-MM-dd HH:mm:ss"), "REG_SZ"
+        Else
             MsgBoxW Uni("Kh\u00f4ng th\u1ec3 k\u1ebft n\u1ed1i \u0111\u1ebfn M\u00e1y ch\u1ee7 LAN ho\u1eb7c kh\u00f4ng t\u00ecm th\u1ea5y th\u00f4ng tin phi\u00ean b\u1ea3n:" & vbCrLf & vbCrLf) & _
                     updateSource & vbCrLf & vbCrLf & _
                     Uni("Vui l\u00f2ng ki\u1ec3m tra k\u1ebft n\u1ed1i m\u1ea1ng LAN ho\u1eb7c m\u00e1y ch\u1ee7 c\u00f3 \u0111ang b\u1eadt kh\u00f4ng."), _
-                    vbExclamation, Uni("KangatangGuard v3.8.0 - K\u1ebft n\u1ed1i th\u1ea5t b\u1ea1i")
+                    vbExclamation, Uni("KangatangGuard v" & CURRENT_VERSION & " - K\u1ebft n\u1ed1i th\u1ea5t b\u1ea1i")
         End If
         Exit Sub
     End If
@@ -1157,7 +1185,7 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
     serverVer = ExtractJsonValue(jsonText, "version")
     If Len(serverVer) = 0 Then
         If Not bSilent Then
-            MsgBoxW Uni("Kh\u00f4ng th\u1ec3 \u0111\u1ecdc th\u00f4ng tin phi\u00ean b\u1ea3n t\u1eeb t\u1ec7p version.json tr\u00ean m\u00e1y ch\u1ee7."), vbExclamation, Uni("KangatangGuard v3.7.0")
+            MsgBoxW Uni("Kh\u00f4ng th\u1ec3 \u0111\u1ecdc th\u00f4ng tin phi\u00ean b\u1ea3n t\u1eeb t\u1ec7p version.json tr\u00ean m\u00e1y ch\u1ee7."), vbExclamation, Uni("KangatangGuard v" & CURRENT_VERSION)
         End If
         Exit Sub
     End If
@@ -1184,7 +1212,7 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
         If Not bSilent Then
             MsgBoxW Uni("B\u1ea1n \u0111ang s\u1eed d\u1ee5ng phi\u00ean b\u1ea3n M\u1edaI NH\u1ea4T (v") & CURRENT_VERSION & ")!" & vbCrLf & vbCrLf & _
                     Uni("M\u00e1y ch\u1ee7 ph\u00e2n ph\u1ed1i: ") & updateSource, _
-                    vbInformation, Uni("KangatangGuard v3.8.0 - H\u1ec7 th\u1ed1ng \u0111\u00e3 c\u1eadp nh\u1eadt")
+                    vbInformation, Uni("KangatangGuard v" & CURRENT_VERSION & " - H\u1ec7 th\u1ed1ng \u0111\u00e3 c\u1eadp nh\u1eadt")
         End If
     End If
     
@@ -1198,8 +1226,11 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
     Exit Sub
     
 UpdateErr:
-    If Not bSilent Then
-        MsgBoxW Uni("L\u1ed7i khi ki\u1ec3m tra c\u1eadp nh\u1eadt: ") & Err.Description, vbCritical, Uni("KangatangGuard v3.8.0 - L\u1ed7i")
+    If bSilent Then
+        On Error Resume Next
+        wsh.RegWrite "HKCU\Software\KangatangGuard\LastUpdateCheck", Format(Now, "yyyy-MM-dd HH:mm:ss"), "REG_SZ"
+    Else
+        MsgBoxW Uni("L\u1ed7i khi ki\u1ec3m tra c\u1eadp nh\u1eadt: ") & Err.Description, vbCritical, Uni("KangatangGuard v" & CURRENT_VERSION & " - L\u1ed7i")
     End If
     On Error GoTo 0
 End Sub

@@ -32,7 +32,7 @@ if ($ScriptDir.StartsWith("\\")) {
 Write-Host "`n[1/5] May chu phan phoi (Hub): $uncSource" -ForegroundColor Yellow
 
 # Doc thong tin phien ban tu version.json neu co
-$versionInfo = "3.8.0"
+$versionInfo = "3.8.6"
 $versionJsonPath = Join-Path $uncSource "version.json"
 if (Test-Path $versionJsonPath) {
     try {

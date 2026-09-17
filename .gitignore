@@ -12,6 +12,7 @@ Thumbs.db
 Desktop.ini
 ~$*
 .DS_Store
+*qhlogs*
 
 # Python
 __pycache__/

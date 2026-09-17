@@ -1,9 +1,9 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-09-13 16:25:52",
+    "release_timestamp":  "2026-09-17 11:41:19",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
-    "version":  "3.8.5",
-    "release_date":  "2026-09-13",
+    "version":  "3.8.6",
+    "release_date":  "2026-09-17",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
                   "standalone":  "Kangatang_Standalone_Scanner.ps1",
@@ -11,6 +11,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.8.5 - Centralized Virus Quarantine: Chuyen toan bo ban sao luu file nhiem ve Hub tap trung (2. Virus backupfile), triet tieu thu muc _Backup_Kangatang tai cho, bo sung danh tinh ComputerName va offline fallback",
+    "changelog":  "v3.8.6 - Core-Only Zero-Delay Startup \u0026 Horizontal Icon Toolbar: Khoi dong Excel tuc thi (\u003c0.05s), loai bo WMI/SMB gay lag, rate-limit kiem tra cap nhat 24h, thiet ke lai thanh cong cu ngang voi 6 icon truc quan tren tab Add-ins",
     "hub_ip":  "192.168.223.7"
 }
