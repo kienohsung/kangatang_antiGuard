@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Deploy_To_Hub.ps1
 # Lenh Phat hanh va Dong bo Phien ban moi len May chu LAN & Tao Clone Cuc bo
 # Phien ban: v3.8.1 (Ho tro Bo cong cu Standalone & Dual-Mirror Release)
@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.8.8"
+$ReleaseVersion = "3.9.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,7 +51,7 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    changelog         = "v${ReleaseVersion} - Deduplicate UI & Dedicated Ribbon Tab: Loai bo hoan toan cac muc trung lap tren tab Add-ins (Custom Toolbars & nhom Add-ins), chuan hoa duy nhat 1 Tab chuyen biet 'Kangatang Guard' tren thanh Ribbon chinh voi bo 6 icon Office vector HD 32x32 pixels sac net 100%"
+    changelog         = "v${ReleaseVersion} - Auto-Repair Scanner & Dynamic Version: Tu dong tai lai Kangatang_FolderScanner.ps1 tu Hub LAN khi file bi mat/xoa tren may client. Thay the toan bo tieu de MsgBox hardcoded v3.6.0 bang CURRENT_VERSION dong de hien thi dung phien ban dang chay."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4

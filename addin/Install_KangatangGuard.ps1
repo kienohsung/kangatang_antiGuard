@@ -1,7 +1,7 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao XLSTART
-# Phien ban: v3.8.8 (Deduplicate UI & Dedicated Ribbon Tab)
+# Phien ban: v3.9.0 (Auto-Repair Scanner & Dynamic Version Display)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.8.8"
+$InstallerVersion = "3.9.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan

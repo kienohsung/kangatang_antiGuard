@@ -1,6 +1,6 @@
 '==============================================================================
 ' KangatangGuard - Excel Add-in Diet Virus Macro Kangatang
-' Phien ban: v3.8.8 (Deduplicate UI & Dedicated Ribbon Tab)
+' Phien ban: v3.9.0 (Auto-Repair Scanner & Dynamic Version Display)
 ' Mo ta: Tu dong quet va tieu diet virus macro Kangatang/Laroux/mypersonnel
 '         ngay khi mo file Excel. Ho tro Trung tam Phan phoi May chu Tep LAN:
 '         \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang
@@ -83,7 +83,7 @@ Public bIsFolderScanning As Boolean
 ' Scan Cache chong lag: key=UCase(FullName), value=Date
 Private dicScanCache As Object
 
-Public Const CURRENT_VERSION As String = "3.8.8"
+Public Const CURRENT_VERSION As String = "3.9.0"
 Private Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Private Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Private Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
@@ -425,7 +425,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook)
                         Uni("Chi ti\u1ebft:") & vbCrLf & detailMsg & vbCrLf & _
                         Uni("L\u01b0u \u00fd: T\u1ec7p \u0111ang \u1edf ch\u1ebf \u0111\u1ed9 Ch\u1ec8 \u0111\u1ecdc (Read-Only) n\u00ean kh\u00f4ng th\u1ec3 t\u1ef1 \u0111\u1ed9ng ghi \u0111\u00e8." & vbCrLf & _
                         "Vui l\u00f2ng m\u1edf kh\u00f3a t\u1ec7p ho\u1eb7c ch\u1ecdn 'Save As' sang b\u1ea3n sao m\u1edbi."), _
-                    vbCritical, Uni("KangatangGuard v3.6.0 - C\u1ea3nh b\u00e1o")
+                    vbCritical, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - C\u1ea3nh b\u00e1o")
             Exit Sub
         End If
         
@@ -459,7 +459,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook)
                 MsgBoxW Uni("C\u1ea2NH B\u00c1O: Ph\u00e1t hi\u1ec7n virus nh\u01b0ng KH\u00d4NG TH\u1ec2 l\u00e0m s\u1ea1ch t\u1ef1 \u0111\u1ed9ng!" & vbCrLf & _
                             "T\u1ec7p: ") & wb.Name & vbCrLf & _
                             Uni("Vui l\u00f2ng ch\u1ea1y Diet_Virus_Kangatang.bat \u0111\u1ec3 x\u1eed l\u00fd th\u1ee7 c\u00f4ng."), _
-                        vbCritical, Uni("KangatangGuard v3.6.0 - L\u1ed7i")
+                        vbCritical, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - L\u1ed7i")
             End If
         Else
             WriteLog "[ERROR] Khong the tao backup cho: " & wb.FullName
@@ -467,7 +467,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook)
                         "T\u1ec7p: ") & wb.Name & vbCrLf & _
                         Uni("\u0110\u1ec3 b\u1ea3o to\u00e0n d\u1eef li\u1ec7u, h\u1ec7 th\u1ed1ng kh\u00f4ng t\u1ef1 \u0111\u1ed9ng s\u1eeda t\u1ec7p khi ch\u01b0a sao l\u01b0u \u0111\u01b0\u1ee3c." & vbCrLf & _
                         "Vui l\u00f2ng sao l\u01b0u th\u1ee7 c\u00f4ng v\u00e0 ch\u1ea1y Diet_Virus_Kangatang.bat."), _
-                    vbCritical, Uni("KangatangGuard v3.6.0 - C\u1ea3nh b\u00e1o an to\u00e0n")
+                    vbCritical, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - C\u1ea3nh b\u00e1o an to\u00e0n")
         End If
     Else
         WriteLog "[SAFE] " & wb.FullName
@@ -551,13 +551,52 @@ Public Sub LaunchBackgroundScanner(ByVal folderPath As String, Optional ByVal bR
         End If
     End If
     
+    ' AUTO-REPAIR v3.9.0: Neu khong tim thay file scanner, tu dong tai tu Hub LAN truoc khi bao loi
+    If Len(scannerScript) = 0 Then
+        WriteLog "[AUTO_REPAIR] Scanner script not found locally, attempting download from LAN Hub..."
+        Dim hubSources As Variant
+        hubSources = Array(DEFAULT_HUB_PRIMARY, DEFAULT_HUB_BACKUP)
+        Dim repairTarget As String
+        repairTarget = Environ("APPDATA") & "\" & LOG_SUBFOLDER & "\Kangatang_FolderScanner.ps1"
+        
+        ' Dam bao thu muc ton tai
+        Dim repairDir As String
+        repairDir = Environ("APPDATA") & "\" & LOG_SUBFOLDER
+        If Not fso.FolderExists(repairDir) Then
+            fso.CreateFolder repairDir
+        End If
+        
+        Dim h As Long
+        For h = LBound(hubSources) To UBound(hubSources)
+            Dim hubScanner As String
+            hubScanner = hubSources(h) & "\Kangatang_FolderScanner.ps1"
+            On Error Resume Next
+            If fso.FileExists(hubScanner) Then
+                fso.CopyFile hubScanner, repairTarget, True
+                If Err.Number = 0 And fso.FileExists(repairTarget) Then
+                    scannerScript = repairTarget
+                    ' Cap nhat Registry de lan sau khoi can repair
+                    wsh.RegWrite "HKCU\Software\KangatangGuard\ScannerScript", repairTarget, "REG_SZ"
+                    WriteLog "[AUTO_REPAIR] SUCCESS - Downloaded scanner from: " & hubSources(h)
+                    On Error GoTo LaunchErr
+                    GoTo RepairDone
+                End If
+            End If
+            Err.Clear
+            On Error GoTo LaunchErr
+        Next h
+    End If
+    
+RepairDone:
     ' Kiem tra cuoi cung: Neu van khong tim thay file script thi thong bao ro rang
     If Len(scannerScript) = 0 Or Not fso.FileExists(scannerScript) Then
+        WriteLog "[ERROR] Scanner script not found after all fallbacks and auto-repair attempts"
         Set fso = Nothing
         Set wsh = Nothing
         MsgBoxW Uni("Kh\u00f4ng t\u00ecm th\u1ea5y t\u1ec7p tr\u00ecnh qu\u00e9t ng\u1ea7m: Kangatang_FolderScanner.ps1!" & vbCrLf & vbCrLf & _
-                    "Vui l\u00f2ng ch\u1ea1y l\u1ea1i t\u1ec7p C\u00e0i \u0111\u1eb7t Add-in ho\u1eb7c li\u00ean h\u1ec7 IT \u0111\u1ec3 \u0111\u01b0\u1ee3c h\u1ed7 tr\u1ee3."), _
-                vbCritical, Uni("KangatangGuard v3.6.0 - Thi\u1ebfu t\u1ec7p h\u1ec7 th\u1ed1ng")
+                    "H\u1ec7 th\u1ed1ng \u0111\u00e3 th\u1eed t\u1ea3i l\u1ea1i t\u1eeb M\u00e1y ch\u1ee7 LAN nh\u01b0ng kh\u00f4ng th\u00e0nh c\u00f4ng." & vbCrLf & _
+                    "Vui l\u00f2ng ki\u1ec3m tra k\u1ebft n\u1ed1i m\u1ea1ng v\u00e0 ch\u1ea1y l\u1ea1i t\u1ec7p C\u00e0i \u0111\u1eb7t Add-in ho\u1eb7c li\u00ean h\u1ec7 IT."), _
+                vbCritical, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Thi\u1ebfu t\u1ec7p h\u1ec7 th\u1ed1ng")
         Exit Sub
     End If
     Set fso = Nothing
@@ -802,7 +841,7 @@ End Function
 ' ===========================================================================
 Public Sub ScanActiveWorkbook()
     If ActiveWorkbook Is Nothing Then
-        MsgBoxW Uni("Kh\u00f4ng c\u00f3 t\u1ec7p Excel n\u00e0o \u0111ang m\u1edf."), vbInformation, Uni("KangatangGuard v3.6.0")
+        MsgBoxW Uni("Kh\u00f4ng c\u00f3 t\u1ec7p Excel n\u00e0o \u0111ang m\u1edf."), vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION
         Exit Sub
     End If
     
@@ -813,7 +852,7 @@ Public Sub ScanActiveWorkbook()
     
     MsgBoxW Uni("\u0110\u00e3 ho\u00e0n th\u00e0nh qu\u00e9t t\u1ec7p: ") & wbName & vbCrLf & _
             Uni("Chi ti\u1ebft \u0111\u01b0\u1ee3c ghi t\u1ea1i th\u01b0 m\u1ee5c nh\u1eadt k\u00fd (Log)."), _
-            vbInformation, Uni("KangatangGuard v3.6.0")
+            vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION
 End Sub
 
 ' ===========================================================================
@@ -838,7 +877,7 @@ Public Sub ScanFolderDialog()
                 folderPath & vbCrLf & vbCrLf & _
                 Uni("Ti\u1ebfn tr\u00ecnh \u0111ang ch\u1ea1y tr\u00ean c\u1eeda s\u1ed5 ri\u00eang bi\u1ec7t v\u1edbi thanh ti\u1ebfn \u0111\u1ed9 % th\u1eddi gian th\u1ef1c." & vbCrLf & _
                     "B\u1ea1n c\u00f3 th\u1ec3 TI\u1ebeP T\u1ee4C L\u00c0M VI\u1ec6C tr\u00ean Excel b\u00ecnh th\u01b0\u1eddng m\u00e0 kh\u00f4ng lo b\u1ecb treo m\u00e1y!"), _
-                vbInformation, Uni("KangatangGuard v3.6.0 - Ti\u1ebfn tr\u00ecnh ng\u1ea7m")
+                vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Ti\u1ebfn tr\u00ecnh ng\u1ea7m")
     End If
 End Sub
 
@@ -857,7 +896,7 @@ Public Sub ResumeScanDialog()
     If Not fso.FileExists(lastSessionPath) Then
         Set fso = Nothing
         MsgBoxW Uni("Kh\u00f4ng t\u00ecm th\u1ea5y phi\u00ean qu\u00e9t n\u00e0o tr\u01b0\u1edbc \u0111\u00f3 \u0111\u1ec3 ti\u1ebfp t\u1ee5c."), _
-                vbInformation, Uni("KangatangGuard v3.6.0 - Ti\u1ebfp t\u1ee5c phi\u00ean")
+                vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Ti\u1ebfp t\u1ee5c phi\u00ean")
         Exit Sub
     End If
     
@@ -881,7 +920,7 @@ Public Sub ResumeScanDialog()
                     "Th\u01b0 m\u1ee5c: ") & targetVal & vbCrLf & _
                 Uni("\u0110\u00e3 qu\u00e9t: ") & scannedVal & Uni(" t\u1ec7p | \u0110\u00e3 di\u1ec7t: ") & cleanedVal & Uni(" t\u1ec7p" & vbCrLf & vbCrLf & _
                     "B\u1ea1n c\u00f3 th\u1ec3 ch\u1ecdn 'Qu\u00e9t th\u01b0 m\u1ee5c m\u1edbi...' n\u1ebfu mu\u1ed1n qu\u00e9t l\u1ea1i ho\u1eb7c ch\u1ecdn th\u01b0 m\u1ee5c kh\u00e1c."), _
-                vbInformation, Uni("KangatangGuard v3.6.0 - Phi\u00ean \u0111\u00e3 ho\u00e0n t\u1ea5t")
+                vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Phi\u00ean \u0111\u00e3 ho\u00e0n t\u1ea5t")
         Exit Sub
     End If
     
@@ -894,18 +933,18 @@ Public Sub ResumeScanDialog()
                     "(C\u00e1c t\u1ec7p \u0111\u00e3 ki\u1ec3m tra s\u1ebd \u0111\u01b0\u1ee3c b\u1ecf qua si\u00eau t\u1ed1c)")
     
     Dim res As VbMsgBoxResult
-    res = MsgBoxW(promptMsg, vbYesNo + vbQuestion, Uni("KangatangGuard v3.6.0 - Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t"))
+    res = MsgBoxW(promptMsg, vbYesNo + vbQuestion, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t"))
     
     If res = vbYes Then
         Call LaunchBackgroundScanner(targetVal, bResume:=True)
         MsgBoxW Uni("\u0110\u00e3 k\u00edch ho\u1ea1t ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t ng\u1ea7m tr\u00ean c\u1eeda s\u1ed5 ri\u00eang bi\u1ec7t." & vbCrLf & _
                     "B\u1ea1n c\u00f3 th\u1ec3 ti\u1ebfp t\u1ee5c l\u00e0m vi\u1ec7c tr\u00ean Excel b\u00ecnh th\u01b0\u1eddng!"), _
-                vbInformation, Uni("KangatangGuard v3.6.0 - Ti\u1ebfp t\u1ee5c phi\u00ean")
+                vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Ti\u1ebfp t\u1ee5c phi\u00ean")
     End If
     Exit Sub
     
 ResumeErr:
-    MsgBoxW Uni("L\u1ed7i khi \u0111\u1ecdc th\u00f4ng tin phi\u00ean qu\u00e9t: ") & Err.Description, vbCritical, Uni("KangatangGuard v3.6.0 - L\u1ed7i")
+    MsgBoxW Uni("L\u1ed7i khi \u0111\u1ecdc th\u00f4ng tin phi\u00ean qu\u00e9t: ") & Err.Description, vbCritical, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - L\u1ed7i")
     On Error GoTo 0
 End Sub
 
@@ -1313,6 +1352,7 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     ts.WriteLine "attrib -r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "attrib -r """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""InstalledVersion"" /t REG_SZ /d """ & serverVer & """ /f > nul"
+    ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""ScannerScript"" /t REG_SZ /d """ & guardDir & "\Kangatang_FolderScanner.ps1"" /f > nul"
     ts.Close
     Set ts = Nothing
     

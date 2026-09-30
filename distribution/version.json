@@ -1,9 +1,9 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-09-17 13:10:18",
+    "release_timestamp":  "2026-09-30 11:18:37",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
-    "version":  "3.8.8",
-    "release_date":  "2026-09-17",
+    "version":  "3.9.0",
+    "release_date":  "2026-09-30",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
                   "standalone":  "Kangatang_Standalone_Scanner.ps1",
@@ -11,6 +11,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.8.8 - Deduplicate UI \u0026 Dedicated Ribbon Tab: Loai bo hoan toan cac muc trung lap tren tab Add-ins (Custom Toolbars \u0026 nhom Add-ins), chuan hoa duy nhat 1 Tab chuyen biet \u0027Kangatang Guard\u0027 tren thanh Ribbon chinh voi bo 6 icon Office vector HD 32x32 pixels sac net 100%",
+    "changelog":  "v3.9.0 - Auto-Repair Scanner \u0026 Dynamic Version: Tu dong tai lai Kangatang_FolderScanner.ps1 tu Hub LAN khi file bi mat/xoa tren may client. Thay the toan bo tieu de MsgBox hardcoded v3.6.0 bang CURRENT_VERSION dong de hien thi dung phien ban dang chay.",
     "hub_ip":  "192.168.223.7"
 }
