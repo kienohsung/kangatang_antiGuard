@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao XLSTART
-# Phien ban: v3.10.0 (Runtime Shield)
+# Phien ban: v3.11.0 (Threat Collector & CopyPaste Fix)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.10.0"
+$InstallerVersion = "3.11.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
@@ -89,9 +89,10 @@ $thisWorkbookCode = Get-VbaSection -Content $vbaContent -SectionName "ThisWorkbo
 $clsAppEventsCode = Get-VbaSection -Content $vbaContent -SectionName "clsAppEvents"
 $modScannerCode   = Get-VbaSection -Content $vbaContent -SectionName "modKangatangScanner"
 $modShieldCode    = Get-VbaSection -Content $vbaContent -SectionName "modKangatangShield"
+$modThreatCode    = Get-VbaSection -Content $vbaContent -SectionName "modThreatCollector"
 $modLoggerCode    = Get-VbaSection -Content $vbaContent -SectionName "modLogger"
 
-# v3.10.0: Chan build neu thieu bat ky section nao (tranh phat hanh add-in thieu ma)
+# v3.11.0: Chan build neu thieu cac core section bat buoc
 foreach ($sec in @(@("ThisWorkbook",$thisWorkbookCode), @("clsAppEvents",$clsAppEventsCode), @("modKangatangScanner",$modScannerCode), @("modKangatangShield",$modShieldCode), @("modLogger",$modLoggerCode))) {
     if ([string]::IsNullOrWhiteSpace($sec[1])) {
         Write-Host "   [LOI] Section VBA rong hoac thieu: $($sec[0])" -ForegroundColor Red
@@ -200,6 +201,7 @@ try {
           <button id="btnResume" label="Tiếp tục quét" size="large" imageMso="PlayMacro" onAction="Ribbon_ResumeScanDialog" screentip="Tiếp tục phiên quét" supertip="Tiếp tục phiên quét dở dang trước đó với tốc độ cao." />
         </group>
         <group id="grpTools" label="Hệ thống &amp; Tiện ích">
+          <button id="btnFixCopyPaste" label="Khôi phục Copy/Paste" size="large" imageMso="Undo" onAction="Ribbon_RestoreClipboardAndUI" screentip="Khôi phục Copy/Paste &amp; Chuột phải" supertip="Khôi phục lại chức năng Copy/Paste, phím tắt Ctrl+C, Ctrl+V và menu chuột phải nếu bị virus làm hỏng hoặc khóa." />
           <button id="btnLog" label="Nhật ký (Log)" size="large" imageMso="ImportTextFile" onAction="Ribbon_OpenLogFolder" screentip="Nhật ký kiểm toán" supertip="Mở thư mục chứa nhật ký quét và diệt virus." />
           <button id="btnUpdate" label="Cập nhật LAN" size="large" imageMso="Synchronize" onAction="Ribbon_CheckForLanUpdates" screentip="Cập nhật mạng LAN" supertip="Kiểm tra và cập nhật phiên bản mới từ máy chủ LAN." />
           <button id="btnAbout" label="Thông tin" size="large" imageMso="Info" onAction="Ribbon_ShowAbout" screentip="Thông tin" supertip="Thông tin phiên bản và xuất xứ KangatangGuard." />
@@ -247,6 +249,14 @@ try {
     $modShield = $wb.VBProject.VBComponents.Add(1)
     $modShield.Name = "modKangatangShield"
     Inject-CleanVbaModule $modShield $modShieldCode
+    
+    # --- Tao Standard Module: modThreatCollector (v3.11.0 Threat Telemetry) ---
+    if (-not [string]::IsNullOrWhiteSpace($modThreatCode)) {
+        Write-Host "   -> Tao Module: modThreatCollector..." -ForegroundColor Gray
+        $modThreat = $wb.VBProject.VBComponents.Add(1)
+        $modThreat.Name = "modThreatCollector"
+        Inject-CleanVbaModule $modThreat $modThreatCode
+    }
     
     # --- Tao Standard Module: modLogger ---
     Write-Host "   -> Tao Module: modLogger..." -ForegroundColor Gray

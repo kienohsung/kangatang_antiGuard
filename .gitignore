@@ -21,3 +21,8 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+
+# Threat telemetry & malware samples (Do not push to GitHub)
+Threat_Samples/
+*.sample.json
+*.sample.txt

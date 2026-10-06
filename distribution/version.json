@@ -1,10 +1,10 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-10-06 17:39:54",
+    "release_timestamp":  "2026-10-07 00:28:50",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
     "mandatory":  true,
-    "version":  "3.10.0",
-    "release_date":  "2026-10-06",
+    "version":  "3.11.0",
+    "release_date":  "2026-10-07",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
                   "standalone":  "Kangatang_Standalone_Scanner.ps1",
@@ -12,6 +12,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.10.0 - Runtime Shield (BAN VA BAO MAT): Chan virus lay qua OnSheetActivate sau khi mo file, kiem tra lai moi lan Luu (bo lo hong cache 5 phut), cach ly mypersonnel1.xls khoi XLSTART + vaccine chong tai tao, quet ca PERSONAL.XLSB/add-in, lam sach phau thuat (giu macro hop le), khong treo khi mat LAN, cap nhat chi ap dung khi Excel da dong.",
+    "changelog":  "v3.11.0 - Threat Telemetry, Password Bypass \u0026 Copy/Paste Recovery: Thu thap code ma doc luu tru ve may ca nhan 223.176/Threat_Samples (khu trung lap MD5/SHA256, chan luu len 223.7); xu ly file/sheet co mat khau bao ve khong treo; tu dong khoi phuc Copy/Paste, keo tha o, chuot phai Context menu va go bo sach Application hooks mo coi.",
     "hub_ip":  "192.168.223.7"
 }

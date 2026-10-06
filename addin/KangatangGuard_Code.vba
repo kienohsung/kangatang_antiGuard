@@ -204,6 +204,9 @@ End Sub
 ' ===========================================================================
 Public Sub InitializeGuard()
     On Error Resume Next
+    ' 0. Khoi phuc clipboard, phim tat va menu chuot phai neu bi virus chan (v3.11.0)
+    Call RestoreExcelClipboardAndUI
+    
     ' 1. Khoi tao Scan Cache trong bo nho RAM (< 1ms)
     Set dicScanCache = CreateObject("Scripting.Dictionary")
     Set dicLaunchedFolders = CreateObject("Scripting.Dictionary")
@@ -296,6 +299,14 @@ End Sub
 
 Public Sub Ribbon_ShowAbout(ByVal control As Object)
     Call ShowAbout
+End Sub
+
+Public Sub Ribbon_RestoreClipboardAndUI(control As IRibbonControl)
+    Call RestoreExcelClipboardAndUI
+    If Application.Visible Then
+        MsgBoxW Uni("\u0110\u00e3 kh\u00f4i ph\u1ee5c th\u00e0nh c\u00f4ng ch\u1ee9c n\u0103ng Copy/Paste, ph\u00edm t\u1eaft v\u00e0 menu chu\u1ed9t ph\u1ea3i Excel!"), _
+            vbInformation, Uni("KangatangGuard - Kh\u00f4i ph\u1ee5c Copy/Paste")
+    End If
 End Sub
 
 ' ===========================================================================
@@ -794,10 +805,102 @@ BackupError:
 End Function
 
 ' ===========================================================================
-' HAM LAM SACH (v3.10.0 - Surgical Clean)
-' - Component mang ten virus (Type 1/2/3)  -> xoa ca component
-' - Component khac co IOC trong code      -> CHI xoa procedure doc hai (giu macro hop le cua nguoi dung)
-' - Sheet / Name khop chu ky               -> xoa; moi thao tac co lap loi rieng (1 loi khong huy ca qua trinh)
+' KHOI PHUC CLIPBOARD, PHIM TAT VA GIAO DIEN EXCEL (v3.11.0)
+' Khac phuc triet de loi khong the Copy/Paste hoac mat chuot phai do tan du virus
+' ===========================================================================
+Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Nothing)
+    On Error Resume Next
+    
+    ' 1. Go bo cac phim tat bi virus chiem dung (khong truyen tham so thu 2 de tro ve mac dinh cua Excel)
+    Application.OnKey "^c"
+    Application.OnKey "^v"
+    Application.OnKey "^x"
+    Application.OnKey "^d"
+    Application.OnKey "^r"
+    Application.OnKey "%{F11}"
+    Application.OnKey "%{F8}"
+    
+    ' 2. Khoi phuc tinh nang keo tha o tinh va che do sao chep
+    Application.CellDragAndDrop = True
+    Application.CutCopyMode = False
+    
+    ' 3. Bat lai menu chuot phai cho O tinh (Cell), Dong (Row), Cot (Column)
+    Dim cb As Object
+    Set cb = Application.CommandBars("Cell")
+    If Not cb Is Nothing Then cb.Enabled = True
+    
+    Set cb = Application.CommandBars("Row")
+    If Not cb Is Nothing Then cb.Enabled = True
+    
+    Set cb = Application.CommandBars("Column")
+    If Not cb Is Nothing Then cb.Enabled = True
+    
+    ' 4. Xoa triet de cac hook su kien mo coi cua Excel Application
+    Application.OnSheetActivate = ""
+    Application.OnSheetDeactivate = ""
+    Application.OnWindow = ""
+    Application.OnCalculate = ""
+    Application.OnDoubleClick = ""
+    Application.OnEntry = ""
+    
+    ' 5. Khoi phuc quyen chon o tinh tren cac sheet bi khoa chon (xlNoSelection = 0 -> xlNoRestrictions = -4142)
+    Dim wbToFix As Workbook, sItem As Object
+    Set wbToFix = targetWb
+    If wbToFix Is Nothing Then Set wbToFix = ActiveWorkbook
+    If Not wbToFix Is Nothing Then
+        For Each sItem In wbToFix.Sheets
+            On Error Resume Next
+            If sItem.EnableSelection = 0 Then
+                Call TryUnprotectSheet(sItem)
+                sItem.EnableSelection = -4142
+            End If
+        Next sItem
+    End If
+    
+    WriteLog "[UI_RESTORE] Excel clipboard, shortcuts, context menus, and event hooks restored."
+    On Error GoTo 0
+End Sub
+
+' ===========================================================================
+' HAM MO KHOA WORKBOOK VA SHEET CO MAT KHAU TRONG (v3.11.0)
+' Giup lam sach virus trong cac file/sheet bi bao ve cau truc
+' ===========================================================================
+Public Function TryUnprotectWorkbook(ByVal wb As Workbook) As Boolean
+    On Error Resume Next
+    If wb Is Nothing Then Exit Function
+    If Not wb.ProtectStructure And Not wb.ProtectWindows Then
+        TryUnprotectWorkbook = True
+        Exit Function
+    End If
+    
+    ' Thu go bao ve cau truc voi mat khau rong
+    wb.Unprotect ""
+    Err.Clear
+    
+    TryUnprotectWorkbook = (Not wb.ProtectStructure And Not wb.ProtectWindows)
+End Function
+
+Public Function TryUnprotectSheet(ByVal sh As Object) As Boolean
+    On Error Resume Next
+    If sh Is Nothing Then Exit Function
+    If Not sh.ProtectContents Then
+        TryUnprotectSheet = True
+        Exit Function
+    End If
+    
+    ' Thu go bao ve sheet voi mat khau rong
+    sh.Unprotect ""
+    Err.Clear
+    
+    TryUnprotectSheet = (Not sh.ProtectContents)
+End Function
+
+' ===========================================================================
+' HAM LAM SACH (v3.11.0 - Surgical Clean & Protection Handling)
+' - Component mang ten virus (Type 1/2/3)  -> xoa ca component (luu mau ma doc truoc khi xoa)
+' - Component khac co IOC trong code      -> CHI xoa procedure doc hai (luu mau ma doc)
+' - Sheet / Name khop chu ky               -> xoa; moi thao tac co lap loi rieng
+' - Ho tro go bao ve cau truc workbook va sheet (blank password)
 ' - Xac minh lai sau khi lam sach. bSave = False khi dang trong BeforeSave hoac file Read-Only.
 ' ===========================================================================
 Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave As Boolean = True, Optional ByVal bForceSave As Boolean = False) As Boolean
@@ -812,20 +915,32 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
     ' Go hook su kien cua virus trong RAM truoc khi xoa code (tranh loi "Cannot run macro" va tai nhiem)
     Call NeutralizeVirusHooks
     
+    ' Kiem tra va go bao ve cau truc workbook neu co (v3.11.0)
+    If wb.ProtectStructure Then
+        If Not TryUnprotectWorkbook(wb) Then
+            WriteLog "[CLEAN_WARN] Workbook structure protected by password."
+        End If
+    End If
+    
     ' --- 1. Sheets TRUOC (v3.10.0): VeryHidden / ban sao "Kangatang (2)" ---
     ' Module-sheet Excel 5 KHONG xoa tai day: xoa tu VBA se huy call stack + reset project add-in
     ' -> giao cho Two-phase purge (OnTime) o cuoi ham.
     Dim shtName As String
     For i = wb.Sheets.Count To 1 Step -1
         shtName = wb.Sheets(i).Name
+        Call TryUnprotectSheet(wb.Sheets(i))
         If IsVirusName(shtName) Then
             If TypeName(wb.Sheets(i)) = "Module" Then
                 nModuleSheetsDeferred = nModuleSheetsDeferred + 1
-            ElseIf DeleteSheetSafe(wb, i) Then
-                changed = True
-                WriteLog "[CLEAN] Removed sheet: " & shtName
             Else
-                failures = failures + 1
+                ' Thu thap mau ma doc cua sheet truoc khi xoa
+                Call CollectThreatSample(wb, shtName, "[Sheet: " & shtName & ", Type: " & TypeName(wb.Sheets(i)) & "]", "InfectedSheet")
+                If DeleteSheetSafe(wb, i) Then
+                    changed = True
+                    WriteLog "[CLEAN] Removed sheet: " & shtName
+                Else
+                    failures = failures + 1
+                End If
             End If
         End If
     Next i
@@ -844,7 +959,10 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
         vbOK = (Err.Number = 0 And Not vbProj Is Nothing)
         Err.Clear
         If vbOK Then
-            If vbProj.Protection = 1 Then vbOK = False
+            If vbProj.Protection = 1 Then
+                vbOK = False
+                WriteLog "[CLEAN_WARN] VBProject is password-protected (VBA components locked)."
+            End If
             Err.Clear
         End If
         On Error GoTo CleanError
@@ -856,6 +974,18 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
             compName = comp.Name
             compType = comp.Type
             If IsVirusName(compName) And (compType = 1 Or compType = 2 Or compType = 3) Then
+                ' Thu thap mau ma doc truoc khi xoa component
+                Dim rawCompCode As String
+                rawCompCode = ""
+                On Error Resume Next
+                If Not comp.CodeModule Is Nothing Then
+                    If comp.CodeModule.CountOfLines > 0 Then
+                        rawCompCode = comp.CodeModule.Lines(1, comp.CodeModule.CountOfLines)
+                    End If
+                End If
+                Err.Clear
+                Call CollectThreatSample(wb, compName, rawCompCode, "VirusModule")
+                
                 On Error Resume Next
                 vbProj.VBComponents.Remove comp
                 If Err.Number <> 0 Then
@@ -868,6 +998,19 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
                 Err.Clear
                 On Error GoTo CleanError
             Else
+                ' Thu thap mau ma doc truoc khi xoa procedures co IOC
+                Dim rawProcCode As String
+                rawProcCode = ""
+                On Error Resume Next
+                If Not comp.CodeModule Is Nothing Then
+                    If comp.CodeModule.CountOfLines > 0 Then
+                        rawProcCode = comp.CodeModule.Lines(1, comp.CodeModule.CountOfLines)
+                        If CodeHasIOC(rawProcCode) Then
+                            Call CollectThreatSample(wb, compName, rawProcCode, "InfectedProcedure")
+                        End If
+                    End If
+                End If
+                Err.Clear
                 nRemoved = RemoveInfectedProcedures(comp)
                 If nRemoved > 0 Then
                     changed = True
@@ -916,6 +1059,7 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
         ' ban luu hien tai van con module-sheet -> Phase 2 ghi de ban sach ngay sau do).
         Call DeferModuleSheetPurge(wb, (Not wb.ReadOnly) And (Len(wb.Path) > 0))
         WriteLog "[CLEAN_DEFERRED] " & wb.FullName & " - " & nModuleSheetsDeferred & " legacy module sheet(s) handed to two-phase purge."
+        Call RestoreExcelClipboardAndUI(wb)
         CleanInfectedWorkbook = False
         Exit Function
     End If
@@ -938,6 +1082,7 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
             WriteLog "[CLEAN_SAVE_ERROR] " & wb.FullName & ": " & Err.Description
             Err.Clear
             Application.DisplayAlerts = prevAlerts
+            Call RestoreExcelClipboardAndUI(wb)
             On Error GoTo CleanError
             Exit Function
         End If
@@ -945,12 +1090,16 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
         On Error GoTo CleanError
     End If
     
+    ' Khoi phuc clipboard va giao dien sau khi lam sach
+    Call RestoreExcelClipboardAndUI(wb)
+    
     CleanInfectedWorkbook = Not stillInfected
     Exit Function
     
 CleanError:
     WriteLog "[CLEAN_ERROR] " & wb.FullName & ": " & Err.Description
     Application.DisplayAlerts = True
+    Call RestoreExcelClipboardAndUI(wb)
     CleanInfectedWorkbook = False
 End Function
 
@@ -1824,11 +1973,13 @@ Public Sub ShieldStartupSweep()
     Call ApplyStartupVaccine
     Call CleanDocumentRecoveryRegistry
     Call CleanAddInCollisions
+    Call RestoreExcelClipboardAndUI
     WriteLog "[SHIELD_STARTUP] Sweep finished: " & wbs.Count & " workbook(s), " & addinWbs.Count & " add-in(s)"
     Exit Sub
     
 SweepErr:
     bShieldContext = False
+    Call RestoreExcelClipboardAndUI
     WriteLog "[SHIELD_ERROR] ShieldStartupSweep: " & Err.Description
 End Sub
 
@@ -2264,9 +2415,15 @@ Public Function DeleteSheetSafe(ByVal wb As Workbook, ByVal idx As Long) As Bool
     isProtected = False
     isProtected = wb.ProtectStructure
     If isProtected Then
+        Call TryUnprotectWorkbook(wb)
+        isProtected = wb.ProtectStructure
+    End If
+    If isProtected Then
         WriteLog "[CLEAN_WARN] Workbook structure is protected, cannot delete sheet " & nm & " in " & wb.Name
         Exit Function
     End If
+    
+    Call TryUnprotectSheet(sh)
     
     For Each s In wb.Sheets
         If Not s Is sh Then
@@ -2376,6 +2533,9 @@ Public Sub ShieldPurgeModuleSheets()
     If wb Is Nothing Then Exit Sub
     Call NeutralizeVirusHooks
     If wb.ProtectStructure Then
+        Call TryUnprotectWorkbook(wb)
+    End If
+    If wb.ProtectStructure Then
         WriteLog "[PURGE_FAIL] Workbook structure is protected: " & wb.FullName
         Exit Sub
     End If
@@ -2394,6 +2554,28 @@ Public Sub ShieldPurgeModuleSheets()
                     WriteLog "[PURGE_FAIL] No other visible sheet, cannot delete '" & nm & "' in " & wb.FullName
                     Exit Sub
                 End If
+                
+                ' Thu thap mau ma doc truoc khi xoa module-sheet (v3.11.0)
+                Dim rawModCode As String
+                rawModCode = ""
+                On Error Resume Next
+                If Not wb.VBProject Is Nothing Then
+                    Dim mComp As Object
+                    Set mComp = wb.VBProject.VBComponents(nm)
+                    If Not mComp Is Nothing Then
+                        If Not mComp.CodeModule Is Nothing Then
+                            If mComp.CodeModule.CountOfLines > 0 Then
+                                rawModCode = mComp.CodeModule.Lines(1, mComp.CodeModule.CountOfLines)
+                            End If
+                        End If
+                    End If
+                End If
+                Err.Clear
+                If Len(rawModCode) = 0 Then
+                    rawModCode = "[Legacy Excel 5.0 Module Sheet: " & nm & "]"
+                End If
+                Call CollectThreatSample(wb, nm, rawModCode, "LegacyModuleSheet")
+                
                 WriteLog "[PURGE] Removing legacy module sheet '" & nm & "' from " & wb.FullName & " (VBA project reset expected)"
                 Application.DisplayAlerts = False
                 sh.Visible = -1
@@ -2518,3 +2700,239 @@ Public Sub WriteLog(ByVal msg As String)
 End Sub
 
 '### END_SECTION: modLogger ###
+
+
+'### SECTION: modThreatCollector ###
+'--- Standard Module: Thu thap va luu tru mau ma doc Excel macro ---
+
+Option Explicit
+
+' Duong dan thu muc mau ma doc
+Private Const LOCAL_SAMPLE_DIR As String = "D:\7. AI tools\kangatang\Threat_Samples"
+Private Const LOCAL_BASE_DIR As String = "D:\7. AI tools\kangatang"
+Private Const LAN_SAMPLE_DIR As String = "\\192.168.223.176\KangatangGuard_Hub\Threat_Samples"
+Private Const LAN_BASE_DIR As String = "\\192.168.223.176\KangatangGuard_Hub"
+Private Const FORBIDDEN_SERVER As String = "192.168.223.7"
+
+' ===========================================================================
+' XAC DINH THU MUC LUU MAU MA DOC
+' Uu tien:
+'   1. Cuc bo: D:\7. AI tools\kangatang\Threat_Samples\
+'   2. Mang LAN may ca nhan: \\192.168.223.176\KangatangGuard_Hub\Threat_Samples\
+'   3. Fallback: %APPDATA%\KangatangGuard\Threat_Samples\
+' TUYET DOI KHONG LUU TREN 223.7!
+' ===========================================================================
+Private Function GetThreatSampleFolder() As String
+    On Error Resume Next
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim targetDir As String
+    
+    ' 1. Kiem tra thu muc cuc bo D:\7. AI tools\kangatang\Threat_Samples
+    If fso.FolderExists(LOCAL_BASE_DIR) Then
+        If Not fso.FolderExists(LOCAL_SAMPLE_DIR) Then
+            fso.CreateFolder LOCAL_SAMPLE_DIR
+        End If
+        If fso.FolderExists(LOCAL_SAMPLE_DIR) Then
+            GetThreatSampleFolder = LOCAL_SAMPLE_DIR
+            Exit Function
+        End If
+    End If
+    
+    ' 2. Kiem tra mang LAN may ca nhan 192.168.223.176 (TUYET DOI KHONG LUU TREN 223.7!)
+    If fso.FolderExists(LAN_BASE_DIR) Then
+        If Not fso.FolderExists(LAN_SAMPLE_DIR) Then
+            fso.CreateFolder LAN_SAMPLE_DIR
+        End If
+        If fso.FolderExists(LAN_SAMPLE_DIR) Then
+            ' Chan tuyet doi may chu 223.7
+            If InStr(1, LAN_SAMPLE_DIR, FORBIDDEN_SERVER, vbTextCompare) = 0 Then
+                GetThreatSampleFolder = LAN_SAMPLE_DIR
+                Exit Function
+            End If
+        End If
+    End If
+    
+    ' 3. Fallback cuc bo: %APPDATA%\KangatangGuard\Threat_Samples
+    Dim appData As String
+    appData = Environ("APPDATA")
+    If Len(appData) > 0 Then
+        targetDir = appData & "\KangatangGuard"
+        If Not fso.FolderExists(targetDir) Then
+            fso.CreateFolder targetDir
+        End If
+        targetDir = targetDir & "\Threat_Samples"
+        If Not fso.FolderExists(targetDir) Then
+            fso.CreateFolder targetDir
+        End If
+        If fso.FolderExists(targetDir) Then
+            GetThreatSampleFolder = targetDir
+            Exit Function
+        End If
+    End If
+    
+    GetThreatSampleFolder = ""
+End Function
+
+' ===========================================================================
+' TINH HASH MD5 DUA TREN .NET COM HOAC FALLBACK CHUOI AN TOAN
+' ===========================================================================
+Public Function ComputeThreatHash(ByVal rawText As String) As String
+    On Error GoTo HashFallback
+    Dim enc As Object, md5 As Object
+    Set enc = CreateObject("System.Text.UTF8Encoding")
+    Set md5 = CreateObject("System.Security.Cryptography.MD5CryptoServiceProvider")
+    
+    Dim bytes As Variant, hashBytes As Variant
+    bytes = enc.GetBytes_4(rawText)
+    hashBytes = md5.ComputeHash_2((bytes))
+    
+    Dim hexStr As String, i As Long, b As Byte, h As String
+    hexStr = ""
+    For i = 1 To LenB(hashBytes)
+        b = AscB(MidB(hashBytes, i, 1))
+        h = Hex(b)
+        If Len(h) = 1 Then h = "0" & h
+        hexStr = hexStr & LCase$(h)
+    Next i
+    
+    If Len(hexStr) > 0 Then
+        ComputeThreatHash = hexStr
+        Exit Function
+    End If
+
+HashFallback:
+    ' Fallback hash neu COM .NET bi chan tren he thong
+    Dim hashVal As Long, codeLen As Long
+    codeLen = Len(rawText)
+    hashVal = 5381
+    For i = 1 To codeLen
+        hashVal = ((hashVal * 33) Xor AscW(Mid$(rawText, i, 1))) And &H7FFFFFFF
+    Next i
+    ComputeThreatHash = "fb_" & Hex(codeLen) & "_" & Hex(hashVal)
+End Function
+
+' ===========================================================================
+' ESCAPE CHUOI AN TOAN CHO DINH DANG JSON
+' ===========================================================================
+Private Function EscapeJsonString(ByVal s As String) As String
+    Dim res As String
+    res = Replace(s, "\", "\\")
+    res = Replace(res, """", "\""")
+    res = Replace(res, vbCrLf, "\r\n")
+    res = Replace(res, vbCr, "\r")
+    res = Replace(res, vbLf, "\n")
+    res = Replace(res, vbTab, "\t")
+    EscapeJsonString = res
+End Function
+
+' ===========================================================================
+' THU THAP VA LUU TRU MAU MA DOC (Threat Collector)
+' ===========================================================================
+Public Sub CollectThreatSample(ByVal wb As Workbook, ByVal compOrSheetName As String, ByVal rawCode As String, ByVal threatType As String)
+    On Error GoTo CollectErr
+    
+    ' Bo qua neu khong co du lieu de thu thap
+    If Len(Trim$(rawCode)) = 0 And Len(compOrSheetName) = 0 Then Exit Sub
+    
+    Dim targetFolder As String
+    targetFolder = GetThreatSampleFolder()
+    If Len(targetFolder) = 0 Then
+        WriteLog "[THREAT_COLLECT_ERR] Cannot determine threat sample directory."
+        Exit Sub
+    End If
+    
+    ' Chan bao mat nghiem ngat: TUYET DOI KHONG LUU TREN 223.7
+    If InStr(1, targetFolder, FORBIDDEN_SERVER, vbTextCompare) > 0 Then
+        WriteLog "[THREAT_COLLECT_ABORT] Target folder contains forbidden server 223.7: " & targetFolder
+        Exit Sub
+    End If
+    
+    ' Tinh ma hash cua raw code
+    Dim codeHash As String
+    codeHash = ComputeThreatHash(rawCode)
+    
+    ' Kiem tra trung lap: Neu file hash da ton tai trong thu muc, khong ghi de de tiet kiem I/O
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim sampleFileName As String
+    sampleFileName = targetFolder & "\" & codeHash & ".sample.json"
+    
+    If fso.FileExists(sampleFileName) Then
+        WriteLog "[THREAT_COLLECT] Sample already exists (hash: " & codeHash & ", comp: " & compOrSheetName & ")"
+        Exit Sub
+    End If
+    
+    ' Thong tin ngu canh
+    Dim wbPath As String
+    wbPath = "Unknown"
+    If Not wb Is Nothing Then
+        On Error Resume Next
+        wbPath = wb.FullName
+        Err.Clear
+        On Error GoTo CollectErr
+    End If
+    
+    Dim compName As String
+    compName = Environ("COMPUTERNAME")
+    If Len(compName) = 0 Then compName = "Unknown"
+    
+    Dim timeStr As String
+    timeStr = Format$(Now, "yyyy-mm-dd hh:nn:ss")
+    
+    ' Xay dung noi dung file mau defanged dang JSON
+    Dim jsonContent As String
+    jsonContent = "{" & vbCrLf & _
+        "  ""timestamp"": """ & timeStr & """," & vbCrLf & _
+        "  ""computer_name"": """ & EscapeJsonString(compName) & """," & vbCrLf & _
+        "  ""file_path"": """ & EscapeJsonString(wbPath) & """," & vbCrLf & _
+        "  ""component_name"": """ & EscapeJsonString(compOrSheetName) & """," & vbCrLf & _
+        "  ""threat_type"": """ & EscapeJsonString(threatType) & """," & vbCrLf & _
+        "  ""code_length"": " & Len(rawCode) & "," & vbCrLf & _
+        "  ""code_hash"": """ & codeHash & """," & vbCrLf & _
+        "  ""raw_code"": """ & EscapeJsonString(rawCode) & """" & vbCrLf & _
+        "}"
+        
+    ' Ghi file UTF-8 qua ADODB.Stream, fallback sang FSO
+    Dim writeOk As Boolean
+    writeOk = False
+    
+    On Error Resume Next
+    Dim stm As Object
+    Set stm = CreateObject("ADODB.Stream")
+    If Not stm Is Nothing Then
+        stm.Type = 2 ' adTypeText
+        stm.Charset = "utf-8"
+        stm.Open
+        stm.WriteText jsonContent
+        stm.SaveToFile sampleFileName, 2 ' adSaveCreateOverWrite
+        stm.Close
+        writeOk = (Err.Number = 0)
+        Err.Clear
+    End If
+    
+    If Not writeOk Then
+        ' Fallback FSO
+        Dim ts As Object
+        Set ts = fso.CreateTextFile(sampleFileName, True, True) ' Unicode
+        If Not ts Is Nothing Then
+            ts.Write jsonContent
+            ts.Close
+            writeOk = True
+        End If
+        Err.Clear
+    End If
+    On Error GoTo CollectErr
+    
+    If writeOk Then
+        WriteLog "[THREAT_COLLECT] Saved threat sample " & codeHash & " (" & threatType & " - " & compOrSheetName & ") to " & sampleFileName
+    Else
+        WriteLog "[THREAT_COLLECT_ERR] Failed to write sample file " & sampleFileName
+    End If
+    Exit Sub
+
+CollectErr:
+    WriteLog "[THREAT_COLLECT_ERR] Exception during collection: " & Err.Description
+End Sub
+
+'### END_SECTION: modThreatCollector ###

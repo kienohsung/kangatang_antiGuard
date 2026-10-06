@@ -369,6 +369,48 @@ function Start-FreshExcel {
 }
 
 # ==============================================================================
+# RESTORE EXCEL UI & APPLICATION ENVIRONMENT
+# ==============================================================================
+function Restore-ExcelEnvironment {
+    Write-Host "   [RESTORE_UI] Restoring Excel UI, Copy/Paste shortcuts, and Application hooks..." -ForegroundColor Cyan
+    Write-AuditLog "[UI_RESTORE] Starting Excel UI environment restoration"
+    
+    $tempApp = $null
+    $needQuit = $false
+    try {
+        if ($null -ne $Script:CurrentExcelApp) {
+            $tempApp = $Script:CurrentExcelApp
+        } else {
+            $tempApp = New-Object -ComObject Excel.Application
+            $needQuit = $true
+        }
+
+        if ($null -ne $tempApp) {
+            try { $tempApp.CellDragAndDrop = $true } catch {}
+            try { $tempApp.OnKey("^c") } catch {}
+            try { $tempApp.OnKey("^v") } catch {}
+            try { $tempApp.OnKey("^x") } catch {}
+            try { $tempApp.CommandBars.Item("Cell").Enabled = $true } catch {}
+            try { $tempApp.OnSheetActivate = "" } catch {}
+            try { $tempApp.OnWindow = "" } catch {}
+            
+            Write-Host "   -> [OK] Excel UI, Copy/Paste keys, and DragDrop restored successfully." -ForegroundColor Green
+            Write-AuditLog "[UI_RESTORE] Excel UI environment restored successfully"
+        }
+    } catch {
+        $msg = $_.Exception.Message
+        Write-Host "   [WARN] Could not restore Excel UI environment: $msg" -ForegroundColor DarkYellow
+        Write-AuditLog "[UI_RESTORE_WARN] Could not restore Excel UI: $msg"
+    } finally {
+        if ($needQuit -and $null -ne $tempApp) {
+            try { $tempApp.Quit() } catch {}
+            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($tempApp) | Out-Null } catch {}
+            $tempApp = $null
+        }
+    }
+}
+
+# ==============================================================================
 # HÀM DỌN DẸP Ổ DỊCH KHỞI ĐỘNG HỆ THỐNG
 # ==============================================================================
 function Clean-SystemReservoirs {
@@ -481,6 +523,9 @@ function Clean-SystemReservoirs {
         }
     }
 
+    # Khoi phuc Copy/Paste, phim tat va moi truong giao dien Excel
+    Restore-ExcelEnvironment
+
     Write-Host "`n   -> ✅ Hoàn tất dọn dẹp ổ dịch hệ thống! (Đã xử lý: $cleanedCount mục)" -ForegroundColor Green
     Write-AuditLog "[SYS_CLEAN_COMPLETE] Da don sach $cleanedCount muc"
 }
@@ -533,6 +578,132 @@ $excelExtensions = @(".xls", ".xlsx", ".xlsm", ".xlsb", ".xltx", ".xltm", ".xlt"
 $virusKeywords   = @("Kangatang", "Kangaatang", "Kanga", "mypersonnel")
 
 # ==============================================================================
+# HELPER FUNCTIONS: THREAT SAMPLES, RESILIENT WORKBOOK OPENING
+# ==============================================================================
+function Open-ExcelWorkbookSafe($excelApp, [string]$path, [bool]$readOnly = $true) {
+    $m = [System.Type]::Missing
+    # 15 parameters via COM InvokeMember:
+    # 1: Filename, 2: UpdateLinks=0, 3: ReadOnly=$readOnly, 4: Format=Missing,
+    # 5: Password="dummy_anti_freeze_pwd", 6: WriteResPassword=Missing,
+    # 7: IgnoreReadOnlyRecommended=$true, 8: Origin=Missing, 9: Delimiter=Missing,
+    # 10: Editable=Missing, 11: Notify=$false, 12: Converter=Missing,
+    # 13: AddToMru=$false, 14: Local=$false, 15: CorruptLoad=1 (xlNormalLoad)
+    $args15 = @($path, 0, $readOnly, $m, "dummy_anti_freeze_pwd", $m, $true, $m, $m, $m, $false, $m, $false, $false, 1)
+    return $excelApp.Workbooks.GetType().InvokeMember("Open", [System.Reflection.BindingFlags]::InvokeMethod, $null, $excelApp.Workbooks, $args15)
+}
+
+function Get-ThreatSampleDirectory {
+    # Threat samples must be saved on personal workstation 223.176 or local D:, NEVER on 223.7
+    $candidates = @(
+        "D:\7. AI tools\kangatang\Threat_Samples",
+        "\\192.168.223.176\KangatangGuard_Hub\Threat_Samples",
+        (Join-Path $env:APPDATA "KangatangGuard\Threat_Samples")
+    )
+    foreach ($cand in $candidates) {
+        if ($cand -like "*192.168.223.7*") { continue }
+        try {
+            if (-not (Test-Path -LiteralPath $cand)) {
+                New-Item -ItemType Directory -Path $cand -Force -ErrorAction SilentlyContinue | Out-Null
+            }
+            if (Test-Path -LiteralPath $cand) {
+                return $cand
+            }
+        } catch {}
+    }
+    return $null
+}
+
+function Save-ThreatSample {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$FilePath,
+        [Parameter(Mandatory=$true)]
+        [string]$ComponentName,
+        [Parameter(Mandatory=$false)]
+        $Component = $null,
+        [Parameter(Mandatory=$false)]
+        $Sheet = $null,
+        [Parameter(Mandatory=$false)]
+        $Workbook = $null
+    )
+
+    try {
+        $sampleDir = Get-ThreatSampleDirectory
+        if (-not $sampleDir) { return }
+
+        $code = ""
+        # 1. Extract code from VBComponent
+        if ($null -ne $Component -and $Component.CodeModule) {
+            try {
+                $lineCount = $Component.CodeModule.CountOfLines
+                if ($lineCount -gt 0) {
+                    $code = $Component.CodeModule.Lines(1, $lineCount)
+                }
+            } catch {}
+        }
+
+        # 2. Extract code from Sheet
+        if ([string]::IsNullOrEmpty($code) -and $null -ne $Sheet) {
+            try {
+                if ($null -ne $Workbook -and $Workbook.VBProject -and $Workbook.VBProject.Protection -eq 0) {
+                    $codeName = $Sheet.CodeName
+                    if ($codeName) {
+                        $sheetComp = $Workbook.VBProject.VBComponents.Item($codeName)
+                        if ($sheetComp -and $sheetComp.CodeModule -and $sheetComp.CodeModule.CountOfLines -gt 0) {
+                            $code = $sheetComp.CodeModule.Lines(1, $sheetComp.CodeModule.CountOfLines)
+                        }
+                    }
+                }
+            } catch {}
+
+            if ([string]::IsNullOrEmpty($code)) {
+                $code = "' [Threat Sheet: $($Sheet.Name)]`r`n' Type: $($Sheet.Type)"
+            }
+        }
+
+        if ([string]::IsNullOrEmpty($code)) {
+            $code = "' [Threat Component: $ComponentName - Empty CodeModule]"
+        }
+
+        # Compute SHA-256
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($code)
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        $hashBytes = $sha256.ComputeHash($bytes)
+        $codeHash = -join ($hashBytes | ForEach-Object { $_.ToString("x2") })
+
+        $sampleFileName = "$codeHash.sample.json"
+        $samplePath = Join-Path $sampleDir $sampleFileName
+
+        # Deduplication check
+        if (Test-Path -LiteralPath $samplePath) {
+            Write-AuditLog "[SAMPLE_DEDUP] Threat sample already exists: $sampleFileName ($ComponentName)"
+            return
+        }
+
+        $hostName = $env:COMPUTERNAME
+        if ([string]::IsNullOrEmpty($hostName)) { $hostName = "UNKNOWN_PC" }
+
+        $sampleObj = [ordered]@{
+            Timestamp     = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+            Host          = $hostName
+            FilePath      = $FilePath
+            ComponentName = $ComponentName
+            CodeHash      = $codeHash
+            Code          = $code
+        }
+
+        $json = $sampleObj | ConvertTo-Json -Depth 3
+        [System.IO.File]::WriteAllText($samplePath, $json, [System.Text.Encoding]::UTF8)
+
+        Write-Host "     [THREAT_SAMPLE] Archived threat sample: $sampleFileName" -ForegroundColor Magenta
+        Write-AuditLog "[THREAT_SAMPLE] Archived: $sampleFileName | Component: $ComponentName | File: $FilePath"
+    } catch {
+        $err = $_.Exception.Message
+        Write-AuditLog "[SAMPLE_ERROR] Failed to save sample for $ComponentName in $FilePath : $err"
+    }
+}
+
+# ==============================================================================
 # QUÉT VÀ DIỆT VIRUS CHO 1 TỆP EXCEL (FULL-LIFECYCLE WATCHDOG 35s)
 # ==============================================================================
 function Scan-SingleExcelFile($file) {
@@ -543,7 +714,7 @@ function Scan-SingleExcelFile($file) {
     $Host.UI.RawUI.WindowTitle = "Kangatang Standalone v$($Script:AppVersion) | Da quet: $Script:TotalScanned | Da diet: $Script:TotalCleaned | PID: $Script:CurrentExcelPid"
     
     if ($Script:TotalScanned % 30 -eq 0) {
-        Write-Host "  -> [RECYCLE] Định kỳ làm sạch bộ nhớ Excel COM tại tệp #$idx..." -ForegroundColor DarkCyan
+        Write-Host "  -> [RECYCLE] Dinh ky lam sach bo nho Excel COM tai tep #$idx..." -ForegroundColor DarkCyan
         Start-FreshExcel | Out-Null
     }
 
@@ -552,21 +723,26 @@ function Scan-SingleExcelFile($file) {
     $wb = $null
 
     try {
-        # 1. Mở file Read-Only (AddToMru = $false, EnableAutoRecover = $false)
+        # 1. Mở file Read-Only (Anti-Freeze Dummy Password, CorruptLoad = 1, IgnoreReadOnlyRecommended = $true)
         try {
-            $wb = $Script:CurrentExcelApp.Workbooks.Open($filePath, 0, $true, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, $false)
+            $wb = Open-ExcelWorkbookSafe -excelApp $Script:CurrentExcelApp -path $filePath -readOnly $true
             if ($null -ne $wb) {
                 try { $wb.EnableAutoRecover = $false } catch {}
             }
         } catch {
-            $errMsg = $_.Exception.Message
+            $rawMsg = $_.Exception.Message
+            $innerMsg = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { "" }
+            $fullErr = ($rawMsg + " " + $innerMsg).ToLower()
             $Script:TotalErrors++
-            if ($Script:Watchdog.TimedOut) {
-                Write-Host "  [$idx] ⏳ [TIMEOUT 35s] Tệp bị treo qua mạng (bỏ qua an toàn): $($file.Name)" -ForegroundColor Red
+            if ($fullErr -like "*password*" -or $fullErr -like "*mật khẩu*" -or $fullErr -like "*mat khau*" -or $fullErr -like "*0x800a03ec*") {
+                Write-Host "  [$idx] [PASS_PROTECTED] Skipped password-protected file: $($file.Name)" -ForegroundColor Yellow
+                Write-AuditLog "[PASS_PROTECTED] Skipped password-protected file: $filePath"
+            } elseif ($Script:Watchdog.TimedOut) {
+                Write-Host "  [$idx] [TIMEOUT] File hung over 35s (safely skipped): $($file.Name)" -ForegroundColor Red
                 Write-AuditLog "[TIMEOUT] $filePath"
             } else {
-                Write-Host "  [$idx] ⚠️ Không thể mở: $($file.Name) ($errMsg)" -ForegroundColor DarkYellow
-                Write-AuditLog "[SKIP] $filePath | $errMsg"
+                Write-Host "  [$idx] Cannot open: $($file.Name) ($rawMsg)" -ForegroundColor DarkYellow
+                Write-AuditLog "[SKIP] $filePath | $rawMsg"
             }
             Start-FreshExcel | Out-Null
             return
@@ -730,7 +906,7 @@ function Scan-SingleExcelFile($file) {
                 $openAttempts = 2
                 for ($oa = 1; $oa -le $openAttempts; $oa++) {
                     try {
-                        $wb = $Script:CurrentExcelApp.Workbooks.Open($filePath, $false, $false, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, [System.Type]::Missing, $false)
+                        $wb = Open-ExcelWorkbookSafe -excelApp $Script:CurrentExcelApp -path $filePath -readOnly $false
                         if ($null -ne $wb) {
                             try { $wb.EnableAutoRecover = $false } catch {}
                             break
@@ -747,47 +923,73 @@ function Scan-SingleExcelFile($file) {
                 }
 
                 if ($null -eq $wb) {
-                    Write-Host "     ❌ [LỖI GHI] Không lấy được đối tượng Workbook." -ForegroundColor Red
+                    Write-Host "     [WRITE_ERROR] Cannot obtain Workbook object in Read-Write mode." -ForegroundColor Red
                     Write-AuditLog "[CLEAN_ERROR] $filePath : null workbook"
                     $Script:TotalErrors++
                     Start-FreshExcel | Out-Null
                     return
                 }
 
+                # 3.1. Mo khoa cau truc Workbook neu bi bao ve
+                try {
+                    if ($wb.ProtectStructure) {
+                        $wb.Unprotect("")
+                    }
+                } catch {}
+
+                # 3.2. Lam sach VBProject (ke ca khi bi khoa mat khau, tiep tuc xu ly)
                 if ($ext -ne ".xlsx" -and $ext -ne ".xltx") {
                     try {
                         $vbProj = $wb.VBProject
-                        if ($vbProj -and $vbProj.Protection -eq 0) {
-                            for ($cIdx = $vbProj.VBComponents.Count; $cIdx -ge 1; $cIdx--) {
-                                $comp = $vbProj.VBComponents.Item($cIdx)
-                                if ($comp.Type -eq 1 -or $comp.Type -eq 2) {
-                                    foreach ($kw in $virusKeywords) {
-                                        if ($comp.Name -like "*$kw*") {
-                                            $vbProj.VBComponents.Remove($comp)
-                                            $cleaned = $true
-                                            break
+                        if ($vbProj) {
+                            if ($vbProj.Protection -eq 1) {
+                                Write-Host "     [VBPROJECT_PROTECTED] VBProject is password-protected. Continuing to clean Sheets and Names..." -ForegroundColor Yellow
+                                Write-AuditLog "[VBPROJECT_PROTECTED] $filePath - VBProject is password protected, proceeding to clean Sheets and Names"
+                            } else {
+                                for ($cIdx = $vbProj.VBComponents.Count; $cIdx -ge 1; $cIdx--) {
+                                    $comp = $vbProj.VBComponents.Item($cIdx)
+                                    if ($comp.Type -eq 1 -or $comp.Type -eq 2) {
+                                        foreach ($kw in $virusKeywords) {
+                                            if ($comp.Name -like "*$kw*") {
+                                                Save-ThreatSample -FilePath $filePath -ComponentName $comp.Name -Component $comp
+                                                $vbProj.VBComponents.Remove($comp)
+                                                $cleaned = $true
+                                                break
+                                            }
                                         }
-                                    }
-                                } elseif ($comp.CodeModule -and $comp.CodeModule.CountOfLines -gt 0) {
-                                    $lines = $comp.CodeModule.Lines(1, [math]::Min(500, $comp.CodeModule.CountOfLines))
-                                    foreach ($kw in $virusKeywords) {
-                                        if ($lines -like "*$kw*") {
-                                            $comp.CodeModule.DeleteLines(1, $comp.CodeModule.CountOfLines)
-                                            $cleaned = $true
-                                            break
+                                    } elseif ($comp.CodeModule -and $comp.CodeModule.CountOfLines -gt 0) {
+                                        $lines = $comp.CodeModule.Lines(1, [math]::Min(500, $comp.CodeModule.CountOfLines))
+                                        foreach ($kw in $virusKeywords) {
+                                            if ($lines -like "*$kw*") {
+                                                Save-ThreatSample -FilePath $filePath -ComponentName $comp.Name -Component $comp
+                                                $comp.CodeModule.DeleteLines(1, $comp.CodeModule.CountOfLines)
+                                                $cleaned = $true
+                                                break
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    } catch {}
+                    } catch {
+                        $vbeErr = $_.Exception.Message
+                        Write-AuditLog "[VBE_ACCESS_WARN] $filePath : $vbeErr"
+                    }
                 }
 
+                # 3.3. Lam sach Sheets (ke ca khi VBProject bi khoa mat khau)
                 for ($sIdx = $wb.Sheets.Count; $sIdx -ge 1; $sIdx--) {
                     if ($wb.Sheets.Count -le 1) { break }
                     $sht = $wb.Sheets.Item($sIdx)
+                    try {
+                        if ($sht.ProtectContents) {
+                            $sht.Unprotect("")
+                        }
+                    } catch {}
+
                     foreach ($kw in $virusKeywords) {
                         if ($sht.Name -like "*$kw*") {
+                            Save-ThreatSample -FilePath $filePath -ComponentName $sht.Name -Sheet $sht -Workbook $wb
                             $sht.Visible = -1
                             $sht.Delete()
                             $cleaned = $true
@@ -796,6 +998,7 @@ function Scan-SingleExcelFile($file) {
                     }
                 }
 
+                # 3.4. Lam sach Names: Fast forward loop voi danh sach ten can xoa
                 try {
                     $delNames = [System.Collections.Generic.List[string]]::new()
                     foreach ($nm in $wb.Names) {
@@ -817,16 +1020,25 @@ function Scan-SingleExcelFile($file) {
                     }
                 } catch {}
 
+                # Tat cac hop thoai tuong thich khi luu
                 $wb.CheckCompatibility = $false
                 try { $wb.RemovePersonalInformation = $false } catch {}
 
                 if ($cleaned) {
-                    $wb.Save()
-                    Write-Host "     ✅ [ĐÃ TIÊU DIỆT] Đã làm sạch và lưu tệp thành công!" -ForegroundColor Green
+                    try {
+                        $wb.Save()
+                    } catch {
+                        try {
+                            $wb.SaveAs($filePath)
+                        } catch {
+                            throw $_
+                        }
+                    }
+                    Write-Host "     [CLEANED] Successfully cleaned and saved file!" -ForegroundColor Green
                     Write-AuditLog "[CLEANED] $filePath"
                     $Script:TotalCleaned++
                 } else {
-                    Write-Host "     ⚠️ Không tìm thấy thành phần cần xóa khi lưu." -ForegroundColor DarkYellow
+                    Write-Host "     No components found to delete during clean." -ForegroundColor DarkYellow
                 }
             }
         } else {
@@ -835,12 +1047,17 @@ function Scan-SingleExcelFile($file) {
         }
     } catch {
         $errTxt = $_.Exception.Message
+        $innerTxt = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { "" }
+        $fullErr = ($errTxt + " " + $innerTxt).ToLower()
         $Script:TotalErrors++
-        if ($Script:Watchdog.TimedOut) {
-            Write-Host "  [$idx] ⏳ [TIMEOUT TOÀN DIỆN] Tệp bị treo quá 35s: $($file.Name)" -ForegroundColor Red
+        if ($fullErr -like "*password*" -or $fullErr -like "*mật khẩu*" -or $fullErr -like "*mat khau*" -or $fullErr -like "*0x800a03ec*") {
+            Write-Host "  [$idx] [PASS_PROTECTED] Skipped password-protected file: $($file.Name)" -ForegroundColor Yellow
+            Write-AuditLog "[PASS_PROTECTED] Skipped password-protected file: $filePath"
+        } elseif ($Script:Watchdog.TimedOut) {
+            Write-Host "  [$idx] [TIMEOUT_FULL] File hung over 35s: $($file.Name)" -ForegroundColor Red
             Write-AuditLog "[TIMEOUT_FULL] $filePath | 35s"
         } else {
-            Write-Host "  [$idx] ❌ Lỗi xử lý tệp: $($file.Name) ($errTxt)" -ForegroundColor Red
+            Write-Host "  [$idx] Error processing file: $($file.Name) | $errTxt" -ForegroundColor DarkYellow
             Write-AuditLog "[ERROR_FILE] $filePath : $errTxt"
         }
         Start-FreshExcel | Out-Null
@@ -1047,7 +1264,7 @@ try {
         Write-Host "     [1] Quét Thư mục Tùy chọn (Mở hộp thoại GUI hoặc nhập đường dẫn/UNC)" -ForegroundColor White
         Write-Host "     [2] Quét Toàn bộ Máy tính (Tất cả ổ đĩa C:, D:, E:...)" -ForegroundColor White
         Write-Host "     [3] Tiếp tục Phiên quét dở dang (Fast Resume từ Checkpoint)" -ForegroundColor White
-        Write-Host "     [4] Dọn dẹp Mầm bệnh Hệ thống (XLSTART, Registry, AddIns)" -ForegroundColor White
+        Write-Host "     [4] Dọn dẹp Mầm bệnh Hệ thống (XLSTART, Registry, Khôi phục Copy/Paste)" -ForegroundColor White
         Write-Host "     [5] Mở Thư mục Nhật ký Kiểm toán (Audit Logs)" -ForegroundColor White
         Write-Host "     [0] Thoát chương trình" -ForegroundColor DarkGray
         Write-Host "======================================================================" -ForegroundColor Cyan
