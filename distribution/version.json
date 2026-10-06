@@ -1,9 +1,10 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-09-30 11:18:37",
+    "release_timestamp":  "2026-10-06 17:39:54",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
-    "version":  "3.9.0",
-    "release_date":  "2026-09-30",
+    "mandatory":  true,
+    "version":  "3.10.0",
+    "release_date":  "2026-10-06",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
                   "standalone":  "Kangatang_Standalone_Scanner.ps1",
@@ -11,6 +12,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.9.0 - Auto-Repair Scanner \u0026 Dynamic Version: Tu dong tai lai Kangatang_FolderScanner.ps1 tu Hub LAN khi file bi mat/xoa tren may client. Thay the toan bo tieu de MsgBox hardcoded v3.6.0 bang CURRENT_VERSION dong de hien thi dung phien ban dang chay.",
+    "changelog":  "v3.10.0 - Runtime Shield (BAN VA BAO MAT): Chan virus lay qua OnSheetActivate sau khi mo file, kiem tra lai moi lan Luu (bo lo hong cache 5 phut), cach ly mypersonnel1.xls khoi XLSTART + vaccine chong tai tao, quet ca PERSONAL.XLSB/add-in, lam sach phau thuat (giu macro hop le), khong treo khi mat LAN, cap nhat chi ap dung khi Excel da dong.",
     "hub_ip":  "192.168.223.7"
 }

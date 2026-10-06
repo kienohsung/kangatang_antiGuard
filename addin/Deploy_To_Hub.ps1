@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.9.0"
+$ReleaseVersion = "3.10.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,7 +51,9 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    changelog         = "v${ReleaseVersion} - Auto-Repair Scanner & Dynamic Version: Tu dong tai lai Kangatang_FolderScanner.ps1 tu Hub LAN khi file bi mat/xoa tren may client. Thay the toan bo tieu de MsgBox hardcoded v3.6.0 bang CURRENT_VERSION dong de hien thi dung phien ban dang chay."
+    # v3.10.0: Ban va bao mat bat buoc -> client chay ngam se tu ap dung khong hoi (sau khi dong Excel)
+    mandatory         = $true
+    changelog         = "v${ReleaseVersion} - Runtime Shield (BAN VA BAO MAT): Chan virus lay qua OnSheetActivate sau khi mo file, kiem tra lai moi lan Luu (bo lo hong cache 5 phut), cach ly mypersonnel1.xls khoi XLSTART + vaccine chong tai tao, quet ca PERSONAL.XLSB/add-in, lam sach phau thuat (giu macro hop le), khong treo khi mat LAN, cap nhat chi ap dung khi Excel da dong."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4

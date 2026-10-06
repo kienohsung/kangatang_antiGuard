@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_Client.ps1
 # PowerShell Installer cho May Client trong Mang LAN
-# Phien ban: v3.9.0 (Auto-Repair Scanner & Dynamic Version Display)
+# Phien ban: v3.10.0 (Runtime Shield)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.9.0)    " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.10.0)    " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -32,7 +32,7 @@ if ($ScriptDir.StartsWith("\\")) {
 Write-Host "`n[1/5] May chu phan phoi (Hub): $uncSource" -ForegroundColor Yellow
 
 # Doc thong tin phien ban tu version.json neu co
-$versionInfo = "3.9.0"
+$versionInfo = "3.10.0"
 $versionJsonPath = Join-Path $uncSource "version.json"
 if (Test-Path $versionJsonPath) {
     try {
@@ -79,6 +79,10 @@ $officeVersions = @("14.0", "15.0", "16.0")
 
 foreach ($ver in $officeVersions) {
     $secKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Security"
+    # v3.10.0: Tao khoa Security neu Office phien ban nay da cai (co khoa Excel) nhung chua tung mo Excel
+    if (-not (Test-Path $secKey) -and (Test-Path "HKCU:\Software\Microsoft\Office\$ver\Excel")) {
+        New-Item -Path $secKey -Force -ErrorAction SilentlyContinue | Out-Null
+    }
     if (Test-Path $secKey) {
         try {
             Set-ItemProperty -Path $secKey -Name "AllowNetworkLocations" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
@@ -153,15 +157,13 @@ Copy-Item -Path $srcXlam -Destination $dstXlamXLSTART -Force
 try { Set-ItemProperty -Path $dstXlamXLSTART -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
 Write-Host "   -> [OK] Da cai dat vao XLSTART: $dstXlamXLSTART" -ForegroundColor Green
 
-# Sao chep sang AddIns (Dual-registration)
+# Don dep ban sao cu trong AddIns neu co (tranh xung dot nap 2 lan)
 $dstXlamAddIns = Join-Path $addInsPath "KangatangGuard.xlam"
 if (Test-Path $dstXlamAddIns) {
     try { Set-ItemProperty -Path $dstXlamAddIns -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
     Remove-Item -Path $dstXlamAddIns -Force -ErrorAction SilentlyContinue
+    Write-Host "   -> [OK] Da xoa ban sao cu trong AddIns: $dstXlamAddIns" -ForegroundColor Green
 }
-Copy-Item -Path $srcXlam -Destination $dstXlamAddIns -Force
-try { Set-ItemProperty -Path $dstXlamAddIns -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
-Write-Host "   -> [OK] Da cai dat vao AddIns: $dstXlamAddIns" -ForegroundColor Green
 
 # Sao chep Background Worker
 if (Test-Path $srcScanner) {
@@ -183,34 +185,42 @@ Set-ItemProperty -Path $regKey -Name "LastUpdateCheck" -Value (Get-Date -Format 
 Write-Host "   -> [OK] UpdateSource    : $uncSource" -ForegroundColor Green
 Write-Host "   -> [OK] InstalledVersion: v$versionInfo" -ForegroundColor Green
 
-# Dual Registration trong Excel Options OPEN keys
+# Don dep cac khoa OPEN* va du lieu gay xung dot trong Excel Registry
 foreach ($ver in @("16.0", "15.0", "14.0")) {
     $optKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Options"
     if (Test-Path $optKey) {
         $props = (Get-ItemProperty -Path $optKey -ErrorAction SilentlyContinue).psobject.Properties
-        $alreadyRegistered = $false
-        $maxOpenIndex = -1
-        
         foreach ($p in $props) {
             if ($p.Name -eq "OPEN" -or $p.Name -match "^OPEN(\d+)$") {
                 $val = [string]$p.Value
                 if ($val -like "*KangatangGuard.xlam*") {
-                    $alreadyRegistered = $true
-                    break
-                }
-                if ($p.Name -eq "OPEN") {
-                    if ($maxOpenIndex -lt 0) { $maxOpenIndex = 0 }
-                } elseif ($p.Name -match "^OPEN(\d+)$") {
-                    $idxNum = [int]$matches[1]
-                    if ($idxNum -gt $maxOpenIndex) { $maxOpenIndex = $idxNum }
+                    Remove-ItemProperty -Path $optKey -Name $p.Name -Force -ErrorAction SilentlyContinue
+                    Write-Host "   -> [OK] Da go bo dang ky trung lap: $optKey\$($p.Name)" -ForegroundColor Green
                 }
             }
         }
-        
-        if (-not $alreadyRegistered) {
-            $targetSlot = if ($maxOpenIndex -lt 0) { "OPEN" } else { "OPEN$($maxOpenIndex + 1)" }
-            $regValue = "/R `"$dstXlamAddIns`""
-            Set-ItemProperty -Path $optKey -Name $targetSlot -Value $regValue -Type String -Force -ErrorAction SilentlyContinue
+    }
+    
+    # Don dep AddInLoadTimes va DisabledItems
+    $altKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\AddInLoadTimes"
+    if (Test-Path $altKey) {
+        Remove-ItemProperty -Path $altKey -Name "KangatangGuard.xlam" -Force -ErrorAction SilentlyContinue
+        Remove-ItemProperty -Path $altKey -Name "KangatangGuard" -Force -ErrorAction SilentlyContinue
+    }
+    $disKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Resiliency\DisabledItems"
+    if (Test-Path $disKey) {
+        $disProps = (Get-ItemProperty -Path $disKey -ErrorAction SilentlyContinue).psobject.Properties
+        foreach ($dp in $disProps) {
+            if ($dp.Name -notlike "PS*") {
+                $bytes = [byte[]]$dp.Value
+                if ($bytes) {
+                    $str = [System.Text.Encoding]::Unicode.GetString($bytes)
+                    if ($str -like "*KangatangGuard*") {
+                        Remove-ItemProperty -Path $disKey -Name $dp.Name -Force -ErrorAction SilentlyContinue
+                        Write-Host "   -> [OK] Da go bo khoi DisabledItems: $disKey\$($dp.Name)" -ForegroundColor Green
+                    }
+                }
+            }
         }
     }
 }

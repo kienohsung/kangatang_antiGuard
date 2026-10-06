@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao XLSTART
-# Phien ban: v3.9.0 (Auto-Repair Scanner & Dynamic Version Display)
+# Phien ban: v3.10.0 (Runtime Shield)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.9.0"
+$InstallerVersion = "3.10.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
@@ -88,7 +88,16 @@ function Get-VbaSection {
 $thisWorkbookCode = Get-VbaSection -Content $vbaContent -SectionName "ThisWorkbook"
 $clsAppEventsCode = Get-VbaSection -Content $vbaContent -SectionName "clsAppEvents"
 $modScannerCode   = Get-VbaSection -Content $vbaContent -SectionName "modKangatangScanner"
+$modShieldCode    = Get-VbaSection -Content $vbaContent -SectionName "modKangatangShield"
 $modLoggerCode    = Get-VbaSection -Content $vbaContent -SectionName "modLogger"
+
+# v3.10.0: Chan build neu thieu bat ky section nao (tranh phat hanh add-in thieu ma)
+foreach ($sec in @(@("ThisWorkbook",$thisWorkbookCode), @("clsAppEvents",$clsAppEventsCode), @("modKangatangScanner",$modScannerCode), @("modKangatangShield",$modShieldCode), @("modLogger",$modLoggerCode))) {
+    if ([string]::IsNullOrWhiteSpace($sec[1])) {
+        Write-Host "   [LOI] Section VBA rong hoac thieu: $($sec[0])" -ForegroundColor Red
+        exit 1
+    }
+}
 
 # Xac dinh duong dan XLSTART
 $xlStartPath = Join-Path $env:APPDATA "Microsoft\Excel\XLSTART"
@@ -233,6 +242,12 @@ try {
     $modScanner.Name = "modKangatangScanner"
     Inject-CleanVbaModule $modScanner $modScannerCode
     
+    # --- Tao Standard Module: modKangatangShield (v3.10.0 Runtime Shield) ---
+    Write-Host "   -> Tao Module: modKangatangShield..." -ForegroundColor Gray
+    $modShield = $wb.VBProject.VBComponents.Add(1)
+    $modShield.Name = "modKangatangShield"
+    Inject-CleanVbaModule $modShield $modShieldCode
+    
     # --- Tao Standard Module: modLogger ---
     Write-Host "   -> Tao Module: modLogger..." -ForegroundColor Gray
     $modLog = $wb.VBProject.VBComponents.Add(1)
@@ -267,64 +282,53 @@ try {
     Add-RibbonCustomUI -targetXlam $xlamPath
     
     # ==============================================================================
-    # DUAL REGISTRATION: SAO CHEP VA DANG KY VAO ADDINS CHO OFFICE 365
+    # DON DEP XUNG DOT: XOA BAN SAO VA DANG KY TRUNG LAP TRONG ADDINS / OPTIONS OPEN
     # ==============================================================================
-    Write-Host "`n[DUAL-REG] Dang thiet lap Add-in Registry cho Office 365..." -ForegroundColor Yellow
+    Write-Host "`n[COLLISION-CLEANUP] Don dep xung dot khoi dong Excel..." -ForegroundColor Yellow
     $addInsDir = Join-Path $env:APPDATA "Microsoft\AddIns"
-    if (-not (Test-Path $addInsDir)) {
-        New-Item -ItemType Directory -Path $addInsDir -Force | Out-Null
-    }
-    
     $xlamAddInsPath = Join-Path $addInsDir "KangatangGuard.xlam"
     if (Test-Path $xlamAddInsPath) {
         try { Set-ItemProperty -Path $xlamAddInsPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
         Remove-Item -Path $xlamAddInsPath -Force -ErrorAction SilentlyContinue
+        Write-Host "   -> [OK] Da xoa ban sao trung lap trong AddIns: $xlamAddInsPath" -ForegroundColor Green
     }
     
-    Copy-Item -Path $xlamPath -Destination $xlamAddInsPath -Force
-    try { Set-ItemProperty -Path $xlamAddInsPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
-    Write-Host "   -> [OK] Da sao chep sang AddIns: $xlamAddInsPath" -ForegroundColor Green
-    
-    # Dang ky khoa OPEN* trong Registry Options cho Office 16.0, 15.0, 14.0
+    # Xoa bo khoa OPEN* trong Registry Options (tranh nap 2 lan gay xung dot ten tep)
     foreach ($ver in @("16.0", "15.0", "14.0")) {
         $optKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Options"
         if (Test-Path $optKey) {
             $props = (Get-ItemProperty -Path $optKey -ErrorAction SilentlyContinue).psobject.Properties
-            $alreadyRegistered = $false
-            $maxOpenIndex = -1
-            $targetSlot = $null
-            
-            # Kiem tra xem da dang ky chua
             foreach ($p in $props) {
                 if ($p.Name -eq "OPEN" -or $p.Name -match "^OPEN(\d+)$") {
                     $val = [string]$p.Value
                     if ($val -like "*KangatangGuard.xlam*") {
-                        $alreadyRegistered = $true
-                        break
-                    }
-                    if ($p.Name -eq "OPEN") {
-                        if ($maxOpenIndex -lt 0) { $maxOpenIndex = 0 }
-                    } elseif ($p.Name -match "^OPEN(\d+)$") {
-                        $idxNum = [int]$matches[1]
-                        if ($idxNum -gt $maxOpenIndex) { $maxOpenIndex = $idxNum }
+                        Remove-ItemProperty -Path $optKey -Name $p.Name -Force -ErrorAction SilentlyContinue
+                        Write-Host "   -> [OK] Da go bo dang ky trung lap: $optKey\$($p.Name)" -ForegroundColor Green
                     }
                 }
             }
-            
-            if (-not $alreadyRegistered) {
-                if ($maxOpenIndex -lt 0) {
-                    # Chua co khoa OPEN nao
-                    $targetSlot = "OPEN"
-                } else {
-                    $nextNum = $maxOpenIndex + 1
-                    $targetSlot = "OPEN$nextNum"
+        }
+        
+        # Don dep AddInLoadTimes va DisabledItems
+        $altKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\AddInLoadTimes"
+        if (Test-Path $altKey) {
+            Remove-ItemProperty -Path $altKey -Name "KangatangGuard.xlam" -Force -ErrorAction SilentlyContinue
+            Remove-ItemProperty -Path $altKey -Name "KangatangGuard" -Force -ErrorAction SilentlyContinue
+        }
+        $disKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Resiliency\DisabledItems"
+        if (Test-Path $disKey) {
+            $disProps = (Get-ItemProperty -Path $disKey -ErrorAction SilentlyContinue).psobject.Properties
+            foreach ($dp in $disProps) {
+                if ($dp.Name -notlike "PS*") {
+                    $bytes = [byte[]]$dp.Value
+                    if ($bytes) {
+                        $str = [System.Text.Encoding]::Unicode.GetString($bytes)
+                        if ($str -like "*KangatangGuard*") {
+                            Remove-ItemProperty -Path $disKey -Name $dp.Name -Force -ErrorAction SilentlyContinue
+                            Write-Host "   -> [OK] Da go bo khoi DisabledItems: $disKey\$($dp.Name)" -ForegroundColor Green
+                        }
+                    }
                 }
-                
-                $regValue = "/R `"$xlamAddInsPath`""
-                Set-ItemProperty -Path $optKey -Name $targetSlot -Value $regValue -Type String -Force -ErrorAction SilentlyContinue
-                Write-Host "   -> [OK] Da dang ky Registry $optKey\$targetSlot" -ForegroundColor Green
-            } else {
-                Write-Host "   -> [OK] Add-in da duoc dang ky san trong Registry Office $ver" -ForegroundColor Green
             }
         }
     }
