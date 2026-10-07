@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Install_Client.ps1
 # PowerShell Installer cho May Client trong Mang LAN
 # Phien ban: v3.11.0 (Threat Collector & CopyPaste Fix)

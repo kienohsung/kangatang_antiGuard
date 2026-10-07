@@ -190,7 +190,15 @@ try {
             }
 
             # 2. Tao customUI/customUI14.xml voi 1 tab duy nhat: Tab "Kangatang Guard" chuyen biet tren Ribbon
-            $customUiXml = @'
+            $customUiFile = Join-Path $ScriptDir "customUI14.xml"
+            $uiBytes = $null
+            if (Test-Path $customUiFile) {
+                # Doc truc tiep byte mang UTF-8 tu file template - KHONG bi anh huong boi PowerShell string encoding
+                $uiBytes = [System.IO.File]::ReadAllBytes($customUiFile)
+            } else {
+                # Fallback: Sinh tu chuoi UTF-8 chuan
+                $customUiXml = @"
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
   <ribbon>
     <tabs>
@@ -210,16 +218,17 @@ try {
     </tabs>
   </ribbon>
 </customUI>
-'@
+"@
+                $uiBytes = [System.Text.Encoding]::UTF8.GetBytes($customUiXml)
+            }
             $uiEntry = $zip.GetEntry("customUI/customUI14.xml")
             if ($uiEntry) { $uiEntry.Delete() }
             $newUiEntry = $zip.CreateEntry("customUI/customUI14.xml", [System.IO.Compression.CompressionLevel]::Optimal)
             $uiStream = $newUiEntry.Open()
-            $uiWriter = New-Object System.IO.StreamWriter($uiStream, [System.Text.Encoding]::UTF8)
-            $uiWriter.Write($customUiXml)
-            $uiWriter.Flush()
-            $uiWriter.Close()
-            Write-Host "   -> [OK] Da tich hop Ribbon CustomUI XML (Large 32x32 Icons) thanh cong!" -ForegroundColor Green
+            $uiStream.Write($uiBytes, 0, $uiBytes.Length)
+            $uiStream.Flush()
+            $uiStream.Close()
+            Write-Host "   -> [OK] Da tich hop Ribbon CustomUI XML (UTF-8 Native Byte Stream) thanh cong!" -ForegroundColor Green
         } catch {
             Write-Host "   -> [CANH BAO] Khong the tich hop Ribbon XML: $($_.Exception.Message)" -ForegroundColor Yellow
         } finally {
@@ -270,10 +279,25 @@ try {
     # Luu file dang .xlam (55 = xlAddIn format)
     Write-Host "   -> Luu file .xlam..." -ForegroundColor Gray
     
-    # Xoa file cu neu ton tai (go bo thuoc tinh Read-Only truoc neu co)
+    # Xoa file cu neu ton tai (thu toi da 5 lan neu dang bi giu handle)
     if (Test-Path $xlamPath) {
-        try { Set-ItemProperty -Path $xlamPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
-        Remove-Item -Path $xlamPath -Force -ErrorAction SilentlyContinue
+        $deleteSuccess = $false
+        for ($i = 1; $i -le 5; $i++) {
+            try {
+                Set-ItemProperty -Path $xlamPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+                Remove-Item -Path $xlamPath -Force -ErrorAction Stop
+                $deleteSuccess = $true
+                break
+            } catch {
+                Start-Sleep -Milliseconds 600
+            }
+        }
+        if (-not $deleteSuccess -and (Test-Path $xlamPath)) {
+            Write-Host "   [CANH BAO] File $xlamPath dang bi tien trinh khac giu khoa. Dang thu dong tat ca Excel..." -ForegroundColor Yellow
+            Get-Process -Name excel -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+            Remove-Item -Path $xlamPath -Force -ErrorAction SilentlyContinue
+        }
     }
     
     # Cau hinh thuoc tinh Add-in chuan
