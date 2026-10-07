@@ -1832,6 +1832,8 @@ Public Function QuickCheckWorkbook(ByVal wb As Workbook, ByRef reason As String)
         QuickCheckWorkbook = True
         Exit Function
     End If
+    
+    Dim sh As Object, nmx As String
     For Each sh In wb.Sheets
         nmx = ""
         nmx = sh.Name
