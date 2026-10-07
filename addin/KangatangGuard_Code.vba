@@ -109,7 +109,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu cua so quet ngam cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.12.1"
+Public Const CURRENT_VERSION As String = "3.12.2"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
@@ -808,69 +808,64 @@ BackupError:
 End Function
 
 ' ===========================================================================
-' THU TUC PHIM TAT NATIVE COPY / PASTE / CUT (FAIL-SAFE DUAL ROUTING v3.12.1)
+' THU TUC PHIM TAT NATIVE COPY / PASTE / CUT (FAIL-SAFE DUAL ROUTING v3.12.2)
 ' Dam bao Ctrl+C, Ctrl+V, Ctrl+X luon hoat dong 100% tren moi workbook/sheet
-' bat ke loi ban phim accelerator hay can thiep cua virus
+' Khong dung ExecuteMso de tranh xoa buffer CutCopyMode trong tien trinh VBA
 ' ===========================================================================
 Public Sub Kangatang_ShortcutCopy()
     On Error Resume Next
-    ' Uu tien 1: Selection.Copy (nhanh, truc tiep, vien marching ants ro net)
     If Not Selection Is Nothing Then
         Selection.Copy
-    End If
-    If Err.Number <> 0 Then
-        Err.Clear
-        ' Uu tien 2: Native Ribbon Command (tuong duong bam nut Copy tren Ribbon/Chuot phai)
-        Application.CommandBars.ExecuteMso "Copy"
-    End If
-    If Err.Number <> 0 Then
-        Err.Clear
-        ' Uu tien 3: ActiveCell.Copy
-        If Not ActiveCell Is Nothing Then
-            ActiveCell.Copy
-        End If
+    ElseIf Not ActiveCell Is Nothing Then
+        ActiveCell.Copy
     End If
     On Error GoTo 0
 End Sub
 
 Public Sub Kangatang_ShortcutPaste()
     On Error Resume Next
-    ' Uu tien 1: Native Ribbon Command (ho tro toan dien: cell range, text, object ngoai)
-    Application.CommandBars.ExecuteMso "Paste"
+    
+    ' Truong hop 1: Dang copy vung o tinh trong Excel (CutCopyMode = xlCopy = 1)
+    If Application.CutCopyMode = 1 Then
+        ' Buoc 1a: Dan cong thuc & gia tri (tranh loi 1004 cua xlPasteAll tren Office 2016/2019/365)
+        Selection.PasteSpecial -4123 ' xlPasteFormulas
+        If Err.Number <> 0 Then
+            Err.Clear
+            Selection.PasteSpecial -4163 ' xlPasteValues
+        End If
+        ' Buoc 1b: Dan toan bo dinh dang (mau sac, font chu, vien ke, number format)
+        Selection.PasteSpecial -4122 ' xlPasteFormats
+        Err.Clear
+        Exit Sub
+    End If
+    
+    ' Truong hop 2: Dang cut vung o tinh (CutCopyMode = xlCut = 2)
+    If Application.CutCopyMode = 2 Then
+        ActiveSheet.Paste
+        If Err.Number = 0 Then Exit Sub
+        Err.Clear
+    End If
+    
+    ' Truong hop 3: Du lieu tu clipboard ben ngoai (Text, Web, Notepad...) hoac hinh anh/shape/chart
+    ActiveSheet.PasteSpecial Format:="Unicode Text"
     If Err.Number <> 0 Then
         Err.Clear
-        ' Uu tien 2: ActiveSheet.Paste
-        If Not ActiveSheet Is Nothing Then
-            ActiveSheet.Paste
-        End If
+        ActiveSheet.Paste
     End If
     If Err.Number <> 0 Then
         Err.Clear
-        ' Uu tien 3: ActiveCell.PasteSpecial
-        If Not ActiveCell Is Nothing Then
-            ActiveCell.PasteSpecial -4104 ' xlPasteAll
-        End If
+        ActiveCell.PasteSpecial -4163 ' xlPasteValues fallback
     End If
+    
     On Error GoTo 0
 End Sub
 
 Public Sub Kangatang_ShortcutCut()
     On Error Resume Next
-    ' Uu tien 1: Selection.Cut
     If Not Selection Is Nothing Then
         Selection.Cut
-    End If
-    If Err.Number <> 0 Then
-        Err.Clear
-        ' Uu tien 2: Native Ribbon Command
-        Application.CommandBars.ExecuteMso "Cut"
-    End If
-    If Err.Number <> 0 Then
-        Err.Clear
-        ' Uu tien 3: ActiveCell.Cut
-        If Not ActiveCell Is Nothing Then
-            ActiveCell.Cut
-        End If
+    ElseIf Not ActiveCell Is Nothing Then
+        ActiveCell.Cut
     End If
     On Error GoTo 0
 End Sub

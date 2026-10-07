@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.12.1"
+$ReleaseVersion = "3.12.2"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,9 +51,9 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    # v3.12.1: Enforced Shortcut Routing & Fallback Healer (Ctrl+C, Ctrl+V, Ctrl+X)
+    # v3.12.2: Perfected 2-Phase Non-Destructive Paste (Formulas + Formats)
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Enforced Shortcut Routing & Dual-Tier Healer: Dinh tuyen bat buoc phim tat Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+Insert, Shift+Insert, Shift+Delete vao quy trinh sao chep native cua Add-in (ExecuteMso + Selection/ActiveSheet fallback), khac phuc triet de loi liet phim tat do virus xoa bo hoac loi accelerator table cua Office; kich hoat tu dong moi khi switch workbook (WorkbookActivate)."
+    changelog         = "v${ReleaseVersion} - Perfected 2-Phase Non-Destructive Paste: Khac phuc loi Ctrl+V lam mat vien net dut CutCopyMode ma khong dan duoc du lieu; chuyen sang quy trinh 2 buoc chuyen dung (PasteFormulas + PasteFormats) tranh loi 1004 cua xlPasteAll tren Office 2016/2019/365; duy tri viền nét đứt nguyên vẹn để dán liên tục nhiều ô."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
