@@ -1,9 +1,9 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-10-07 13:42:49",
+    "release_timestamp":  "2026-10-07 13:53:50",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
     "mandatory":  true,
-    "version":  "3.12.0",
+    "version":  "3.12.1",
     "release_date":  "2026-10-07",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
@@ -12,6 +12,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.12.0 - Deep Copy/Paste Healing \u0026 Safe Files Auto-Restore: Tu dong khuc phuc Copy/Paste, menu chuot phai (CommandBars Cell/Row/Column/Standard reset), phim tat va selection ngay ca khi mo file sach (khong chua macro kangatang); reset toan dien Control ID 19, 21, 22, 21437; mo khoa EnableSelection cho moi sheet.",
+    "changelog":  "v3.12.1 - Enforced Shortcut Routing \u0026 Dual-Tier Healer: Dinh tuyen bat buoc phim tat Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+Insert, Shift+Insert, Shift+Delete vao quy trinh sao chep native cua Add-in (ExecuteMso + Selection/ActiveSheet fallback), khac phuc triet de loi liet phim tat do virus xoa bo hoac loi accelerator table cua Office; kich hoat tu dong moi khi switch workbook (WorkbookActivate).",
     "hub_ip":  "192.168.223.7"
 }

@@ -81,6 +81,7 @@ Private Sub xlApp_WorkbookActivate(ByVal Wb As Workbook)
     On Error Resume Next
     If bIsFolderScanning Then Exit Sub
     Call ScheduleShieldCheck
+    Call RestoreExcelClipboardAndUI(Wb)
     On Error GoTo 0
 End Sub
 
@@ -108,7 +109,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu cua so quet ngam cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.12.0"
+Public Const CURRENT_VERSION As String = "3.12.1"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
@@ -807,27 +808,144 @@ BackupError:
 End Function
 
 ' ===========================================================================
-' KHOI PHUC CLIPBOARD, PHIM TAT VA GIAO DIEN EXCEL (v3.12.0)
+' THU TUC PHIM TAT NATIVE COPY / PASTE / CUT (FAIL-SAFE DUAL ROUTING v3.12.1)
+' Dam bao Ctrl+C, Ctrl+V, Ctrl+X luon hoat dong 100% tren moi workbook/sheet
+' bat ke loi ban phim accelerator hay can thiep cua virus
+' ===========================================================================
+Public Sub Kangatang_ShortcutCopy()
+    On Error Resume Next
+    ' Uu tien 1: Selection.Copy (nhanh, truc tiep, vien marching ants ro net)
+    If Not Selection Is Nothing Then
+        Selection.Copy
+    End If
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' Uu tien 2: Native Ribbon Command (tuong duong bam nut Copy tren Ribbon/Chuot phai)
+        Application.CommandBars.ExecuteMso "Copy"
+    End If
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' Uu tien 3: ActiveCell.Copy
+        If Not ActiveCell Is Nothing Then
+            ActiveCell.Copy
+        End If
+    End If
+    On Error GoTo 0
+End Sub
+
+Public Sub Kangatang_ShortcutPaste()
+    On Error Resume Next
+    ' Uu tien 1: Native Ribbon Command (ho tro toan dien: cell range, text, object ngoai)
+    Application.CommandBars.ExecuteMso "Paste"
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' Uu tien 2: ActiveSheet.Paste
+        If Not ActiveSheet Is Nothing Then
+            ActiveSheet.Paste
+        End If
+    End If
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' Uu tien 3: ActiveCell.PasteSpecial
+        If Not ActiveCell Is Nothing Then
+            ActiveCell.PasteSpecial -4104 ' xlPasteAll
+        End If
+    End If
+    On Error GoTo 0
+End Sub
+
+Public Sub Kangatang_ShortcutCut()
+    On Error Resume Next
+    ' Uu tien 1: Selection.Cut
+    If Not Selection Is Nothing Then
+        Selection.Cut
+    End If
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' Uu tien 2: Native Ribbon Command
+        Application.CommandBars.ExecuteMso "Cut"
+    End If
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' Uu tien 3: ActiveCell.Cut
+        If Not ActiveCell Is Nothing Then
+            ActiveCell.Cut
+        End If
+    End If
+    On Error GoTo 0
+End Sub
+
+' ===========================================================================
+' KHOI PHUC CLIPBOARD, PHIM TAT VA GIAO DIEN EXCEL (v3.12.1)
 ' Khac phuc triet de loi khong the Copy/Paste hoac mat chuot phai do tan du virus
 ' ===========================================================================
 Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Nothing)
     On Error Resume Next
     
-    ' 1. Go bo cac phim tat bi virus chiem dung (khong truyen tham so thu 2 de tro ve mac dinh cua Excel)
+    Dim sAddinPrefix As String
+    sAddinPrefix = "'" & ThisWorkbook.Name & "'!"
+    
+    ' 1. Go bo toan bo cac phim tat bi virus chiem dung hoac vo hieu hoa
     Application.OnKey "^c"
+    Application.OnKey "^C"
+    Application.OnKey "^{c}"
+    Application.OnKey "^{C}"
+    Application.OnKey "^+{c}"
+    Application.OnKey "^+{C}"
+    Application.OnKey "^{INSERT}"
+    
     Application.OnKey "^v"
+    Application.OnKey "^V"
+    Application.OnKey "^{v}"
+    Application.OnKey "^{V}"
+    Application.OnKey "^+{v}"
+    Application.OnKey "^+{V}"
+    Application.OnKey "+{INSERT}"
+    
     Application.OnKey "^x"
+    Application.OnKey "^X"
+    Application.OnKey "^{x}"
+    Application.OnKey "^{X}"
+    Application.OnKey "^+{x}"
+    Application.OnKey "^+{X}"
+    Application.OnKey "+{DELETE}"
+    
+    Application.OnKey "^z"
+    Application.OnKey "^Z"
+    Application.OnKey "^y"
+    Application.OnKey "^Y"
     Application.OnKey "^d"
+    Application.OnKey "^D"
     Application.OnKey "^r"
+    Application.OnKey "^R"
     Application.OnKey "%{F11}"
     Application.OnKey "%{F8}"
-    Application.OnKey "^z"
-    Application.OnKey "^y"
     
-    ' 2. Khoi phuc tinh nang keo tha o tinh
+    ' 2. Enforced Shortcut Routing (v3.12.1):
+    ' Dinh tuyen truc tiep Ctrl+C, Ctrl+V, Ctrl+X vao quy trinh sao chep cua Add-in
+    ' Khac phuc triet de tinh trang liet phim tat do hong ban accelerator cua Office
+    Application.OnKey "^c", sAddinPrefix & "Kangatang_ShortcutCopy"
+    Application.OnKey "^C", sAddinPrefix & "Kangatang_ShortcutCopy"
+    Application.OnKey "^{c}", sAddinPrefix & "Kangatang_ShortcutCopy"
+    Application.OnKey "^{C}", sAddinPrefix & "Kangatang_ShortcutCopy"
+    Application.OnKey "^{INSERT}", sAddinPrefix & "Kangatang_ShortcutCopy"
+    
+    Application.OnKey "^v", sAddinPrefix & "Kangatang_ShortcutPaste"
+    Application.OnKey "^V", sAddinPrefix & "Kangatang_ShortcutPaste"
+    Application.OnKey "^{v}", sAddinPrefix & "Kangatang_ShortcutPaste"
+    Application.OnKey "^{V}", sAddinPrefix & "Kangatang_ShortcutPaste"
+    Application.OnKey "+{INSERT}", sAddinPrefix & "Kangatang_ShortcutPaste"
+    
+    Application.OnKey "^x", sAddinPrefix & "Kangatang_ShortcutCut"
+    Application.OnKey "^X", sAddinPrefix & "Kangatang_ShortcutCut"
+    Application.OnKey "^{x}", sAddinPrefix & "Kangatang_ShortcutCut"
+    Application.OnKey "^{X}", sAddinPrefix & "Kangatang_ShortcutCut"
+    Application.OnKey "+{DELETE}", sAddinPrefix & "Kangatang_ShortcutCut"
+    
+    ' 3. Khoi phuc tinh nang keo tha o tinh
     Application.CellDragAndDrop = True
     
-    ' 3. Bat lai va Reset TOAN BO cac CommandBars (Cell, Row, Column, etc.)
+    ' 4. Bat lai va Reset TOAN BO cac CommandBars (Cell, Row, Column, etc.)
     Dim iCb As Long, cbItem As Object, ctrlItem As Object
     For iCb = 1 To Application.CommandBars.Count
         Set cbItem = Nothing
@@ -853,7 +971,7 @@ Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Noth
         If Not fCtrl Is Nothing Then fCtrl.Enabled = True
     Next vId
     
-    ' 4. Xoa triet de cac hook su kien mo coi cua Excel Application
+    ' 5. Xoa triet de cac hook su kien mo coi cua Excel Application
     Application.OnSheetActivate = ""
     Application.OnSheetDeactivate = ""
     Application.OnWindow = ""
@@ -861,7 +979,7 @@ Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Noth
     Application.OnDoubleClick = ""
     Application.OnEntry = ""
     
-    ' 5. Khoi phuc quyen chon o tinh va bo khoa tren cac sheet (xlNoRestrictions = -4142)
+    ' 6. Khoi phuc quyen chon o tinh va bo khoa tren cac sheet (xlNoRestrictions = -4142)
     Dim wbToFix As Workbook, sItem As Object
     Set wbToFix = targetWb
     If wbToFix Is Nothing Then Set wbToFix = ActiveWorkbook
@@ -873,7 +991,7 @@ Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Noth
         Next sItem
     End If
     
-    WriteLog "[UI_RESTORE] Excel clipboard, shortcuts, context menus, and event hooks restored (v3.12.0)."
+    WriteLog "[UI_RESTORE] Excel clipboard, shortcuts, context menus, and event hooks restored (v" & CURRENT_VERSION & ")."
     On Error GoTo 0
 End Sub
 
