@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Install_Client.ps1
 # PowerShell Installer cho May Client trong Mang LAN
 # Phien ban: v3.11.0 (Threat Collector & CopyPaste Fix)
@@ -196,6 +196,18 @@ foreach ($ver in @("16.0", "15.0", "14.0")) {
                 if ($val -like "*KangatangGuard.xlam*") {
                     Remove-ItemProperty -Path $optKey -Name $p.Name -Force -ErrorAction SilentlyContinue
                     Write-Host "   -> [OK] Da go bo dang ky trung lap: $optKey\$($p.Name)" -ForegroundColor Green
+                }
+            }
+        }
+        
+        # Xoa bo Add-in Manager entry tro den KangatangGuard (tranh loi load tu UNC)
+        $mgrKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Add-in Manager"
+        if (Test-Path $mgrKey) {
+            $mProps = (Get-ItemProperty -Path $mgrKey -ErrorAction SilentlyContinue).psobject.Properties
+            foreach ($mp in $mProps) {
+                if ($mp.Name -like "*KangatangGuard*" -or $mp.Name -like "*addin_kangatang*") {
+                    Remove-ItemProperty -Path $mgrKey -Name $mp.Name -Force -ErrorAction SilentlyContinue
+                    Write-Host "   -> [OK] Da go bo Add-in Manager: $mgrKey\$($mp.Name)" -ForegroundColor Green
                 }
             }
         }

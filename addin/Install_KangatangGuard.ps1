@@ -315,6 +315,14 @@ try {
     # Tich hop Ribbon CustomUI XML (Icon HD 32x32)
     Add-RibbonCustomUI -targetXlam $xlamPath
     
+    # Dong bo ban sao xlam vao thu muc nguon repository (addin\KangatangGuard.xlam)
+    $repoXlam = Join-Path $ScriptDir "KangatangGuard.xlam"
+    try {
+        Set-ItemProperty -Path $repoXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+        Copy-Item -Path $xlamPath -Destination $repoXlam -Force
+        Write-Host "   -> [OK] Da cap nhat ban sao repository: $repoXlam" -ForegroundColor Green
+    } catch {}
+
     # ==============================================================================
     # DON DEP XUNG DOT: XOA BAN SAO VA DANG KY TRUNG LAP TRONG ADDINS / OPTIONS OPEN
     # ==============================================================================
@@ -327,7 +335,7 @@ try {
         Write-Host "   -> [OK] Da xoa ban sao trung lap trong AddIns: $xlamAddInsPath" -ForegroundColor Green
     }
     
-    # Xoa bo khoa OPEN* trong Registry Options (tranh nap 2 lan gay xung dot ten tep)
+    # Xoa bo khoa OPEN* trong Registry Options va Add-in Manager (tranh nap 2 lan hoac tu UNC gay loi)
     foreach ($ver in @("16.0", "15.0", "14.0")) {
         $optKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Options"
         if (Test-Path $optKey) {
@@ -339,6 +347,18 @@ try {
                         Remove-ItemProperty -Path $optKey -Name $p.Name -Force -ErrorAction SilentlyContinue
                         Write-Host "   -> [OK] Da go bo dang ky trung lap: $optKey\$($p.Name)" -ForegroundColor Green
                     }
+                }
+            }
+        }
+        
+        # Xoa bo Add-in Manager entry tro den KangatangGuard (tranh loi load tu UNC)
+        $mgrKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Add-in Manager"
+        if (Test-Path $mgrKey) {
+            $mProps = (Get-ItemProperty -Path $mgrKey -ErrorAction SilentlyContinue).psobject.Properties
+            foreach ($mp in $mProps) {
+                if ($mp.Name -like "*KangatangGuard*" -or $mp.Name -like "*addin_kangatang*") {
+                    Remove-ItemProperty -Path $mgrKey -Name $mp.Name -Force -ErrorAction SilentlyContinue
+                    Write-Host "   -> [OK] Da go bo Add-in Manager: $mgrKey\$($mp.Name)" -ForegroundColor Green
                 }
             }
         }

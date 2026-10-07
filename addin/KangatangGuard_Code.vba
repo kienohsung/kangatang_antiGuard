@@ -1,6 +1,6 @@
 '==============================================================================
 ' KangatangGuard - Excel Add-in Diet Virus Macro Kangatang
-' Phien ban: v3.10.0 (Runtime Shield: chan lay qua OnSheetActivate, cach ly XLSTART, vaccine)
+' Phien ban: v3.11.0 (Threat Collector, Password Bypass, Copy/Paste Healing & Runtime Shield)
 ' Mo ta: Tu dong quet va tieu diet virus macro Kangatang/Laroux/mypersonnel
 '         ngay khi mo file Excel. Ho tro Trung tam Phan phoi May chu Tep LAN:
 '         \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang
@@ -108,7 +108,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu cua so quet ngam cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.10.0"
+Public Const CURRENT_VERSION As String = "3.11.0"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
@@ -453,6 +453,20 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
     ' v3.10.0: dang cho Two-phase purge cho chinh workbook nay -> khong xu ly lai (tranh backup/OnTime trung)
     If IsPurgePending(wb) Then Exit Sub
     
+    ' Uu tien tuyet doi (v3.11.0): Neu ten workbook la nguon virus (mypersonnel*, kangatang*, mypersonel*)
+    ' Dong va cach ly ngay lap tuc - bat ke co chua code macro hoat dong hay khong,
+    ' khong phu thuoc vao quyen AccessVBOM hay CheckWorkbookInfection!
+    If IsVirusName(wb.Name) Then
+        WriteLog "[VIRUS_CARRIER_DETECTED] Immediate quarantine for virus carrier: " & wb.FullName
+        Call NeutralizeVirusHooks
+        If bShieldContext Then
+            Call QuarantineLoadedStartupWorkbook(wb)
+        Else
+            Call ScheduleShieldCheck
+        End If
+        Exit Sub
+    End If
+    
     Dim virusFound As Boolean
     Dim detailMsg As String
     virusFound = CheckWorkbookInfection(wb, detailMsg)
@@ -468,19 +482,6 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
     
     ' Uu tien 1: Go hook su kien cua virus dang chay trong RAM (chan lay tiep sang file khac)
     Call NeutralizeVirusHooks
-    
-    ' Uu tien 2: Tep nguon virus nam trong thu muc khoi dong (vd XLSTART\mypersonnel1.xls)
-    ' -> dong va cach ly thay vi sua (khong de lai workbook rong mo an moi lan khoi dong)
-    If IsVirusName(wb.Name) And IsInStartupFolder(wb.FullName) Then
-        If bShieldContext Then
-            Call QuarantineLoadedStartupWorkbook(wb)
-        Else
-            ' Dang trong su kien cua chinh workbook -> khong dong ngay (co the crash Excel), hen 1 giay sau
-            WriteLog "[XLSTART_SOURCE] Deferred quarantine scheduled: " & wb.FullName
-            Call ScheduleShieldCheck
-        End If
-        Exit Sub
-    End If
     
     If wb.ReadOnly Then
         ' Lam sach trong bo nho (khong ghi de tep) de chan lay lan trong phien lam viec
@@ -1474,12 +1475,12 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
         isMandatory = (LCase(ExtractJsonValue(jsonText, "mandatory")) = "true")
         If isMandatory And bSilent Then
             WriteLog "[UPDATE_MANDATORY] Auto-applying v" & serverVer & " from " & updateSource
-            Call PerformLanUpdate(updateSource, serverVer)
+            Call PerformLanUpdate(updateSource, serverVer, True)
         Else
             Dim ans As VbMsgBoxResult
             ans = MsgBoxW(promptMsg, vbYesNo + vbInformation, Uni("KangatangGuard - C\u00f3 phi\u00ean b\u1ea3n m\u1edbi v") & serverVer)
             If ans = vbYes Then
-                Call PerformLanUpdate(updateSource, serverVer)
+                Call PerformLanUpdate(updateSource, serverVer, False)
             End If
         End If
     Else
@@ -1543,7 +1544,7 @@ Public Function IsNewerVersion(ByVal vServer As String, ByVal vLocal As String) 
     On Error GoTo 0
 End Function
 
-Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As String)
+Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As String, Optional ByVal bSilent As Boolean = False)
     On Error GoTo InstallErr
     
     Dim fso As Object, wsh As Object
@@ -1603,8 +1604,7 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     
     Dim ts As Object
     Set ts = fso.CreateTextFile(updaterBat, True)
-    ' v3.10.0: Updater CHO Excel dong han roi moi chep (Excel khoa file .xlam khi dang chay),
-    ' xac minh bang fc /b va CHI ghi InstalledVersion khi chep thanh cong. Ghi log update_apply.log.
+    ' v3.11.0: Polling nhanh 2 giay, tu dong don zombie process sau 60s, assert AccessVBOM
     ts.WriteLine "@echo off"
     ts.WriteLine "setlocal"
     ts.WriteLine "set ""LOG=" & guardDir & "\update_apply.log"""
@@ -1613,11 +1613,16 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     ts.WriteLine ":WAIT_EXCEL"
     ts.WriteLine "tasklist /FI ""IMAGENAME eq EXCEL.EXE"" /NH 2>nul | find /I ""EXCEL.EXE"" >nul"
     ts.WriteLine "if errorlevel 1 goto APPLY"
-    ts.WriteLine "set /a WAITED+=15"
-    ts.WriteLine "if %WAITED% GEQ 43200 goto TIMEOUT"
-    ts.WriteLine "ping -n 16 127.0.0.1 >nul"
+    ts.WriteLine "set /a WAITED+=2"
+    ts.WriteLine "if %WAITED% GEQ 60 goto FORCE_CLOSE"
+    ts.WriteLine "ping -n 3 127.0.0.1 >nul"
     ts.WriteLine "goto WAIT_EXCEL"
+    ts.WriteLine ":FORCE_CLOSE"
+    ts.WriteLine "echo [%date% %time%] Force-closing orphan Excel processes... >> ""%LOG%"""
+    ts.WriteLine "taskkill /F /IM EXCEL.EXE >nul 2>&1"
+    ts.WriteLine "ping -n 3 127.0.0.1 >nul"
     ts.WriteLine ":APPLY"
+    ts.WriteLine "ping -n 2 127.0.0.1 >nul"
     ts.WriteLine "attrib -r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "attrib -r """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "attrib -r """ & stagedDir & "\KangatangGuard.xlam"" >nul 2>&1"
@@ -1628,13 +1633,16 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     ts.WriteLine "if errorlevel 1 goto FAIL"
     ts.WriteLine "if exist """ & addInsDir & "\KangatangGuard.xlam"" copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "if exist """ & stagedDir & "\Kangatang_FolderScanner.ps1"" copy /y """ & stagedDir & "\Kangatang_FolderScanner.ps1"" """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1"
-    ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""InstalledVersion"" /t REG_SZ /d """ & serverVer & """ /f >nul"
-    ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""ScannerScript"" /t REG_SZ /d """ & guardDir & "\Kangatang_FolderScanner.ps1"" /f >nul"
+    ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""InstalledVersion"" /t REG_SZ /d """ & serverVer & """ /f >nul 2>&1"
+    ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""ScannerScript"" /t REG_SZ /d """ & guardDir & "\Kangatang_FolderScanner.ps1"" /f >nul 2>&1"
+    ts.WriteLine "reg add ""HKCU\Software\Microsoft\Office\16.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1"
+    ts.WriteLine "reg add ""HKCU\Software\Microsoft\Office\15.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1"
+    ts.WriteLine "reg add ""HKCU\Software\Microsoft\Office\14.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1"
+    ts.WriteLine "reg delete ""HKCU\Software\Microsoft\Office\16.0\Excel\Add-in Manager"" /v ""KangatangGuard.xlam"" /f >nul 2>&1"
+    ts.WriteLine "reg delete ""HKCU\Software\Microsoft\Office\15.0\Excel\Add-in Manager"" /v ""KangatangGuard.xlam"" /f >nul 2>&1"
+    ts.WriteLine "reg delete ""HKCU\Software\Microsoft\Office\14.0\Excel\Add-in Manager"" /v ""KangatangGuard.xlam"" /f >nul 2>&1"
     ts.WriteLine "echo [%date% %time%] SUCCESS: applied v" & serverVer & " >> ""%LOG%"""
     ts.WriteLine "exit /b 0"
-    ts.WriteLine ":TIMEOUT"
-    ts.WriteLine "echo [%date% %time%] TIMEOUT: Excel still running after 12h, update NOT applied >> ""%LOG%"""
-    ts.WriteLine "exit /b 2"
     ts.WriteLine ":FAIL"
     ts.WriteLine "echo [%date% %time%] FAIL: copy/verify failed, InstalledVersion NOT changed >> ""%LOG%"""
     ts.WriteLine "exit /b 1"
@@ -1646,9 +1654,16 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     
     WriteLog "[UPDATE_STAGED] v" & serverVer & " from Hub: " & updateSource & " (will apply after Excel exits)"
     
-    MsgBoxW Uni("\u0110\u00e3 t\u1ea3i b\u1ea3n c\u1eadp nh\u1eadt v") & serverVer & Uni(" th\u00e0nh c\u00f4ng!" & vbCrLf & vbCrLf & _
-                "B\u1ea3n m\u1edbi s\u1ebd \u0111\u01b0\u1ee3c \u00e1p d\u1ee5ng t\u1ef1 \u0111\u1ed9ng ngay sau khi b\u1ea1n \u0110\u00d3NG H\u1ebeT c\u00e1c c\u1eeda s\u1ed5 Excel."), _
-            vbInformation, Uni("KangatangGuard - C\u1eadp nh\u1eadt th\u00e0nh c\u00f4ng")
+    If Not bSilent Then
+        Dim askClose As VbMsgBoxResult
+        askClose = MsgBoxW(Uni("\u0110\u00e3 t\u1ea3i b\u1ea3n c\u1eadp nh\u1eadt v") & serverVer & Uni(" th\u00e0nh c\u00f4ng!" & vbCrLf & vbCrLf & _
+                               "B\u1ea1n c\u00f3 mu\u1ed1n \u0110\u00d3NG EXCEL NGAY B\u00c2Y GI\u1edc \u0111\u1ec3 ho\u00e0n t\u1ea5t c\u1eadp nh\u1eadt kh\u00f4ng?" & vbCrLf & _
+                               "(Ch\u1ecdn 'Yes' \u0111\u1ec3 \u00e1p d\u1ee5ng ngay, ho\u1eb7c 'No' \u0111\u1ec3 t\u1ef1 \u0111\u1ed9ng c\u1eadp nh\u1eadt sau khi b\u1ea1n l\u00e0m vi\u1ec7c xong)."), _
+                           vbYesNo + vbQuestion, Uni("KangatangGuard - C\u1eadp nh\u1eadt th\u00e0nh c\u00f4ng"))
+        If askClose = vbYes Then
+            Application.Quit
+        End If
+    End If
             
     Set fso = Nothing
     Set wsh = Nothing
@@ -1797,7 +1812,11 @@ Public Function QuickCheckWorkbook(ByVal wb As Workbook, ByRef reason As String)
     If wb Is Nothing Then Exit Function
     If wb Is ThisWorkbook Then Exit Function
     
-    Dim sh As Object, nmx As String
+    If IsVirusName(wb.Name) Then
+        reason = "filename:" & wb.Name
+        QuickCheckWorkbook = True
+        Exit Function
+    End If
     For Each sh In wb.Sheets
         nmx = ""
         nmx = sh.Name
@@ -1929,6 +1948,18 @@ Public Sub ShieldStartupSweep()
     WriteLog "[SHIELD_STARTUP] Sweep started (v" & CURRENT_VERSION & ")"
     
     Call NeutralizeVirusHooks
+    
+    ' Dong va cach ly ngay cac workbook mang ten virus dang mo (mypersonnel*, kangatang*)
+    Dim curWb As Workbook
+    For Each curWb In Application.Workbooks
+        If Not curWb Is ThisWorkbook Then
+            If IsVirusName(curWb.Name) Then
+                WriteLog "[SHIELD_STARTUP] Closing and quarantining virus carrier: " & curWb.FullName
+                Call NeutralizeVirusHooks
+                Call QuarantineLoadedStartupWorkbook(curWb)
+            End If
+        End If
+    Next curWb
     
     Dim wbs As New Collection, addinWbs As New Collection
     Dim wb As Workbook
@@ -2125,6 +2156,16 @@ Public Sub SweepStartupFolders()
             For Each p In found
                 If Not IsWorkbookOpenByPath(CStr(p)) Then
                     If QuarantineFile(CStr(p)) Then WriteLog "[XLSTART_QUARANTINED] " & p
+                Else
+                    ' v3.11.0: Neu dang mo trong Excel: tim va dong workbook roi cach ly ngay lap tuc
+                    Dim openWb As Workbook
+                    For Each openWb In Application.Workbooks
+                        If LCase$(openWb.FullName) = LCase$(CStr(p)) Or LCase$(openWb.Name) = LCase$(fso.GetFileName(CStr(p))) Then
+                            Call NeutralizeVirusHooks
+                            Call QuarantineLoadedStartupWorkbook(openWb)
+                            Exit For
+                        End If
+                    Next openWb
                 End If
             Next p
         End If
@@ -2245,8 +2286,40 @@ Public Sub CleanAddInCollisions()
                 End If
             Next dv
         End If
+        
+        ' 5. (v3.11.0) Xoa khoi Add-in Manager neu tro toi KangatangGuard hoac UNC path cu
+        Dim aimPath As String, aimVals As Variant, av As Variant, avTypes As Variant
+        aimPath = "Software\Microsoft\Office\" & ver & "\Excel\Add-in Manager"
+        reg.EnumValues HKEY_CURRENT_USER, aimPath, aimVals, avTypes
+        If IsArray(aimVals) Then
+            For Each av In aimVals
+                Dim aimStr As String
+                aimStr = CStr(av)
+                If InStr(1, aimStr, "KangatangGuard", vbTextCompare) > 0 Or InStr(1, aimStr, "addin_kangatang", vbTextCompare) > 0 Then
+                    reg.DeleteValue HKEY_CURRENT_USER, aimPath, aimStr
+                    WriteLog "[COLLISION_FIX] Removed from Add-in Manager: " & aimStr
+                End If
+            Next av
+        End If
+        
+        ' 6. (v3.11.0) Dam bao AccessVBOM = 1 va AllowNetworkLocations = 1 trong HKCU Security
+        Dim secPath As String
+        secPath = "Software\Microsoft\Office\" & ver & "\Excel\Security"
+        reg.SetDWORDValue HKEY_CURRENT_USER, secPath, "AccessVBOM", 1
+        reg.SetDWORDValue HKEY_CURRENT_USER, secPath, "AllowNetworkLocations", 1
     Next ver
     
+    ' 7. (v3.11.0) Go bo cac Add-in trung lap trong Application.AddIns (chi cho phep duy nhat XLSTART)
+    Dim oAi As Object
+    On Error Resume Next
+    For Each oAi In Application.AddIns
+        If InStr(1, oAi.Name, "KangatangGuard", vbTextCompare) > 0 Or InStr(1, oAi.FullName, "KangatangGuard", vbTextCompare) > 0 Then
+            If InStr(1, oAi.FullName, "XLSTART", vbTextCompare) = 0 Then
+                oAi.Installed = False
+                WriteLog "[COLLISION_FIX] Uninstalled duplicate Add-in from Application.AddIns: " & oAi.FullName
+            End If
+        End If
+    Next oAi
     Err.Clear
 End Sub
 
