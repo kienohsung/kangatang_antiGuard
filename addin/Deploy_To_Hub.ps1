@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Deploy_To_Hub.ps1
 # Lenh Phat hanh va Dong bo Phien ban moi len May chu LAN & Tao Clone Cuc bo
 # Phien ban: v3.8.1 (Ho tro Bo cong cu Standalone & Dual-Mirror Release)
@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.11.0"
+$ReleaseVersion = "3.12.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,9 +51,9 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    # v3.11.0: Threat Telemetry, Password Bypass & Copy/Paste Recovery
+    # v3.12.0: Deep Copy/Paste Healing, Auto-Restore on Safe Files & Unrestricted Selection
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Threat Telemetry, Password Bypass & Copy/Paste Recovery: Thu thap code ma doc luu tru ve may ca nhan 223.176/Threat_Samples (khu trung lap MD5/SHA256, chan luu len 223.7); xu ly file/sheet co mat khau bao ve khong treo; tu dong khoi phuc Copy/Paste, keo tha o, chuot phai Context menu va go bo sach Application hooks mo coi."
+    changelog         = "v${ReleaseVersion} - Deep Copy/Paste Healing & Safe Files Auto-Restore: Tu dong khuc phuc Copy/Paste, menu chuot phai (CommandBars Cell/Row/Column/Standard reset), phim tat va selection ngay ca khi mo file sach (khong chua macro kangatang); reset toan dien Control ID 19, 21, 22, 21437; mo khoa EnableSelection cho moi sheet."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4

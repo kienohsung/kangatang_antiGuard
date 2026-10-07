@@ -1,6 +1,6 @@
 '==============================================================================
 ' KangatangGuard - Excel Add-in Diet Virus Macro Kangatang
-' Phien ban: v3.11.0 (Threat Collector, Password Bypass, Copy/Paste Healing & Runtime Shield)
+' Phien ban: v3.12.0 (Deep Copy/Paste Healing, Auto-Restore on Safe Files & Unrestricted Selection)
 ' Mo ta: Tu dong quet va tieu diet virus macro Kangatang/Laroux/mypersonnel
 '         ngay khi mo file Excel. Ho tro Trung tam Phan phoi May chu Tep LAN:
 '         \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang
@@ -108,7 +108,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu cua so quet ngam cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.11.0"
+Public Const CURRENT_VERSION As String = "3.12.0"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
@@ -475,6 +475,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
     
     If Not virusFound Then
         WriteLog "[SAFE] " & wb.FullName
+        Call RestoreExcelClipboardAndUI(wb)
         Exit Sub
     End If
     
@@ -806,7 +807,7 @@ BackupError:
 End Function
 
 ' ===========================================================================
-' KHOI PHUC CLIPBOARD, PHIM TAT VA GIAO DIEN EXCEL (v3.11.0)
+' KHOI PHUC CLIPBOARD, PHIM TAT VA GIAO DIEN EXCEL (v3.12.0)
 ' Khac phuc triet de loi khong the Copy/Paste hoac mat chuot phai do tan du virus
 ' ===========================================================================
 Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Nothing)
@@ -820,21 +821,37 @@ Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Noth
     Application.OnKey "^r"
     Application.OnKey "%{F11}"
     Application.OnKey "%{F8}"
+    Application.OnKey "^z"
+    Application.OnKey "^y"
     
-    ' 2. Khoi phuc tinh nang keo tha o tinh va che do sao chep
+    ' 2. Khoi phuc tinh nang keo tha o tinh
     Application.CellDragAndDrop = True
-    Application.CutCopyMode = False
     
-    ' 3. Bat lai menu chuot phai cho O tinh (Cell), Dong (Row), Cot (Column)
-    Dim cb As Object
-    Set cb = Application.CommandBars("Cell")
-    If Not cb Is Nothing Then cb.Enabled = True
+    ' 3. Bat lai va Reset TOAN BO cac CommandBars (Cell, Row, Column, etc.)
+    Dim iCb As Long, cbItem As Object, ctrlItem As Object
+    For iCb = 1 To Application.CommandBars.Count
+        Set cbItem = Nothing
+        Set cbItem = Application.CommandBars(iCb)
+        If Not cbItem Is Nothing Then
+            Select Case cbItem.Name
+                Case "Cell", "Row", "Column", "XLM Cell", "Standard", "Worksheet Menu Bar"
+                    cbItem.Enabled = True
+                    cbItem.Reset
+                    For Each ctrlItem In cbItem.Controls
+                        ctrlItem.Enabled = True
+                    Next ctrlItem
+            End Select
+        End If
+    Next iCb
     
-    Set cb = Application.CommandBars("Row")
-    If Not cb Is Nothing Then cb.Enabled = True
-    
-    Set cb = Application.CommandBars("Column")
-    If Not cb Is Nothing Then cb.Enabled = True
+    ' Bat cac nut Copy, Cut, Paste tren he thong theo Office Control ID
+    Dim sysIds As Variant, vId As Variant, fCtrl As Object
+    sysIds = Array(19, 21, 22, 21437, 3624, 755, 369)
+    For Each vId In sysIds
+        Set fCtrl = Nothing
+        Set fCtrl = Application.CommandBars.FindControl(Id:=CLng(vId))
+        If Not fCtrl Is Nothing Then fCtrl.Enabled = True
+    Next vId
     
     ' 4. Xoa triet de cac hook su kien mo coi cua Excel Application
     Application.OnSheetActivate = ""
@@ -844,21 +861,19 @@ Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Noth
     Application.OnDoubleClick = ""
     Application.OnEntry = ""
     
-    ' 5. Khoi phuc quyen chon o tinh tren cac sheet bi khoa chon (xlNoSelection = 0 -> xlNoRestrictions = -4142)
+    ' 5. Khoi phuc quyen chon o tinh va bo khoa tren cac sheet (xlNoRestrictions = -4142)
     Dim wbToFix As Workbook, sItem As Object
     Set wbToFix = targetWb
     If wbToFix Is Nothing Then Set wbToFix = ActiveWorkbook
     If Not wbToFix Is Nothing Then
         For Each sItem In wbToFix.Sheets
             On Error Resume Next
-            If sItem.EnableSelection = 0 Then
-                Call TryUnprotectSheet(sItem)
-                sItem.EnableSelection = -4142
-            End If
+            Call TryUnprotectSheet(sItem)
+            sItem.EnableSelection = -4142
         Next sItem
     End If
     
-    WriteLog "[UI_RESTORE] Excel clipboard, shortcuts, context menus, and event hooks restored."
+    WriteLog "[UI_RESTORE] Excel clipboard, shortcuts, context menus, and event hooks restored (v3.12.0)."
     On Error GoTo 0
 End Sub
 
