@@ -73,6 +73,8 @@ Private Sub xlApp_SheetActivate(ByVal Sh As Object)
     ' v3.10.0: Virus Kangatang lay qua Application.OnSheetActivate -> kiem tra tre (debounce) sau moi lan doi sheet
     On Error Resume Next
     If bIsFolderScanning Then Exit Sub
+    ' v3.13.0: Neu dang co du lieu Copy/Cut (CutCopyMode <> 0), tuyet doi khong can thiep tranh lam mat clipboard
+    If Application.CutCopyMode <> 0 Then Exit Sub
     Call ScheduleShieldCheck
     On Error GoTo 0
 End Sub
@@ -80,6 +82,8 @@ End Sub
 Private Sub xlApp_WorkbookActivate(ByVal Wb As Workbook)
     On Error Resume Next
     If bIsFolderScanning Then Exit Sub
+    ' v3.13.0: Bao toan clipboard khi chuyen doi qua lai giua cac file Excel (Cross-Workbook Copy/Paste)
+    If Application.CutCopyMode <> 0 Then Exit Sub
     Call ScheduleShieldCheck
     Call RestoreExcelClipboardAndUI(Wb)
     On Error GoTo 0
@@ -109,7 +113,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu cua so quet ngam cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.12.2"
+Public Const CURRENT_VERSION As String = "3.13.0"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
@@ -871,11 +875,15 @@ Public Sub Kangatang_ShortcutCut()
 End Sub
 
 ' ===========================================================================
-' KHOI PHUC CLIPBOARD, PHIM TAT VA GIAO DIEN EXCEL (v3.12.1)
+' KHOI PHUC CLIPBOARD, PHIM TAT VA GIAO DIEN EXCEL (v3.13.0)
 ' Khac phuc triet de loi khong the Copy/Paste hoac mat chuot phai do tan du virus
 ' ===========================================================================
 Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Nothing)
     On Error Resume Next
+    
+    ' v3.13.0: Neu dang co du lieu Copy/Cut (CutCopyMode <> 0), tuyet doi khong thuc hien
+    ' cac lenh lam huy buffer nhu CellDragAndDrop hoac CommandBars.Reset.
+    If Application.CutCopyMode <> 0 Then Exit Sub
     
     Dim sAddinPrefix As String
     sAddinPrefix = "'" & ThisWorkbook.Name & "'!"
@@ -2913,16 +2921,17 @@ Option Explicit
 ' Duong dan thu muc mau ma doc
 Private Const LOCAL_SAMPLE_DIR As String = "D:\7. AI tools\kangatang\Threat_Samples"
 Private Const LOCAL_BASE_DIR As String = "D:\7. AI tools\kangatang"
-Private Const LAN_SAMPLE_DIR As String = "\\192.168.223.176\KangatangGuard_Hub\Threat_Samples"
-Private Const LAN_BASE_DIR As String = "\\192.168.223.176\KangatangGuard_Hub"
+Private Const LAN_SAMPLE_DIR As String = "\\192.168.223.176\test\Threat_Samples"
+Private Const LAN_BASE_DIR As String = "\\192.168.223.176\test\Threat_Samples"
+Private Const LAN_FALLBACK_DIR As String = "\\192.168.223.176\KangatangGuard_Hub\Threat_Samples"
 Private Const FORBIDDEN_SERVER As String = "192.168.223.7"
 
 ' ===========================================================================
-' XAC DINH THU MUC LUU MAU MA DOC
+' XAC DINH THU MUC LUU MAU MA DOC (v3.13.0)
 ' Uu tien:
-'   1. Cuc bo: D:\7. AI tools\kangatang\Threat_Samples\
-'   2. Mang LAN may ca nhan: \\192.168.223.176\KangatangGuard_Hub\Threat_Samples\
-'   3. Fallback: %APPDATA%\KangatangGuard\Threat_Samples\
+'   1. Cuc bo: D:\7. AI tools\kangatang\Threat_Samples\ (May Master 223.176)
+'   2. Mang LAN may ca nhan 192.168.223.176 qua share test\Threat_Samples (Writeable)
+'   3. Fallback cuc bo: %APPDATA%\KangatangGuard\Threat_Samples\
 ' TUYET DOI KHONG LUU TREN 223.7!
 ' ===========================================================================
 Private Function GetThreatSampleFolder() As String
@@ -2944,15 +2953,16 @@ Private Function GetThreatSampleFolder() As String
     
     ' 2. Kiem tra mang LAN may ca nhan 192.168.223.176 (TUYET DOI KHONG LUU TREN 223.7!)
     If fso.FolderExists(LAN_BASE_DIR) Then
-        If Not fso.FolderExists(LAN_SAMPLE_DIR) Then
-            fso.CreateFolder LAN_SAMPLE_DIR
+        If InStr(1, LAN_SAMPLE_DIR, FORBIDDEN_SERVER, vbTextCompare) = 0 Then
+            GetThreatSampleFolder = LAN_SAMPLE_DIR
+            Exit Function
         End If
-        If fso.FolderExists(LAN_SAMPLE_DIR) Then
-            ' Chan tuyet doi may chu 223.7
-            If InStr(1, LAN_SAMPLE_DIR, FORBIDDEN_SERVER, vbTextCompare) = 0 Then
-                GetThreatSampleFolder = LAN_SAMPLE_DIR
-                Exit Function
-            End If
+    End If
+    
+    If fso.FolderExists(LAN_FALLBACK_DIR) Then
+        If InStr(1, LAN_FALLBACK_DIR, FORBIDDEN_SERVER, vbTextCompare) = 0 Then
+            GetThreatSampleFolder = LAN_FALLBACK_DIR
+            Exit Function
         End If
     End If
     

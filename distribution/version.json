@@ -1,10 +1,10 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-10-07 14:01:50",
+    "release_timestamp":  "2026-10-08 08:14:50",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
     "mandatory":  true,
-    "version":  "3.12.2",
-    "release_date":  "2026-10-07",
+    "version":  "3.13.0",
+    "release_date":  "2026-10-08",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
                   "standalone":  "Kangatang_Standalone_Scanner.ps1",
@@ -12,6 +12,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.12.2 - Perfected 2-Phase Non-Destructive Paste: Khac phuc loi Ctrl+V lam mat vien net dut CutCopyMode ma khong dan duoc du lieu; chuyen sang quy trinh 2 buoc chuyen dung (PasteFormulas + PasteFormats) tranh loi 1004 cua xlPasteAll tren Office 2016/2019/365; duy tri viá»n nÃ©t Ä‘á»©t nguyÃªn váº¹n Ä‘á»ƒ dÃ¡n liÃªn tá»¥c nhiá»u Ã´.",
+    "changelog":  "v3.13.0 - Cross-Workbook Copy/Paste \u0026 Centralized LAN Threat Collection: Khac phuc triet de loi mat buffer copy/paste khi chuyen doi giua 2 file Excel khac nhau (WorkbookActivate bao toan CutCopyMode); cau hinh thu thap tap trung 100% mau code virus tu moi may client trong mang LAN ve truc tiep may chu 192.168.223.176.",
     "hub_ip":  "192.168.223.7"
 }

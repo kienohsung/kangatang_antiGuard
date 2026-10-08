@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.12.2"
+$ReleaseVersion = "3.13.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,9 +51,9 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    # v3.12.2: Perfected 2-Phase Non-Destructive Paste (Formulas + Formats)
+    # v3.13.0: Cross-Workbook Copy/Paste & Centralized LAN Threat Collection
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Perfected 2-Phase Non-Destructive Paste: Khac phuc loi Ctrl+V lam mat vien net dut CutCopyMode ma khong dan duoc du lieu; chuyen sang quy trinh 2 buoc chuyen dung (PasteFormulas + PasteFormats) tranh loi 1004 cua xlPasteAll tren Office 2016/2019/365; duy tri viền nét đứt nguyên vẹn để dán liên tục nhiều ô."
+    changelog         = "v${ReleaseVersion} - Cross-Workbook Copy/Paste & Centralized LAN Threat Collection: Khac phuc triet de loi mat buffer copy/paste khi chuyen doi giua 2 file Excel khac nhau (WorkbookActivate bao toan CutCopyMode); cau hinh thu thap tap trung 100% mau code virus tu moi may client trong mang LAN ve truc tiep may chu 192.168.223.176."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
