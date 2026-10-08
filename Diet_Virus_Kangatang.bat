@@ -125,11 +125,25 @@ function Restore-AccessVBOM {
 function Backup-ExcelFile {
     param ([string]$FilePath)
     
-    $centralHubBackup = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
-    $backupDir = $centralHubBackup
-    $isCentral = $true
+    # Tao ban sao luu an toan vao Kho cach ly tap trung tren May ca nhan 223.176 (v3.14.0)
+    # TUYET DOI KHONG LUU TREN 223.7!
+    $localHubBackup = "D:\7. AI tools\kangatang\Quarantine_Backup"
+    $centralHubBackup = "\\192.168.223.176\test\Quarantine_Backup"
+    $backupDir = $null
+    $isCentral = $false
 
-    if (-not (Test-Path -LiteralPath $centralHubBackup)) {
+    if (Test-Path -LiteralPath $localHubBackup) {
+        $backupDir = $localHubBackup
+        $isCentral = $true
+    } elseif (Test-Path -LiteralPath $centralHubBackup) {
+        if ($centralHubBackup -notlike "*192.168.223.7*") {
+            $backupDir = $centralHubBackup
+            $isCentral = $true
+        }
+    }
+
+    if (-not $backupDir) {
+        # Fallback phong thu khi offline mat mang: Luu vao thu muc an trong APPDATA
         $backupDir = Join-Path $env:APPDATA "KangatangGuard\Quarantine_Backup"
         $isCentral = $false
         if (-not (Test-Path -LiteralPath $backupDir)) {

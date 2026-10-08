@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.13.0"
+$ReleaseVersion = "3.14.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,9 +51,9 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    # v3.13.0: Cross-Workbook Copy/Paste & Centralized LAN Threat Collection
+    # v3.14.0: Redirect Virus Quarantine Backup to Personal Server 223.176 & Purge 223.7
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Cross-Workbook Copy/Paste & Centralized LAN Threat Collection: Khac phuc triet de loi mat buffer copy/paste khi chuyen doi giua 2 file Excel khac nhau (WorkbookActivate bao toan CutCopyMode); cau hinh thu thap tap trung 100% mau code virus tu moi may client trong mang LAN ve truc tiep may chu 192.168.223.176."
+    changelog         = "v${ReleaseVersion} - Redirect Quarantine Backup to 223.176 & Block 223.7: Chuyen toan bo ban sao luu cach ly virus ve Kho tap trung tren may ca nhan 192.168.223.176 (D:\7. AI tools\kangatang\Quarantine_Backup qua UNC \\192.168.223.176\test\Quarantine_Backup); chan tuyet doi 100% moi hanh vi ghi file nhiem len may chu 223.7."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
@@ -75,9 +75,13 @@ Copy-Item -Path $compiledXlam -Destination $targetLocalXlam -Force
 try { Set-ItemProperty -Path $targetLocalXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
 
 # Chep cac script vao distribution
-Copy-Item -Path (Join-Path $RootDir "Kangatang_Standalone_Scanner.ps1") -Destination (Join-Path $LocalDist "Kangatang_Standalone_Scanner.ps1") -Force
-Copy-Item -Path (Join-Path $RootDir "Chay_Diet_Virus_Ngoai.bat") -Destination (Join-Path $LocalDist "Chay_Diet_Virus_Ngoai.bat") -Force
+Copy-Item -Path (Join-Path $AddinDir "Kangatang_Standalone_Scanner.ps1") -Destination (Join-Path $LocalDist "Kangatang_Standalone_Scanner.ps1") -Force
 Copy-Item -Path (Join-Path $AddinDir "Kangatang_FolderScanner.ps1") -Destination (Join-Path $LocalDist "Kangatang_FolderScanner.ps1") -Force
+if (Test-Path (Join-Path $AddinDir "Chay_Diet_Virus_Ngoai.bat")) {
+    Copy-Item -Path (Join-Path $AddinDir "Chay_Diet_Virus_Ngoai.bat") -Destination (Join-Path $LocalDist "Chay_Diet_Virus_Ngoai.bat") -Force
+} else {
+    Copy-Item -Path (Join-Path $RootDir "Chay_Diet_Virus_Ngoai.bat") -Destination (Join-Path $LocalDist "Chay_Diet_Virus_Ngoai.bat") -Force
+}
 
 Write-Host "   -> [OK] Ban CLONE cuc bo tren may 223.176 da duoc dong bo day du." -ForegroundColor Green
 

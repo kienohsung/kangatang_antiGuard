@@ -113,10 +113,12 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu cua so quet ngam cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.13.0"
+Public Const CURRENT_VERSION As String = "3.14.0"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
-Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
+Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
+Public Const LOCAL_BACKUP_HUB    As String = "D:\7. AI tools\kangatang\Quarantine_Backup"
+Public Const FORBIDDEN_BACKUP_HUB As String = "192.168.223.7"
 
 Public Const ADDIN_NAME As String = "KangatangGuard.xlam"
 Private Const TOOLBAR_NAME As String = "KangatangGuard"
@@ -534,8 +536,8 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
                         "T\u1ec7p: ") & wb.Name & vbCrLf & vbCrLf & _
                     Uni("Chi ti\u1ebft:") & vbCrLf & detailMsg & vbCrLf & _
                     Uni("Tr\u1ea1ng th\u00e1i: \u0110\u00c3 TI\u00caU DI\u1ec6T TH\u00c0NH C\u00d4NG!" & vbCrLf & _
-                        "B\u1ea3n sao l\u01b0u g\u1ed1c \u0111\u00e3 \u0111\u01b0\u1ee3c c\u00e1ch ly an to\u00e0n v\u1ec1 Kho M\u00e1y ch\u1ee7 LAN:" & vbCrLf & _
-                        "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT")
+                        "B\u1ea3n sao l\u01b0u g\u1ed1c \u0111\u00e3 \u0111\u01b0\u1ee3c c\u00e1ch ly an to\u00e0n v\u1ec1 Kho M\u00e1y ch\u1ee7 LAN (223.176):" & vbCrLf & _
+                        CENTRAL_BACKUP_HUB)
             If bLaunch Then
                 okMsg = okMsg & vbCrLf & vbCrLf & _
                         Uni("Ti\u1ebfn tr\u00ecnh qu\u00e9t ng\u1ea7m \u0111\u1ed9c l\u1eadp s\u1ebd T\u1ef0 \u0110\u1ed8NG QU\u00c9T TO\u00c0N B\u1ed8 TH\u01af M\u1ee4C ch\u1ee9a t\u1ec7p n\u00e0y m\u00e0 kh\u00f4ng l\u00e0m gi\u00e1n \u0111o\u1ea1n Excel c\u1ee7a b\u1ea1n!")
@@ -754,6 +756,12 @@ Public Function BackupBeforeClean(ByVal wb As Workbook) As Boolean
     Dim isCentral As Boolean
     backupDir = GetQuarantineDir(isCentral)
     If Len(backupDir) = 0 Then GoTo BackupError
+    
+    ' Chan bao mat nghiem ngat: TUYET DOI KHONG LUU TREN 223.7
+    If InStr(1, backupDir, FORBIDDEN_BACKUP_HUB, vbTextCompare) > 0 Then
+        WriteLog "[SECURITY_ABORT] Backup directory contains forbidden server 223.7: " & backupDir
+        GoTo BackupError
+    End If
     
     Dim timestamp As String
     timestamp = Format(Now, "yyyyMMdd_HHmmss")
@@ -2215,20 +2223,34 @@ Public Sub QuarantineLoadedStartupWorkbook(ByVal wb As Workbook)
 End Sub
 
 ' ===========================================================================
-' KHO CACH LY: Hub trung tam (neu ping duoc) hoac APPDATA cuc bo. Tra ve duong dan co dau "\" cuoi.
+' KHO CACH LY: Uu tien thu muc cuc bo 223.176 -> Hub trung tam LAN 223.176 -> APPDATA cuc bo.
+' TUYET DOI KHONG LUU TREN 223.7! Tra ve duong dan co dau "\" cuoi.
 ' ===========================================================================
-Public Function GetQuarantineDir(ByRef isCentral As Boolean) As String
+Public Function GetQuarantineDir(Optional ByRef isCentral As Variant) As String
     On Error Resume Next
     Dim fso As Object, d As String
     Set fso = CreateObject("Scripting.FileSystemObject")
-    isCentral = False
-    If IsUncReachable(CENTRAL_BACKUP_HUB) Then
-        If fso.FolderExists(CENTRAL_BACKUP_HUB) Then
-            GetQuarantineDir = CENTRAL_BACKUP_HUB & "\"
-            isCentral = True
-            Exit Function
+    If Not IsMissing(isCentral) Then isCentral = False
+    
+    ' 1. Uu tien tuyet doi: Thu muc cuc bo tren may Master 223.176 (Direct local fast I/O)
+    If fso.FolderExists(LOCAL_BACKUP_HUB) Then
+        GetQuarantineDir = LOCAL_BACKUP_HUB & "\"
+        If Not IsMissing(isCentral) Then isCentral = True
+        Exit Function
+    End If
+    
+    ' 2. Kiem tra kho tap trung LAN 223.176 (TUYET DOI KHONG LUU TREN 223.7!)
+    If InStr(1, CENTRAL_BACKUP_HUB, FORBIDDEN_BACKUP_HUB, vbTextCompare) = 0 Then
+        If IsUncReachable(CENTRAL_BACKUP_HUB) Then
+            If fso.FolderExists(CENTRAL_BACKUP_HUB) Then
+                GetQuarantineDir = CENTRAL_BACKUP_HUB & "\"
+                If Not IsMissing(isCentral) Then isCentral = True
+                Exit Function
+            End If
         End If
     End If
+    
+    ' 3. Fallback offline khi mat mang: Thu muc an trong APPDATA
     d = Environ("APPDATA") & "\" & LOG_SUBFOLDER
     If Not fso.FolderExists(d) Then fso.CreateFolder d
     d = d & "\Quarantine_Backup"
@@ -2252,6 +2274,10 @@ Public Function QuarantineFile(ByVal srcPath As String) As Boolean
     Dim isCentral As Boolean, destDir As String, destPath As String, pc As String
     destDir = GetQuarantineDir(isCentral)
     If Len(destDir) = 0 Then Exit Function
+    If InStr(1, destDir, FORBIDDEN_BACKUP_HUB, vbTextCompare) > 0 Then
+        WriteLog "[SECURITY_ABORT] Quarantine directory contains forbidden server 223.7: " & destDir
+        Exit Function
+    End If
     pc = Environ("COMPUTERNAME")
     If Len(pc) = 0 Then pc = "UNKNOWN_PC"
     destPath = destDir & fso.GetFileName(srcPath) & "_" & pc & "_" & Format(Now, "yyyyMMdd_HHmmss") & "_" & CStr(Int(Rnd * 9000) + 1000) & ".quarantine"

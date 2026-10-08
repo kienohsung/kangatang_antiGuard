@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Kangatang_Standalone_Scanner.ps1
 # Trình Quét & Tiêu Diệt Virus Macro Excel Độc Lập (Standalone Scanner v3.8.2)
 # Thiết kế dành riêng cho các máy trạm không thể cài đặt Add-in Excel
@@ -253,7 +253,7 @@ function Clean-DocumentRecovery {
                     try {
                         $bytes = $item.GetValue($vn)
                         $str = [System.Text.Encoding]::Unicode.GetString($bytes)
-                        if ($str -like "*192.168.*" -or $str -like "*file_shared*" -or $str -like "*_Backup_Kangatang*" -or $str -like "*Virus backupfile*" -or $str -like "*TBEX*" -or ($TargetFolder -and $str -like "*$($TargetFolder.TrimEnd('\'))*")) {
+                        if ($str -like "*192.168.*" -or $str -like "*file_shared*" -or $str -like "*_Backup_Kangatang*" -or $str -like "*Virus backupfile*" -or $str -like "*Quarantine_Backup*" -or $str -like "*Threat_Samples*" -or $str -like "*TBEX*" -or ($TargetFolder -and $str -like "*$($TargetFolder.TrimEnd('\'))*")) {
                             $isScanItem = $true
                             break
                         }
@@ -843,12 +843,24 @@ function Scan-SingleExcelFile($file) {
                 return
             }
 
-            # Tao ban sao luu an toan vao Kho cach ly tap trung tren May chu LAN (v3.8.5)
-            $centralHubBackup = "\\192.168.223.7\file_shared\vietnam\z. ETC\2. Virus backupfile - DO NOT OPEN IT"
-            $backupDir = $centralHubBackup
-            $isCentral = $true
+            # Tao ban sao luu an toan vao Kho cach ly tap trung tren May ca nhan 223.176 (v3.14.0)
+            # TUYET DOI KHONG LUU TREN 223.7!
+            $localHubBackup = "D:\7. AI tools\kangatang\Quarantine_Backup"
+            $centralHubBackup = "\\192.168.223.176\test\Quarantine_Backup"
+            $backupDir = $null
+            $isCentral = $false
 
-            if (-not (Test-Path -LiteralPath $centralHubBackup)) {
+            if (Test-Path -LiteralPath $localHubBackup) {
+                $backupDir = $localHubBackup
+                $isCentral = $true
+            } elseif (Test-Path -LiteralPath $centralHubBackup) {
+                if ($centralHubBackup -notlike "*192.168.223.7*") {
+                    $backupDir = $centralHubBackup
+                    $isCentral = $true
+                }
+            }
+
+            if (-not $backupDir) {
                 # Fallback phong thu khi offline mat mang: Luu vao thu muc an trong APPDATA
                 $backupDir = Join-Path $env:APPDATA "KangatangGuard\Quarantine_Backup"
                 $isCentral = $false
@@ -1077,7 +1089,7 @@ function Scan-SingleExcelFile($file) {
 # HÀM DUYỆT LUỒNG TRỰC TIẾP
 # ==============================================================================
 function Scan-FolderStream([string]$currentDir) {
-    if ($currentDir -like "*_Backup_Kangatang*" -or $currentDir -like "*Virus backupfile*") { return }
+    if ($currentDir -like "*_Backup_Kangatang*" -or $currentDir -like "*Virus backupfile*" -or $currentDir -like "*Quarantine_Backup*" -or $currentDir -like "*Threat_Samples*") { return }
 
     $Script:TotalFolders++
     Write-Host "`n----------------------------------------------------------------------" -ForegroundColor DarkGray
@@ -1109,7 +1121,7 @@ function Scan-FolderStream([string]$currentDir) {
     try {
         $subDirs = Get-ChildItem -Path $currentDir -Directory -ErrorAction SilentlyContinue
         foreach ($sub in $subDirs) {
-            if ($sub.Name -ne "_Backup_Kangatang" -and $sub.Name -notlike "*Virus backupfile*" -and $sub.Name -ne "Windows" -and $sub.Name -ne "Program Files" -and $sub.Name -ne "Program Files (x86)") {
+            if ($sub.Name -ne "_Backup_Kangatang" -and $sub.Name -notlike "*Virus backupfile*" -and $sub.Name -notlike "*Quarantine_Backup*" -and $sub.Name -notlike "*Threat_Samples*" -and $sub.Name -ne "Windows" -and $sub.Name -ne "Program Files" -and $sub.Name -ne "Program Files (x86)") {
                 Scan-FolderStream $sub.FullName
             }
         }
