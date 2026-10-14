@@ -113,7 +113,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu cua so quet ngam cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.14.0"
+Public Const CURRENT_VERSION As String = "3.15.0"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -211,7 +211,8 @@ End Sub
 ' ===========================================================================
 Public Sub InitializeGuard()
     On Error Resume Next
-    ' 0. Khoi phuc clipboard, phim tat va menu chuot phai neu bi virus chan (v3.11.0)
+    ' 0. Khoi phuc clipboard, phim tat, menu chuot phai va dam bao AccessVBOM = 1 (v3.15.0)
+    Call EnsureVbomRegistryEnabled
     Call RestoreExcelClipboardAndUI
     
     ' 1. Khoi tao Scan Cache trong bo nho RAM (< 1ms)
@@ -234,6 +235,8 @@ End Sub
 
 Public Sub TerminateGuard()
     On Error Resume Next
+    Call EnsureVbomRegistryEnabled
+    Call SchedulePostExitVbomFix
     Call RemoveMenu
     Set oAppEvents.xlApp = Nothing
     Set oAppEvents = Nothing
@@ -398,13 +401,32 @@ Public Function CheckWorkbookInfection(ByVal wb As Workbook, ByRef detailMsg As 
     End If
     
     ' 3. VBA Project
-    Dim vbProj As Object
+    ' v3.15.0: Neu workbook KHONG co VBProject (HasVBProject = False, vd: Book1, .xlsx, file khong co macro)
+    ' thi thoat ngay (khong khoi tao VBE thua va khong bao loi VBOM gia).
+    Dim bHasVbp As Boolean
+    bHasVbp = True
+    On Error Resume Next
+    bHasVbp = wb.HasVBProject
+    If Err.Number <> 0 Then
+        bHasVbp = True
+        Err.Clear
+    End If
+    On Error GoTo CheckError
+    If Not bHasVbp Then Exit Function
+    
+    Dim vbProj As Object, vbpErr As Long, vbpDesc As String
     On Error Resume Next
     Set vbProj = wb.VBProject
     If Err.Number <> 0 Or vbProj Is Nothing Then
+        vbpErr = Err.Number
+        vbpDesc = Err.Description
         Err.Clear
         On Error GoTo CheckError
-        Call ReportVbomBlocked(wb)
+        If IsVbomAccessible() Then
+            WriteLog "[VBP_UNREADABLE] " & wb.FullName & " - VBOM is enabled, workbook VBProject unreadable (" & vbpErr & ": " & vbpDesc & ")"
+        Else
+            Call ReportVbomBlocked(wb)
+        End If
         Exit Function
     End If
     Dim prot As Long
@@ -1093,10 +1115,21 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
     ' --- 2 + 3. VBA components ---
     Dim vbProj As Object, comp As Object
     Dim compName As String, compType As Long, nRemoved As Long
-    Dim vbOK As Boolean
+    Dim vbOK As Boolean, bCleanHasVbp As Boolean
+    bCleanHasVbp = True
+    On Error Resume Next
+    bCleanHasVbp = wb.HasVBProject
+    If Err.Number <> 0 Then
+        bCleanHasVbp = True
+        Err.Clear
+    End If
+    On Error GoTo CleanError
+    
     If LegacyModuleSheetCount(wb) <> 0 Then
         ' Crash guard: con module-sheet (khong mang ten virus) -> khong mo VBProject
         WriteLog "[VBP_SKIPPED] " & wb.FullName & " - legacy module sheet remains, VBA components not cleaned."
+        vbOK = False
+    ElseIf Not bCleanHasVbp Then
         vbOK = False
     Else
         On Error Resume Next
@@ -1701,10 +1734,16 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
         fso.CreateFolder stagedDir
     End If
     
-    ' Sao chep tap tin tu Hub vao bo dem tam staged_update
+    ' Sao chep tap tin tu Hub vao bo dem tam staged_update (uu tien ban danh so phien ban de tranh SMB lock)
     Dim srcXlam As String, srcPs1 As String
     Dim targetXlam As String, targetPs1 As String
-    srcXlam = updateSource & "\KangatangGuard.xlam"
+    If fso.FileExists(updateSource & "\KangatangGuard_v" & serverVer & ".xlam") Then
+        srcXlam = updateSource & "\KangatangGuard_v" & serverVer & ".xlam"
+    ElseIf fso.FileExists(updateSource & "\KangatangGuard_latest.xlam") Then
+        srcXlam = updateSource & "\KangatangGuard_latest.xlam"
+    Else
+        srcXlam = updateSource & "\KangatangGuard.xlam"
+    End If
     srcPs1 = updateSource & "\Kangatang_FolderScanner.ps1"
     targetXlam = stagedDir & "\KangatangGuard.xlam"
     targetPs1 = stagedDir & "\Kangatang_FolderScanner.ps1"
@@ -1782,6 +1821,11 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     ts.WriteLine "reg add ""HKCU\Software\Microsoft\Office\16.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1"
     ts.WriteLine "reg add ""HKCU\Software\Microsoft\Office\15.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1"
     ts.WriteLine "reg add ""HKCU\Software\Microsoft\Office\14.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1"
+    ts.WriteLine "reg add ""HKCU\Software\Microsoft\Office\12.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1"
+    ts.WriteLine "reg delete ""HKCU\Software\Policies\Microsoft\Office\16.0\Excel\Security"" /v ""AccessVBOM"" /f >nul 2>&1"
+    ts.WriteLine "reg delete ""HKCU\Software\Policies\Microsoft\Office\15.0\Excel\Security"" /v ""AccessVBOM"" /f >nul 2>&1"
+    ts.WriteLine "reg delete ""HKCU\Software\Policies\Microsoft\Office\14.0\Excel\Security"" /v ""AccessVBOM"" /f >nul 2>&1"
+    ts.WriteLine "reg delete ""HKCU\Software\KangatangGuard"" /v ""LastVbomWarn"" /f >nul 2>&1"
     ts.WriteLine "reg delete ""HKCU\Software\Microsoft\Office\16.0\Excel\Add-in Manager"" /v ""KangatangGuard.xlam"" /f >nul 2>&1"
     ts.WriteLine "reg delete ""HKCU\Software\Microsoft\Office\15.0\Excel\Add-in Manager"" /v ""KangatangGuard.xlam"" /f >nul 2>&1"
     ts.WriteLine "reg delete ""HKCU\Software\Microsoft\Office\14.0\Excel\Add-in Manager"" /v ""KangatangGuard.xlam"" /f >nul 2>&1"
@@ -1976,6 +2020,15 @@ Public Function QuickCheckWorkbook(ByVal wb As Workbook, ByRef reason As String)
     
     ' Crash guard (v3.10.0): khong cham VBProject khi con module-sheet Excel 5
     If LegacyModuleSheetCount(wb) <> 0 Then Exit Function
+    
+    Dim bQuickHasVbp As Boolean
+    bQuickHasVbp = True
+    bQuickHasVbp = wb.HasVBProject
+    If Err.Number <> 0 Then
+        bQuickHasVbp = True
+        Err.Clear
+    End If
+    If Not bQuickHasVbp Then Exit Function
     
     Dim vbProj As Object, comp As Object, prot As Long
     Set vbProj = Nothing
@@ -2534,42 +2587,150 @@ NetErr:
 End Function
 
 ' ===========================================================================
-' KHONG TRUY CAP DUOC VBProject (AccessVBOM = 0): khong im lang
+' KIEM TRA THUC TE QUYEN VBOM TREN THISWORKBOOK (v3.15.0)
+' Phan biet chinh xac giua:
+'   - AccessVBOM = 0 toan cuc cua Excel (ThisWorkbook.VBProject cung bi chan)
+'   - Loi cuc bo cua rieng 1 file wb (ThisWorkbook.VBProject van doc duoc binh thuong)
+' ===========================================================================
+Public Function IsVbomAccessible() As Boolean
+    On Error Resume Next
+    Dim testProj As Object, compCount As Long
+    Set testProj = ThisWorkbook.VBProject
+    If Err.Number <> 0 Or testProj Is Nothing Then
+        Err.Clear
+        IsVbomAccessible = False
+        Exit Function
+    End If
+    compCount = testProj.VBComponents.Count
+    If Err.Number <> 0 Or compCount <= 0 Then
+        Err.Clear
+        IsVbomAccessible = False
+        Exit Function
+    End If
+    IsVbomAccessible = True
+End Function
+
+' ===========================================================================
+' TU DONG BAT LAI QUYEN AccessVBOM = 1 TREN MOI NHANH REGISTRY (v3.15.0)
+' Xu ly triet de:
+'   - Loi dau phay thap phan locale tieng Viet ("16,0" -> "16.0")
+'   - Tat ca cac phien ban Office (16.0, 15.0, 14.0, 12.0)
+'   - Go bo khoa chan trong HKCU\Software\Policies va HKLM (neu co quyen)
+' ===========================================================================
+Public Sub EnsureVbomRegistryEnabled()
+    On Error Resume Next
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    If wsh Is Nothing Then Exit Sub
+    
+    Dim curVer As String
+    curVer = Replace(Trim$(Application.Version), ",", ".")
+    If Len(curVer) = 0 Then curVer = "16.0"
+    
+    Dim vers As Variant, idx As Long, v As String
+    vers = Array(curVer, "16.0", "15.0", "14.0", "12.0")
+    
+    For idx = LBound(vers) To UBound(vers)
+        v = CStr(vers(idx))
+        If Len(v) > 0 Then
+            ' 1. Bat AccessVBOM = 1 trong HKCU
+            wsh.RegWrite "HKCU\Software\Microsoft\Office\" & v & "\Excel\Security\AccessVBOM", 1, "REG_DWORD"
+            Err.Clear
+            
+            ' 2. Neu HKCU Policies dang chan (AccessVBOM = 0), xoa hoac ghi de = 1
+            Dim polVal As Variant
+            polVal = Empty
+            polVal = wsh.RegRead("HKCU\Software\Policies\Microsoft\Office\" & v & "\Excel\Security\AccessVBOM")
+            Err.Clear
+            If Not IsEmpty(polVal) Then
+                If CLng(Val(CStr(polVal))) = 0 Then
+                    wsh.RegWrite "HKCU\Software\Policies\Microsoft\Office\" & v & "\Excel\Security\AccessVBOM", 1, "REG_DWORD"
+                    Err.Clear
+                    wsh.RegDelete "HKCU\Software\Policies\Microsoft\Office\" & v & "\Excel\Security\AccessVBOM"
+                    Err.Clear
+                End If
+            End If
+            
+            ' 3. Neu HKLM hoac WOW6432Node dang dat AccessVBOM = 0 (chan toan may), thu cap nhat = 1
+            Dim hklmVal As Variant
+            hklmVal = Empty
+            hklmVal = wsh.RegRead("HKLM\Software\Microsoft\Office\" & v & "\Excel\Security\AccessVBOM")
+            Err.Clear
+            If Not IsEmpty(hklmVal) Then
+                If CLng(Val(CStr(hklmVal))) = 0 Then
+                    wsh.RegWrite "HKLM\Software\Microsoft\Office\" & v & "\Excel\Security\AccessVBOM", 1, "REG_DWORD"
+                    Err.Clear
+                End If
+            End If
+            
+            hklmVal = Empty
+            hklmVal = wsh.RegRead("HKLM\Software\WOW6432Node\Microsoft\Office\" & v & "\Excel\Security\AccessVBOM")
+            Err.Clear
+            If Not IsEmpty(hklmVal) Then
+                If CLng(Val(CStr(hklmVal))) = 0 Then
+                    wsh.RegWrite "HKLM\Software\WOW6432Node\Microsoft\Office\" & v & "\Excel\Security\AccessVBOM", 1, "REG_DWORD"
+                    Err.Clear
+                End If
+            End If
+        End If
+    Next idx
+    
+    Set wsh = Nothing
+    Err.Clear
+End Sub
+
+' ===========================================================================
+' BAO VE SAU KHI DONG EXCEL (POST-EXIT REGISTRY PERSISTENCE v3.15.0)
+' Khi Excel khoi dong voi AccessVBOM = 0 trong RAM, luc nguoi dung dong Excel,
+' tien trinh EXCEL.EXE co the ghi de gia tri 0 trong RAM xuong lai Registry HKCU.
+' Ham nayhen gio 3 giay sau khi EXCEL.EXE thoat se tu dong nap lai AccessVBOM = 1.
+' ===========================================================================
+Public Sub SchedulePostExitVbomFix()
+    On Error Resume Next
+    If Not mVbomWarned Then
+        If IsVbomAccessible() Then Exit Sub
+    End If
+    
+    Dim wsh As Object, cmd As String
+    Set wsh = CreateObject("WScript.Shell")
+    If wsh Is Nothing Then Exit Sub
+    
+    cmd = "cmd.exe /c for /L %i in (1,1,8) do @(" & _
+          "reg add ""HKCU\Software\Microsoft\Office\16.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1" & _
+          " & reg add ""HKCU\Software\Microsoft\Office\15.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1" & _
+          " & reg add ""HKCU\Software\Microsoft\Office\14.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1" & _
+          " & reg add ""HKCU\Software\Microsoft\Office\12.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1" & _
+          " & reg delete ""HKCU\Software\Policies\Microsoft\Office\16.0\Excel\Security"" /v ""AccessVBOM"" /f >nul 2>&1" & _
+          " & ping -n 2 127.0.0.1 >nul)"
+    wsh.Run cmd, 0, False
+    Set wsh = Nothing
+    Err.Clear
+End Sub
+
+' ===========================================================================
+' TU PHUC HOI NGAM KHI VBProject BI CHAN (v3.15.0 - ZERO-POPUP SELF-HEALING)
+' Khong hien popup canh bao gay hoang mang cho nguoi dung:
+'   1. Tu dong bat lai AccessVBOM = 1 trong Registry ngay lap tuc.
+'   2. Neu tep dang mo nam tren o dia va co macro, kich hoat Background Scanner
+'      (chay trong tien trinh moi doc AccessVBOM = 1 vua bat) de quet ngam an toan.
 ' ===========================================================================
 Public Sub ReportVbomBlocked(ByVal wb As Workbook)
     On Error Resume Next
-    WriteLog "[NO_VBOM] Cannot access VBProject of " & wb.FullName & " - only sheets/names were checked."
-    If mVbomWarned Then Exit Sub
-    mVbomWarned = True
+    Call EnsureVbomRegistryEnabled
     
-    Dim wsh As Object, ver As String, policyVal As Variant, byPolicy As Boolean
-    Set wsh = CreateObject("WScript.Shell")
-    ver = Application.Version
-    policyVal = Empty
-    policyVal = wsh.RegRead("HKCU\Software\Policies\Microsoft\Office\" & ver & "\Excel\Security\AccessVBOM")
-    Err.Clear
-    byPolicy = Not IsEmpty(policyVal)
-    If Not byPolicy Then
-        wsh.RegWrite "HKCU\Software\Microsoft\Office\" & ver & "\Excel\Security\AccessVBOM", 1, "REG_DWORD"
-        If Err.Number = 0 Then WriteLog "[NO_VBOM] Re-enabled AccessVBOM in HKCU (effective after Excel restart)"
-        Err.Clear
-    Else
-        WriteLog "[NO_VBOM] AccessVBOM is enforced by Group Policy - contact IT"
+    If Not mVbomWarned Then
+        mVbomWarned = True
+        WriteLog "[NO_VBOM_AUTOFIXED] AccessVBOM re-enabled in Registry for " & wb.FullName & " (silent self-healing v3.15.0)."
     End If
     
-    ' Canh bao toi da 1 lan/ngay
-    Dim lastWarn As String
-    lastWarn = ""
-    lastWarn = wsh.RegRead("HKCU\Software\KangatangGuard\LastVbomWarn")
+    ' Neu tep luu tren o dia (khong phai Book1 moi tao va khong nam trong XLSTART),
+    ' goi trinh quet ngam doc lap (tien trinh moi se ap dung ngay AccessVBOM = 1 vua ghi).
+    If Not wb Is Nothing Then
+        If Len(wb.Path) > 0 And (Not IsInStartupFolder(wb.FullName)) Then
+            Call LaunchBackgroundScanner(wb.Path)
+        End If
+    End If
     Err.Clear
-    If lastWarn = Format(Date, "yyyy-mm-dd") Then Exit Sub
-    wsh.RegWrite "HKCU\Software\KangatangGuard\LastVbomWarn", Format(Date, "yyyy-mm-dd"), "REG_SZ"
-    
-    MsgBoxW Uni("KangatangGuard KH\u00d4NG TH\u1ec2 ki\u1ec3m tra m\u00e3 VBA v\u00ec Excel \u0111ang ch\u1eb7n quy\u1ec1n 'Trust access to the VBA project object model'." & vbCrLf & vbCrLf & _
-                "Add-in v\u1eabn ki\u1ec3m tra sheet \u1ea9n c\u1ee7a virus nh\u01b0ng c\u00f3 th\u1ec3 b\u1ecf s\u00f3t bi\u1ebfn th\u1ec3." & vbCrLf & _
-                "H\u1ec7 th\u1ed1ng \u0111\u00e3 t\u1ef1 b\u1eadt l\u1ea1i quy\u1ec1n n\u00e0y - vui l\u00f2ng kh\u1edfi \u0111\u1ed9ng l\u1ea1i Excel." & vbCrLf & _
-                "N\u1ebfu th\u00f4ng b\u00e1o l\u1eb7p l\u1ea1i, vui l\u00f2ng li\u00ean h\u1ec7 IT (c\u00f3 th\u1ec3 do ch\u00ednh s\u00e1ch GPO)."), _
-            vbExclamation, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - C\u1ea3nh b\u00e1o b\u1ea3o m\u1eadt")
 End Sub
 
 ' ===========================================================================

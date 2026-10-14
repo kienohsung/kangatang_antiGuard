@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.14.0"
+$ReleaseVersion = "3.15.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,9 +51,9 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    # v3.14.0: Redirect Virus Quarantine Backup to Personal Server 223.176 & Purge 223.7
+    # v3.15.0: AccessVBOM Self-Healing & Zero-Popup Architecture
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Redirect Quarantine Backup to 223.176 & Block 223.7: Chuyen toan bo ban sao luu cach ly virus ve Kho tap trung tren may ca nhan 192.168.223.176 (D:\7. AI tools\kangatang\Quarantine_Backup qua UNC \\192.168.223.176\test\Quarantine_Backup); chan tuyet doi 100% moi hanh vi ghi file nhiem len may chu 223.7."
+    changelog         = "v${ReleaseVersion} - AccessVBOM Self-Healing & Zero-Popup Architecture: Khac phuc triet de hop thoai canh bao bao mat AccessVBOM khi mo Excel hoac file .xlsx/Book1; bo sungwb.HasVBProject pre-check, IsVbomAccessible() xac thuc chinh xac, tu dong phuc hoi AccessVBOM = 1 da tang (HKCU/Policies/HKLM & Post-Exit Persistence) va Out-of-Process Background Scanner Fallback khong lam gian doan nguoi dung."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
@@ -72,6 +72,8 @@ if (Test-Path $targetLocalXlam) {
     try { Set-ItemProperty -Path $targetLocalXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
 }
 Copy-Item -Path $compiledXlam -Destination $targetLocalXlam -Force
+Copy-Item -Path $compiledXlam -Destination (Join-Path $LocalDist "KangatangGuard_latest.xlam") -Force
+Copy-Item -Path $compiledXlam -Destination (Join-Path $LocalDist "KangatangGuard_v${ReleaseVersion}.xlam") -Force
 try { Set-ItemProperty -Path $targetLocalXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
 
 # Chep cac script vao distribution
@@ -111,13 +113,29 @@ if (-not (Test-Path $PrimaryRemoteHub)) {
     Write-Host "   -> [CANH BAO] Khong the ket noi den $PrimaryRemoteHub!" -ForegroundColor Red
     Write-Host "   -> Vui long kiem tra may 192.168.223.7 co dang ket noi mang khong." -ForegroundColor Red
 } else {
+    # Luon chep ban danh so phien ban va ban _latest (KHONG BAO GIO bi SMB lock boi Excel client)
+    $remoteXlamVer    = Join-Path $PrimaryRemoteHub "KangatangGuard_v${ReleaseVersion}.xlam"
+    $remoteXlamLatest = Join-Path $PrimaryRemoteHub "KangatangGuard_latest.xlam"
+    Copy-Item -Path $compiledXlam -Destination $remoteXlamVer -Force
+    Copy-Item -Path $compiledXlam -Destination $remoteXlamLatest -Force
+    Write-Host "   -> [OK] Da chep KangatangGuard_v${ReleaseVersion}.xlam & KangatangGuard_latest.xlam len May chu 223.7" -ForegroundColor Green
+
     $remoteXlam = Join-Path $PrimaryRemoteHub "KangatangGuard.xlam"
-    if (Test-Path $remoteXlam) {
-        try { Set-ItemProperty -Path $remoteXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
+    try {
+        if (Test-Path $remoteXlam) {
+            Set-ItemProperty -Path $remoteXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+        }
+        Copy-Item -Path $compiledXlam -Destination $remoteXlam -Force -ErrorAction Stop
+        Set-ItemProperty -Path $remoteXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+        Write-Host "   -> [OK] Da chep KangatangGuard.xlam len May chu 223.7" -ForegroundColor Green
+    } catch {
+        Write-Host "   -> [LUU Y] KangatangGuard.xlam tren 223.7 dang duoc mo truc tiep boi 1 may trạm LAN (SMB lock)." -ForegroundColor Yellow
+        Write-Host "   -> [OK] Cac may cai moi / cap nhat se tu dong lay tu KangatangGuard_v${ReleaseVersion}.xlam & KangatangGuard_latest.xlam!" -ForegroundColor Green
+        # Khoi chay tien trinh ngam tu dong ghi de KangatangGuard.xlam ngay khi may tram dong Excel
+        $bgSyncCmd = "for (`$i=0; `$i -lt 720; `$i++) { try { Copy-Item -LiteralPath '$targetLocalXlam' -Destination '$remoteXlam' -Force -ErrorAction Stop; break } catch { Start-Sleep -Seconds 30 } }"
+        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$bgSyncCmd`""
+        Write-Host "   -> [OK] Da kich hoat Background Sync Watcher (tu dong cap nhat KangatangGuard.xlam khi may tram dong Excel)." -ForegroundColor Green
     }
-    Copy-Item -Path $compiledXlam -Destination $remoteXlam -Force
-    try { Set-ItemProperty -Path $remoteXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
-    Write-Host "   -> [OK] Da chep KangatangGuard.xlam len May chu 223.7" -ForegroundColor Green
 
     # Chep cac tep ho tro
     Copy-Item -Path (Join-Path $LocalDist "Kangatang_FolderScanner.ps1") -Destination (Join-Path $PrimaryRemoteHub "Kangatang_FolderScanner.ps1") -Force

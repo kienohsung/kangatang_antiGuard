@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao XLSTART
-# Phien ban: v3.11.0 (Threat Collector & CopyPaste Fix)
+# Phien ban: v3.15.0 (AccessVBOM Self-Healing & Zero-Popup Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,24 +9,27 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.14.0"
+$InstallerVersion = "3.15.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 # ==============================================================================
-# BUOC 1: BAT REGISTRY AccessVBOM CHO OFFICE (BAT BUOC DE INJECT VBA)
+# BUOC 1: BAT REGISTRY AccessVBOM CHO OFFICE (BAT BUOC DE INJECT & QUET VBA)
 # ==============================================================================
 Write-Host "`n[1/3] Dang bat quyen truy cap VBA Project Object Model (AccessVBOM)..." -ForegroundColor Yellow
 
-$officeVersions = @("14.0", "15.0", "16.0")  # Office 2010, 2013, 2016/2019/365
+$officeVersions = @("12.0", "14.0", "15.0", "16.0")  # Office 2007, 2010, 2013, 2016/2019/2021/365
 $regBackup = @{}
 
 foreach ($ver in $officeVersions) {
-    $regPath = "HKCU:\Software\Microsoft\Office\$ver\Excel\Security"
+    $excelKey = "HKCU:\Software\Microsoft\Office\$ver\Excel"
+    $regPath  = "$excelKey\Security"
+    if (-not (Test-Path $regPath) -and (Test-Path $excelKey)) {
+        New-Item -Path $regPath -Force -ErrorAction SilentlyContinue | Out-Null
+    }
     if (Test-Path $regPath) {
-        # Luu gia tri cu de co the rollback
         try {
             $currentVal = (Get-ItemProperty -Path $regPath -Name "AccessVBOM" -ErrorAction SilentlyContinue).AccessVBOM
             if ($null -eq $currentVal) { $currentVal = 0 }
@@ -35,19 +38,49 @@ foreach ($ver in $officeVersions) {
             $regBackup[$regPath] = 0
         }
         
-        # Bat AccessVBOM = 1
         try {
             Set-ItemProperty -Path $regPath -Name "AccessVBOM" -Value 1 -Type DWord -Force -ErrorAction Stop
-            Write-Host "   -> [OK] Da bat AccessVBOM cho Office $ver" -ForegroundColor Green
+            Set-ItemProperty -Path $regPath -Name "AllowNetworkLocations" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+            Write-Host "   -> [OK] Da bat AccessVBOM cho Office $ver (HKCU)" -ForegroundColor Green
         } catch {
             Write-Host "   -> [Loi] Khong the ghi Registry Office $ver : $($_.Exception.Message)" -ForegroundColor DarkYellow
         }
     }
+    
+    # Go bo Policy HKCU neu dang khoa AccessVBOM = 0
+    $polPath = "HKCU:\Software\Policies\Microsoft\Office\$ver\Excel\Security"
+    if (Test-Path $polPath) {
+        try {
+            Remove-ItemProperty -Path $polPath -Name "AccessVBOM" -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+    
+    # Thu bat tren HKLM va WOW6432Node neu co quyen
+    foreach ($hklmSec in @(
+        "HKLM:\Software\Microsoft\Office\$ver\Excel\Security",
+        "HKLM:\Software\WOW6432Node\Microsoft\Office\$ver\Excel\Security"
+    )) {
+        if (Test-Path $hklmSec) {
+            try {
+                Set-ItemProperty -Path $hklmSec -Name "AccessVBOM" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+            } catch {}
+        }
+    }
+}
+
+# Xoa LastVbomWarn cu neu co
+if (Test-Path "HKCU:\Software\KangatangGuard") {
+    Remove-ItemProperty -Path "HKCU:\Software\KangatangGuard" -Name "LastVbomWarn" -Force -ErrorAction SilentlyContinue
 }
 
 if ($regBackup.Count -eq 0) {
-    Write-Host "   -> [Canh bao] Khong tim thay cai dat Office nao trong Registry." -ForegroundColor DarkYellow
-    Write-Host "   -> Vui long kiem tra Excel da duoc cai dat tren may nay." -ForegroundColor DarkYellow
+    # Dam bao toi thieu 16.0 va 15.0 luon duoc tao san
+    foreach ($defVer in @("16.0", "15.0")) {
+        $defPath = "HKCU:\Software\Microsoft\Office\$defVer\Excel\Security"
+        New-Item -Path $defPath -Force -ErrorAction SilentlyContinue | Out-Null
+        Set-ItemProperty -Path $defPath -Name "AccessVBOM" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host "   -> [OK] Da khoi tao san AccessVBOM = 1 cho Office 15.0/16.0." -ForegroundColor Green
 }
 
 # ==============================================================================

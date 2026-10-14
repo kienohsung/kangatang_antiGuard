@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_Client.ps1
 # PowerShell Installer cho May Client trong Mang LAN
-# Phien ban: v3.11.0 (Threat Collector & CopyPaste Fix)
+# Phien ban: v3.15.0 (AccessVBOM Self-Healing & Zero-Popup Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.11.0)    " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.15.0)    " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -32,7 +32,7 @@ if ($ScriptDir.StartsWith("\\")) {
 Write-Host "`n[1/5] May chu phan phoi (Hub): $uncSource" -ForegroundColor Yellow
 
 # Doc thong tin phien ban tu version.json neu co
-$versionInfo = "3.12.0"
+$versionInfo = "3.15.0"
 $versionJsonPath = Join-Path $uncSource "version.json"
 if (Test-Path $versionJsonPath) {
     try {
@@ -44,14 +44,22 @@ if (Test-Path $versionJsonPath) {
 }
 Write-Host "   -> Phien ban phat hanh: v$versionInfo" -ForegroundColor Green
 
-# Kiem tra file nguon
-$srcXlam    = Join-Path $uncSource "KangatangGuard.xlam"
-$srcScanner = Join-Path $uncSource "Kangatang_FolderScanner.ps1"
-
-if (-not (Test-Path $srcXlam)) {
-    # Fallback to current script directory if different
-    $srcXlam = Join-Path $ScriptDir "KangatangGuard.xlam"
+# Kiem tra file nguon (Uu tien ban danh so phien ban de tranh loi file KangatangGuard.xlam tren Hub bi SMB lock boi may khac)
+$srcXlamCandidates = @(
+    (Join-Path $uncSource "KangatangGuard_v$versionInfo.xlam"),
+    (Join-Path $uncSource "KangatangGuard_latest.xlam"),
+    (Join-Path $BackupServerPath "KangatangGuard.xlam"),
+    (Join-Path $uncSource "KangatangGuard.xlam"),
+    (Join-Path $ScriptDir "KangatangGuard.xlam")
+)
+$srcXlam = $srcXlamCandidates[3]
+foreach ($cand in $srcXlamCandidates) {
+    if ($cand -and (Test-Path $cand)) {
+        $srcXlam = $cand
+        break
+    }
 }
+$srcScanner = Join-Path $uncSource "Kangatang_FolderScanner.ps1"
 if (-not (Test-Path $srcScanner)) {
     $srcScanner = Join-Path $ScriptDir "Kangatang_FolderScanner.ps1"
 }
@@ -61,6 +69,7 @@ if (-not (Test-Path $srcXlam)) {
     Write-Host "Vui long kiem tra ket noi den May chu LAN: $uncSource" -ForegroundColor Red
     exit 1
 }
+Write-Host "   -> Tep nguon Add-in: $srcXlam" -ForegroundColor Gray
 
 # Dong cac tien trinh Excel dang chay
 Write-Host "`n[2/5] Dang dong tien trinh Excel dang chay..." -ForegroundColor Yellow
@@ -75,12 +84,12 @@ if ($excelProcs) {
 
 # Cau hinh Office Trust Center
 Write-Host "`n[3/5] Dang cau hinh Office Trust Center (Cho phep Macro & Mang noi bo)..." -ForegroundColor Yellow
-$officeVersions = @("14.0", "15.0", "16.0")
+$officeVersions = @("12.0", "14.0", "15.0", "16.0")
 
 foreach ($ver in $officeVersions) {
     $secKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Security"
-    # v3.10.0: Tao khoa Security neu Office phien ban nay da cai (co khoa Excel) nhung chua tung mo Excel
-    if (-not (Test-Path $secKey) -and (Test-Path "HKCU:\Software\Microsoft\Office\$ver\Excel")) {
+    # v3.15.0: Luon dam bao khoa Security ton tai cho cac phien ban Office pho bien (15.0, 16.0) hoac da co khoa Excel
+    if (-not (Test-Path $secKey) -and ((Test-Path "HKCU:\Software\Microsoft\Office\$ver\Excel") -or ($ver -in @("15.0", "16.0")))) {
         New-Item -Path $secKey -Force -ErrorAction SilentlyContinue | Out-Null
     }
     if (Test-Path $secKey) {
@@ -88,6 +97,22 @@ foreach ($ver in $officeVersions) {
             Set-ItemProperty -Path $secKey -Name "AllowNetworkLocations" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
             Set-ItemProperty -Path $secKey -Name "AccessVBOM" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
         } catch {}
+
+        # Go bo Policy HKCU neu dang khoa AccessVBOM = 0
+        $polPath = "HKCU:\Software\Policies\Microsoft\Office\$ver\Excel\Security"
+        if (Test-Path $polPath) {
+            try { Remove-ItemProperty -Path $polPath -Name "AccessVBOM" -Force -ErrorAction SilentlyContinue } catch {}
+        }
+
+        # Thu bat tren HKLM va WOW6432Node neu co quyen
+        foreach ($hklmSec in @(
+            "HKLM:\Software\Microsoft\Office\$ver\Excel\Security",
+            "HKLM:\Software\WOW6432Node\Microsoft\Office\$ver\Excel\Security"
+        )) {
+            if (Test-Path $hklmSec) {
+                try { Set-ItemProperty -Path $hklmSec -Name "AccessVBOM" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue } catch {}
+            }
+        }
 
         $trustedRoot = "$secKey\Trusted Locations"
         if (-not (Test-Path $trustedRoot)) {
@@ -119,7 +144,7 @@ foreach ($ver in $officeVersions) {
         Set-ItemProperty -Path $locLocal -Name "Description" -Value "KangatangGuard Local Cache" -Type String -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Host "   -> [OK] Da cau hinh Trusted Locations thanh cong." -ForegroundColor Green
+Write-Host "   -> [OK] Da cau hinh Trusted Locations va AccessVBOM thanh cong." -ForegroundColor Green
 
 # Sao chep tep vao bo nho dem cuc bo (Local Cache: XLSTART va APPDATA)
 Write-Host "`n[4/5] Dang cai dat Add-in vao bo nho dem cuc bo (Offline-First Cache)..." -ForegroundColor Yellow
@@ -181,6 +206,7 @@ Set-ItemProperty -Path $regKey -Name "UpdateSource" -Value $uncSource -Force
 Set-ItemProperty -Path $regKey -Name "InstalledVersion" -Value $versionInfo -Force
 Set-ItemProperty -Path $regKey -Name "ScannerScript" -Value (Join-Path $localAppData "Kangatang_FolderScanner.ps1") -Force
 Set-ItemProperty -Path $regKey -Name "LastUpdateCheck" -Value (Get-Date -Format "yyyy-MM-dd HH:mm:ss") -Force
+Remove-ItemProperty -Path $regKey -Name "LastVbomWarn" -Force -ErrorAction SilentlyContinue
 
 Write-Host "   -> [OK] UpdateSource    : $uncSource" -ForegroundColor Green
 Write-Host "   -> [OK] InstalledVersion: v$versionInfo" -ForegroundColor Green

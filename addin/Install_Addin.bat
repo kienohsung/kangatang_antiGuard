@@ -1,15 +1,6 @@
-﻿﻿﻿﻿@echo off
+@echo off
 setlocal
-chcp 65001 >nul
 title KANGATANG GUARD - CAI DAT ADD-IN EXCEL
-
-:: Kiem tra quyen Administrator
-net session >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [!] Dang yeu cau quyen Administrator...
-    powershell -NoProfile -Command "Start-Process cmd.exe -ArgumentList '/c \"\"%~f0\"\"' -Verb RunAs"
-    exit /b
-)
 
 echo ======================================================================
 echo   KANGATANG GUARD - CAI DAT ADD-IN TU DONG QUET VIRUS EXCEL

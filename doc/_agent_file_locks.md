@@ -1,26 +1,11 @@
-<!-- doc/_agent_file_locks.md - Auto-generated, DO NOT edit manually -->
-# 🔒 Agent File Lock Registry
-> Generated: 2026-10-07 00:16:00
-> Released: 2026-10-07 00:28:15
-> Session: e642ecbb-30a3-4e65-b8fb-0752868e5fe9
-> Protocol: multi-agent-coordination v1.0
+# Agent File Locks (`_agent_file_locks.md`)
 
-## Active Locks
+> Quy ước phối hợp Multi-Agent: Trước khi chỉnh sửa bất kỳ file nào trong dự án, Agent phải kiểm tra bảng dưới đây và đăng ký khóa file (`LOCKED`). Khi hoàn tất (Step 4 Healthcheck pass), giải phóng khóa (`IDLE`).
 
-| File Path | Lock Owner (Agent) | Lock Time | Status |
-|---|---|---|---|
-| *(No active locks)* | - | - | - |
-
-## Completed Locks
-
-| File Path | Agent | Completed At | Build Check |
-|---|---|---|---|
-| `addin/KangatangGuard_Code.vba` | Orchestrator | 11:05:00 | ✅ PASSED (Quarantine Redirect & 223.7 Forbidden Guard v3.14.0) |
-| `addin/Kangatang_FolderScanner.ps1` | Orchestrator | 11:05:00 | ✅ PASSED (Quarantine Redirect & Path Exclusion v3.14.0) |
-| `addin/Kangatang_Standalone_Scanner.ps1` | Orchestrator | 11:05:00 | ✅ PASSED (Quarantine Redirect & Path Exclusion v3.14.0) |
-| `addin/Deploy_To_Hub.ps1` | Orchestrator | 11:05:00 | ✅ PASSED (Compilation & Packaging v3.14.0) |
-| `addin/KangatangGuard_Code.vba` | Orchestrator | 08:15:20 | ✅ PASSED (Cross-Workbook Copy/Paste & Centralized Threat Collector v3.13.0) |
-| `addin/KangatangGuard_Code.vba` | Subagent-VBA-Architect | 00:28:00 | ✅ PASSED (AST + COM In-Memory Compile) |
-| `addin/Kangatang_FolderScanner.ps1` | Subagent-PowerShell-Scanner | 00:27:30 | ✅ PASSED (AST + Integration Test Suite) |
-| `addin/Kangatang_Standalone_Scanner.ps1` | Subagent-PowerShell-Scanner | 00:27:30 | ✅ PASSED (AST + Clean-SystemReservoirs Test) |
-| `addin/Install_KangatangGuard.ps1` | Orchestrator | 00:28:15 | ✅ READY |
+| File Path | Agent Owner | Status | Task / Description | Timestamp |
+| :--- | :--- | :--- | :--- | :--- |
+| `addin/KangatangGuard_Code.vba` | MainAgent | `IDLE` | Released after v3.15.0 AccessVBOM Self-Healing & Zero-Popup verification | 2026-10-14 23:45 |
+| `addin/Install_KangatangGuard.ps1` | MainAgent | `IDLE` | Released after v3.15.0 deployment | 2026-10-14 23:45 |
+| `addin/Install_Addin.bat` | MainAgent | `IDLE` | Released after v3.15.0 deployment | 2026-10-14 23:45 |
+| `addin/Deploy_To_Hub.ps1` | MainAgent | `IDLE` | Released after v3.15.0 deployment | 2026-10-14 23:45 |
+| `distribution/Install_Client.ps1` | MainAgent | `IDLE` | Released after v3.15.0 deployment | 2026-10-14 23:45 |
