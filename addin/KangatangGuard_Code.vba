@@ -131,7 +131,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.17.1"
+Public Const CURRENT_VERSION As String = "3.17.2"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -1741,27 +1741,8 @@ End Sub
 ' HAM MENU: Hien thi thong tin Add-in
 ' ===========================================================================
 Public Sub ShowAbout()
-    Dim regVer As String, regSrc As String
-    Dim wsh As Object
-    On Error Resume Next
-    Set wsh = CreateObject("WScript.Shell")
-    regVer = wsh.RegRead("HKCU\Software\KangatangGuard\InstalledVersion")
-    regSrc = wsh.RegRead("HKCU\Software\KangatangGuard\UpdateSource")
-    Set wsh = Nothing
-    On Error GoTo 0
-    
-    If Len(regVer) = 0 Then regVer = CURRENT_VERSION
-    If Len(regSrc) = 0 Then regSrc = DEFAULT_HUB_PRIMARY
-    
     MsgBoxW Uni("KangatangGuard v" & CURRENT_VERSION & vbCrLf & vbCrLf & _
-                "H\u1ec7 th\u1ed1ng b\u1ea3o v\u1ec7 Excel chuy\u00ean d\u1ee5ng ch\u1ed1ng virus macro Kangatang / Laroux / mypersonnel." & vbCrLf & vbCrLf & _
-                "- T\u1ef1 \u0111\u1ed9ng qu\u00e9t th\u1eddi gian th\u1ef1c khi m\u1edf t\u1ec7p." & vbCrLf & _
-                "- ScanCache th\u00f4ng minh ch\u1ed1ng lag khi l\u01b0u v\u00e0 AutoSave." & vbCrLf & _
-                "- Ki\u1ebfn tr\u00fac 100% Native VBA Scanner: T\u01b0\u01a1ng th\u00edch tuy\u1ec7t \u0111\u1ed1i v\u1edbi m\u1ecdi Antivirus/EDR (Seqrite/Quick Heal)!" & vbCrLf & _
-                "- T\u00ednh n\u0103ng Fast Resume: Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t d\u1edf dang si\u00eau t\u1ed1c." & vbCrLf & _
-                "- Trung t\u00e2m Ph\u00e2n ph\u1ed1i LAN Hub (\\192.168.223.7) & T\u1ef1 \u0111\u1ed9ng C\u1eadp nh\u1eadt." & vbCrLf & vbCrLf & _
-                "\u2022 M\u00e1y ch\u1ee7 ngu\u1ed3n: " & regSrc & vbCrLf & _
-                "\u2022 Phi\u00ean b\u1ea3n ki\u1ebfn tr\u00fac: v" & CURRENT_VERSION & " Production-grade"), _
+                "\u0110\u00e2y l\u00e0 addin ph\u00f2ng ch\u1ed1ng virus kangatang - Ph\u00e1t tri\u1ec3n b\u1edfi OhsungIT team !"), _
             vbInformation, Uni("Gi\u1edbi thi\u1ec7u KangatangGuard v" & CURRENT_VERSION)
 End Sub
 

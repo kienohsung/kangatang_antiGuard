@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao %APPDATA%\Microsoft\AddIns
-# Phien ban: v3.17.1 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
+# Phien ban: v3.17.2 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.17.1"
+$InstallerVersion = "3.17.2"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
@@ -340,7 +340,7 @@ try {
     # Cau hinh thuoc tinh Add-in chuan
     try {
         $wb.BuiltinDocumentProperties("Title").Value = "KangatangGuard"
-        $wb.BuiltinDocumentProperties("Comments").Value = "KangatangGuard v$InstallerVersion - Tu dong quet, diet virus macro Kangatang va khoi phuc Copy/Paste Excel."
+        $wb.BuiltinDocumentProperties("Comments").Value = "Đây là addin phòng chống virus kangatang - Phát triển bởi OhsungIT team !"
     } catch {}
     $wb.IsAddin = $true
     $wb.SaveAs($xlamPath, 55)  # 55 = xlOpenXMLAddIn (.xlam)

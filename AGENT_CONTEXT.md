@@ -5,7 +5,7 @@
 
 ## 1. THÔNG TIN PHIÊN BẢN & HẠ TẦNG MẠNG LAN (CRITICAL TOPOLOGY)
 
-- **Phiên bản hiện tại:** `v3.17.1` (`Unified Version Synchronization & 100% Native VBA Antivirus-Safe Engine`)
+- **Phiên bản hiện tại:** `v3.17.2` (`Unified Version Synchronization & 100% Native VBA Antivirus-Safe Engine`)
 - **Phân tách vai trò 2 máy chủ LAN (BẤT BIẾN):**
   | Máy chủ | Đường dẫn UNC / Local | Vai trò duy nhất | Quy tắc CẤM (Hard Constraint) |
   | :--- | :--- | :--- | :--- |

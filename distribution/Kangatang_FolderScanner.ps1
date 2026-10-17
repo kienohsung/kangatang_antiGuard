@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh khoi chay Quet Thu Muc qua Engine Native VBA cua KangatangGuard.xlam
-# Phien ban: v3.17.1 (Unified Version Sync & Antivirus-Safe Pure COM Wrapper)
+# Phien ban: v3.17.2 (Unified Version Sync & Antivirus-Safe Pure COM Wrapper)
 # ==============================================================================
 
 param (
@@ -18,7 +18,7 @@ $OutputEncoding           = [System.Text.Encoding]::UTF8
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
 # Dong bo phien ban dong tu version.json hoac Registry InstalledVersion (khong bao gio lech phien ban voi Add-in)
-$AppVersion = "3.17.1"
+$AppVersion = "3.17.2"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
