@@ -417,8 +417,9 @@ function Write-PeriodicReportFiles([string]$status, [int]$totalTarget, [string]$
     try {
         $nowStr = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         $elapsedMin = if ($null -ne $stopwatch) { [Math]::Round($stopwatch.Elapsed.TotalMinutes, 2) } else { 0.0 }
-        $elapsedSec = if ($null -ne $stopwatch) { [Math]::Max(0.1, $stopwatch.Elapsed.TotalSeconds) } else { 1.0 }
-        $avgSpeed   = [Math]::Round($script:totalScanned / $elapsedSec, 1)
+        $elapsedSec = if ($null -ne $stopwatch) { [Math]::Max(0.5, $stopwatch.Elapsed.TotalSeconds) } else { 1.0 }
+        $sessionNewScanned = [Math]::Max(0, $script:totalScanned - [int]$script:initialResumeCount)
+        $avgSpeed   = if ($sessionNewScanned -gt 0) { [Math]::Round($sessionNewScanned / $elapsedSec, 1) } else { 0.0 }
         $totalFolders = if ($null -ne $sharedState) { [Math]::Max([int]$sharedState.TotalTargetFolders, [int]$script:folderIdx) } else { [int]$script:folderIdx }
 
         # 1. Cap nhat Scan_Summary_History.csv (Upsert theo SessionID)
@@ -956,6 +957,7 @@ function Ensure-WorkerPoolStarted {
 }
 
 # 7. Bien trang thai va Ham ve Bang Dieu Khien Co Dinh (Non-Scrolling Live Dashboard UI)
+$script:initialResumeCount = 0
 $script:totalDiscovered = 0
 $script:totalScanned    = 0
 $script:totalSkipped    = 0
@@ -1035,13 +1037,14 @@ function Render-LiveDashboard([bool]$force = $false, [bool]$isCompleted = $false
     $pctRem  = [Math]::Max(0.0, [Math]::Round(100.0 - $pctDone, 1))
     $remFiles = [Math]::Max(0, $totalTarget - $script:totalScanned)
 
-    $elapsedSec = [Math]::Max(0.1, $stopwatch.Elapsed.TotalSeconds)
-    $speed = [Math]::Round($script:totalScanned / $elapsedSec, 1)
+    $elapsedSec = [Math]::Max(0.5, $stopwatch.Elapsed.TotalSeconds)
+    $sessionNewScanned = [Math]::Max(0, $script:totalScanned - [int]$script:initialResumeCount)
+    $speed = if ($sessionNewScanned -gt 0) { [Math]::Round($sessionNewScanned / $elapsedSec, 1) } else { 0.0 }
 
-    $etaStr = "--p--s"
+    $etaStr = "--h--p"
     if ($isCompleted) {
         $etaStr = "00p00s"
-    } elseif ($speed -gt 0 -and $remFiles -gt 0) {
+    } elseif ($speed -gt 0 -and $remFiles -gt 0 -and $sessionNewScanned -ge 10) {
         $etaSec = [int][Math]::Ceiling($remFiles / $speed)
         if ($etaSec -ge 3600) {
             $etaStr = "{0:D2}h{1:D2}p" -f [int][Math]::Floor($etaSec / 3600), [int][Math]::Floor(($etaSec % 3600) / 60)
@@ -1313,6 +1316,7 @@ if ($isResume -and $resumeMap.Count -gt 0) {
         }
     }
 }
+$script:initialResumeCount = $script:preCountedResumeSet.Count
 $script:lastFlushMs = 0
 
 Add-DetailAuditEvent "SESSION_START" $TargetFolder 0 "(ALL)" "Bat dau phien quet thu muc v$AppVersion (Resume=$isResume, Workers=$workerCount)"
@@ -1331,10 +1335,11 @@ if ($isResume -and $script:orderedScannedDirs.Count -gt 0) {
     $script:folderIdx       = $script:orderedScannedDirs.Count
     $script:totalDiscovered = $script:totalScanned
     $lastScannedDir         = $script:orderedScannedDirs[$script:orderedScannedDirs.Count - 1]
+    $rootLen                = $TargetFolder.Length
 
-    # Uu tien nap ngay cha/ong cua thu muc cuoi cung (#15,941) de nhay thang sang thu muc #15,942 trong 0.1 giay
+    # 1. Uu tien nap ngay cha/ong cua thu muc cuoi cung (#15,941) de quet tiep cac thu muc cung cap (#15,942...)
     $curAnc = $lastScannedDir
-    while ($curAnc -and ($curAnc.Length -ge $TargetFolder.Length)) {
+    while ($curAnc -and ($curAnc.Length -ge $rootLen)) {
         if ($queuedSeedSet.Add($curAnc)) {
             $dirQueue.Enqueue($curAnc)
         }
@@ -1342,16 +1347,32 @@ if ($isResume -and $script:orderedScannedDirs.Count -gt 0) {
         $curAnc = [System.IO.Path]::GetDirectoryName($curAnc)
     }
 
-    # Nap cac nhanh bien gioi (Frontier) tu cuoi danh sach da quet nguoc ve truoc
+    # 2. Uu tien nap cac thu muc cha (tang <= 6) tu cuoi nguoc ve truoc (nhanh 3-Display & 2-Motor chua quet tang 7),
+    #    day cac thu muc tang >= 7 (da quet xong con) xuong cuoi hang doi
+    $deepLeafQueue = New-Object System.Collections.Generic.List[string]
     for ($idxD = $script:orderedScannedDirs.Count - 1; $idxD -ge 0; $idxD--) {
         $dItem = $script:orderedScannedDirs[$idxD]
-        $pItem = [System.IO.Path]::GetDirectoryName($dItem)
-        if ($pItem -and ($pItem.Length -ge $TargetFolder.Length) -and $queuedSeedSet.Add($pItem)) {
-            $dirQueue.Enqueue($pItem)
+        $relD  = if ($dItem.Length -gt $rootLen) { $dItem.Substring($rootLen + 1) } else { "" }
+        $depthD = if ($relD -eq "") { 0 } else { ($relD -split "\\").Count }
+
+        if ($depthD -le 6) {
+            if ($queuedSeedSet.Add($dItem)) { $dirQueue.Enqueue($dItem) }
+            $pItem = [System.IO.Path]::GetDirectoryName($dItem)
+            if ($pItem -and ($pItem.Length -ge $rootLen) -and $queuedSeedSet.Add($pItem)) {
+                $dirQueue.Enqueue($pItem)
+            }
+        } else {
+            $pItem = [System.IO.Path]::GetDirectoryName($dItem)
+            if ($pItem -and ($pItem.Length -ge $rootLen) -and $queuedSeedSet.Add($pItem)) {
+                $deepLeafQueue.Add($pItem)
+            }
+            if ($queuedSeedSet.Add($dItem)) {
+                $deepLeafQueue.Add($dItem)
+            }
         }
-        if ($queuedSeedSet.Add($dItem)) {
-            $dirQueue.Enqueue($dItem)
-        }
+    }
+    foreach ($leafDir in $deepLeafQueue) {
+        $dirQueue.Enqueue($leafDir)
     }
 }
 if ($queuedSeedSet.Add($TargetFolder)) {
