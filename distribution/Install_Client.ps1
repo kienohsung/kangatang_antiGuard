@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_Client.ps1
 # PowerShell Installer cho May Client trong Mang LAN
-# Phien ban: v3.20.2 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
+# Phien ban: v3.21.0 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.20.2)    " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.21.0)    " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -32,7 +32,7 @@ if ($ScriptDir.StartsWith("\\")) {
 Write-Host "`n[1/5] May chu phan phoi (Hub): $uncSource" -ForegroundColor Yellow
 
 # Doc thong tin phien ban tu version.json neu co
-$versionInfo = "3.20.2"
+$versionInfo = "3.21.0"
 $versionJsonPath = Join-Path $uncSource "version.json"
 if (Test-Path $versionJsonPath) {
     try {
@@ -212,8 +212,39 @@ if (-not (Test-Path $regKey)) { New-Item -Path $regKey -Force | Out-Null }
 Set-ItemProperty -Path $regKey -Name "UpdateSource" -Value $uncSource -Force
 Set-ItemProperty -Path $regKey -Name "InstalledVersion" -Value $versionInfo -Force
 Remove-ItemProperty -Path $regKey -Name "ScannerScript" -Force -ErrorAction SilentlyContinue
-Set-ItemProperty -Path $regKey -Name "LastUpdateCheck" -Value (Get-Date -Format "yyyy-MM-dd HH:mm:ss") -Force
+$nowClientTs = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+Set-ItemProperty -Path $regKey -Name "LastUpdateCheck" -Value $nowClientTs -Force
+$firstInstDate = (Get-ItemProperty -Path $regKey -Name "FirstInstalledDate" -ErrorAction SilentlyContinue).FirstInstalledDate
+if ([string]::IsNullOrWhiteSpace($firstInstDate)) {
+    $firstInstDate = $nowClientTs
+    Set-ItemProperty -Path $regKey -Name "FirstInstalledDate" -Value $firstInstDate -Force
+}
 Remove-ItemProperty -Path $regKey -Name "LastVbomWarn" -Force -ErrorAction SilentlyContinue
+try {
+    $macAddr = ""
+    $ipAddr  = ""
+    $nics = Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "IPEnabled = True" -ErrorAction SilentlyContinue
+    foreach ($nic in $nics) {
+        $mCand = ([string]$nic.MACAddress).Trim().ToUpperInvariant().Replace(":", "-")
+        $ipCand = ""
+        foreach ($ip in @($nic.IPAddress)) {
+            if ($ip -match '^\d+\.\d+\.\d+\.\d+$' -and (-not $ip.StartsWith("169."))) { $ipCand = $ip; break }
+        }
+        if ($mCand -and $ipCand) {
+            $macAddr = $mCand; $ipAddr = $ipCand
+            if ($ipCand.StartsWith("192.168.223.")) { break }
+        }
+    }
+    if (-not $macAddr) { $macAddr = "UNKNOWN-$env:COMPUTERNAME" }
+    if (-not $ipAddr)  { $ipAddr  = "0.0.0.0" }
+    $hbLine = "$macAddr|$ipAddr|$env:COMPUTERNAME|$env:USERNAME|$firstInstDate|$nowClientTs|v$versionInfo`r`n"
+    $repDir = if (Test-Path "D:\7. AI tools\kangatang\Scan_Reports") { "D:\7. AI tools\kangatang\Scan_Reports" } elseif (Test-Path "\\192.168.223.176\test") {
+        $rPath = "\\192.168.223.176\test\Scan_Reports"
+        if (-not (Test-Path $rPath)) { New-Item -ItemType Directory -Path $rPath -Force -ErrorAction SilentlyContinue | Out-Null }
+        $rPath
+    } else { $localAppData }
+    [System.IO.File]::AppendAllText((Join-Path $repDir "Endpoint_Heartbeats.log"), $hbLine, [System.Text.Encoding]::Unicode)
+} catch {}
 
 Write-Host "   -> [OK] UpdateSource    : $uncSource" -ForegroundColor Green
 Write-Host "   -> [OK] InstalledVersion: v$versionInfo (100% Native VBA Scanner)" -ForegroundColor Green

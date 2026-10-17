@@ -36,7 +36,7 @@
 
 ---
 
-## 2. BẢNG TIẾN HÓA KIẾN TRÚC QUA CÁC PHIÊN BẢN (`v3.1` ➔ `v3.20.2`)
+## 2. BẢNG TIẾN HÓA KIẾN TRÚC QUA CÁC PHIÊN BẢN (`v3.1` ➔ `v3.21.0`)
 
 | Phiên bản | Ngày | Cột mốc Kiến trúc & Cải tiến Trọng tâm | Tài liệu chi tiết trong `doc/` |
 | :--- | :--- | :--- | :--- |
@@ -53,4 +53,5 @@
 | **`v3.19.0` – `v3.19.3`** | `10/2026` | **Non-Scrolling Live Dashboard UI + Immortal Worker Pool + Single-Instance Mutex:** Giao diện bảng điều khiển cố định tự co giãn (`Adaptive Console Width Guard`), hàm băm `Pure Native VBA ComputeThreatHash` (0% `.NET CLR mscorwks.dll` crash), `Immortal Worker Pool` + `LOH 4MB Cap` chịu tải `66.000+` tệp, và `Single-Instance Mutex` chặn bật trùng cửa sổ PowerShell. | `20261017_live_dashboard_progress_ui_v3.19.0.md` |
 | **`v3.20.0`** | `10/2026` | **Enterprise Periodic Scan Reporting & Project Audit Logging (`Scan_Reports\`):** Tự động ghi nhật ký kiểm toán chi tiết và xuất bộ 4 báo cáo định kỳ (`LATEST_SCAN_REPORT.md`, `Scan_Summary_History.csv`, `Infected_Files_Ledger_YYYYMM.csv`, `scan_detail_log_YYYYMMDD.txt`) kèm thống kê theo từng Phòng ban / Thư mục cấp 1 trực tiếp vào `D:\7. AI tools\kangatang\Scan_Reports\`. | `20261017_detailed_scan_report_logging_plan.md` |
 | **`v3.20.1` – `v3.20.2`** | `10/2026` | **RAM-Only DDE Isolation, Zero-Freeze Worker Calculation (`< 1.3s` User Excel Open) & UTF-8 Resume Session Reader:** Cách ly hoàn toàn Worker ngầm với Windows Explorer DDE (`IgnoreRemoteRequests = True` trong RAM + xóa ngay bit `0x40` trong Registry `HKCU\...\Excel\Options\Options`), chuyển `Application.Calculation = xlCalculationManual` (`-4135`) + `DoEvents` khi xóa hàng loạt sheet ẩn `Kangatang_N`, và bổ sung `ReadUtf8FileText` (`ADODB.Stream` UTF-8 + Fallback) cho `IsScannerCurrentlyRunning` & `ResumeScanDialog`. | `AGENT_CONTEXT.md` |
+| **`v3.21.0`** | `10/2026` | **Executive Multi-Sheet Excel Report ("1-Page A4 Dashboard"), Endpoint MAC Telemetry & `Last Saved By` Forensics:** Xuất báo cáo quản trị `Bao_Cao_Quan_Tri_KangatangGuard.xlsx` gồm 6 Sheet (`1_Dashboard_A4` chuẩn 1 trang A4 ngang, `2_Thiet_Bi_Addin` dùng `MAC Address` làm khóa chính, `3_Xep_Hang_Phong_Ban` xếp hạng A/B/C & tách `Re-infected`, `4_So_Cai_File_Nhiem` truy vết `Last Saved By` từ `docProps/core.xml` & `BuiltinDocumentProperties`, `5_Bien_The_Virus` phân tích kỹ thuật 4 biến thể, `6_Lich_Su_Phat_Trien` ngôn ngữ đời thường). | `AGENT_CONTEXT.md` |
 

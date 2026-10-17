@@ -135,7 +135,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.20.2"
+Public Const CURRENT_VERSION As String = "3.21.0"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -515,6 +515,22 @@ CheckError:
     On Error GoTo 0
 End Function
 
+Public Function GetWorkbookLastAuthor(ByVal wb As Workbook) As String
+    On Error Resume Next
+    Dim sAuth As String
+    If Not wb Is Nothing Then
+        sAuth = Trim$(CStr(wb.BuiltinDocumentProperties("Last Author").Value & ""))
+        If Len(sAuth) = 0 Then
+            Err.Clear
+            sAuth = Trim$(CStr(wb.BuiltinDocumentProperties("Author").Value & ""))
+        End If
+    End If
+    Err.Clear
+    sAuth = Replace(Replace(Replace(sAuth, "|", "/"), vbCr, " "), vbLf, " ")
+    If Len(sAuth) = 0 Then sAuth = "(Khong ro)"
+    GetWorkbookLastAuthor = sAuth
+End Function
+
 ' ===========================================================================
 ' HAM QUET CHINH (v3.10.0)
 ' bFromBeforeSave = True: dang o trong su kien BeforeSave -> lam sach trong bo nho,
@@ -542,7 +558,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
     End If
     
     Dim virusFound As Boolean
-    Dim detailMsg As String
+    Dim detailMsg As String, lastAuthor As String
     virusFound = CheckWorkbookInfection(wb, detailMsg)
     
     UpdateScanCache wb
@@ -553,7 +569,8 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
         Exit Sub
     End If
     
-    WriteLog "[DETECTED] " & wb.FullName & vbCrLf & detailMsg
+    lastAuthor = GetWorkbookLastAuthor(wb)
+    WriteLog "[DETECTED] " & wb.FullName & " | LastSavedBy=" & lastAuthor & vbCrLf & detailMsg
     
     ' Uu tien 1: Go hook su kien cua virus dang chay trong RAM (chan lay tiep sang file khac)
     Call NeutralizeVirusHooks
@@ -561,7 +578,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
     If wb.ReadOnly Then
         ' Lam sach trong bo nho (khong ghi de tep) de chan lay lan trong phien lam viec
         Call CleanInfectedWorkbook(wb, False)
-        WriteLog "[READONLY_DETECTED] " & wb.FullName & " is read-only, neutralized in memory only."
+        WriteLog "[READONLY_DETECTED] " & wb.FullName & " | LastSavedBy=" & lastAuthor & " is read-only, neutralized in memory only."
         MsgBoxW Uni("C\u1ea2NH B\u00c1O: PH\u00c1T HI\u1ec6N VIRUS KANGATANG TRONG T\u1ec6P CH\u1ec8 \u0110\u1eccC (READ-ONLY)!" & vbCrLf & vbCrLf & _
                     "T\u1ec7p: ") & wb.Name & vbCrLf & vbCrLf & _
                     Uni("Chi ti\u1ebft:") & vbCrLf & detailMsg & vbCrLf & _
@@ -593,7 +610,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
         End If
         
         If cleanResult Then
-            WriteLog "[CLEANED] " & wb.FullName
+            WriteLog "[CLEANED] " & wb.FullName & " | LastSavedBy=" & lastAuthor
             
             Dim bLaunch As Boolean
             bLaunch = (Not bFromBeforeSave) And (Len(wb.Path) > 0) And (Not IsInStartupFolder(wb.FullName)) And (Not IsScannerCurrentlyRunning())
@@ -1037,7 +1054,7 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     On Error GoTo WorkerFileErr
     
     Dim wbTarget As Workbook
-    Dim detailMsg As String, detailShort As String
+    Dim detailMsg As String, detailShort As String, lastAuthor As String
     Dim virusFound As Boolean, cleanOk As Boolean
     
     ' BUOC 1 (Fast Inspection Open - ReadOnly=True):
@@ -1059,6 +1076,9 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     ' BUOC 2: Kiem tra nhiem virus tren ban ReadOnly
     detailMsg = ""
     virusFound = CheckWorkbookInfection(wbTarget, detailMsg)
+    If virusFound Then
+        lastAuthor = GetWorkbookLastAuthor(wbTarget)
+    End If
     wbTarget.Close SaveChanges:=False
     Set wbTarget = Nothing
     
@@ -1069,7 +1089,7 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     
     ' BUOC 3 (Surgical Write Re-Open - Chi khi phat hien virus!):
     detailShort = Replace(Replace(Trim$(detailMsg), vbCrLf, "; "), "  - ", "")
-    WriteLog "[FOLDER_SCAN_DETECTED] " & filePath & " | " & detailShort
+    WriteLog "[FOLDER_SCAN_DETECTED] " & filePath & " | LastSavedBy=" & lastAuthor & " | " & detailShort
     
     On Error Resume Next
     Err.Clear
@@ -1077,7 +1097,7 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
                                               Password:="", WriteResPassword:="", _
                                               IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
     If Err.Number <> 0 Or wbTarget Is Nothing Then
-        ScanSingleFileForWorker = "INFECTED_LOCKED|" & detailShort
+        ScanSingleFileForWorker = "INFECTED_LOCKED|" & detailShort & "|||" & lastAuthor
         Err.Clear
         Exit Function
     End If
@@ -1086,20 +1106,20 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     If wbTarget.ReadOnly Then
         wbTarget.Close SaveChanges:=False
         Set wbTarget = Nothing
-        ScanSingleFileForWorker = "INFECTED_LOCKED|" & detailShort
+        ScanSingleFileForWorker = "INFECTED_LOCKED|" & detailShort & "|||" & lastAuthor
         Exit Function
     End If
     
     If Not BackupBeforeClean(wbTarget) Then
         wbTarget.Close SaveChanges:=False
         Set wbTarget = Nothing
-        ScanSingleFileForWorker = "INFECTED_ERR|Backup failed (" & detailShort & ")"
+        ScanSingleFileForWorker = "INFECTED_ERR|Backup failed (" & detailShort & ")|||" & lastAuthor
         Exit Function
     End If
     
     ' Neu tep chua Legacy Excel 5.0 Module-Sheet mang ten virus -> phoi hop 2 buoc voi PowerShell
     If VirusModuleSheetCount(wbTarget) > 0 Then
-        ScanSingleFileForWorker = "PURGE_NEEDED|" & detailShort
+        ScanSingleFileForWorker = "PURGE_NEEDED|" & detailShort & "|||" & lastAuthor
         Exit Function
     End If
     
@@ -1109,10 +1129,10 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     Set wbTarget = Nothing
     
     If cleanOk Then
-        WriteLog "[FOLDER_SCAN_CLEANED] " & filePath
-        ScanSingleFileForWorker = "CLEANED|" & detailShort
+        WriteLog "[FOLDER_SCAN_CLEANED] " & filePath & " | LastSavedBy=" & lastAuthor
+        ScanSingleFileForWorker = "CLEANED|" & detailShort & "|||" & lastAuthor
     Else
-        ScanSingleFileForWorker = "INFECTED_ERR|Clean partial (" & detailShort & ")"
+        ScanSingleFileForWorker = "INFECTED_ERR|Clean partial (" & detailShort & ")|||" & lastAuthor
     End If
     Exit Function
     
@@ -2488,9 +2508,10 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
         End If
     End If
     
-    ' Luu moc thoi gian kiem tra
+    ' Luu moc thoi gian kiem tra & ghi nhip tim thiet bi (MAC + IP + Version)
     On Error Resume Next
     wsh.RegWrite "HKCU\Software\KangatangGuard\LastUpdateCheck", Format(Now, "yyyy-MM-dd HH:mm:ss"), "REG_SZ"
+    Call RegisterEndpointHeartbeat
     On Error GoTo 0
     
     Set fso = Nothing
@@ -2501,10 +2522,93 @@ UpdateErr:
     If bSilent Then
         On Error Resume Next
         wsh.RegWrite "HKCU\Software\KangatangGuard\LastUpdateCheck", Format(Now, "yyyy-MM-dd HH:mm:ss"), "REG_SZ"
+        Call RegisterEndpointHeartbeat
     Else
         MsgBoxW Uni("L\u1ed7i khi ki\u1ec3m tra c\u1eadp nh\u1eadt: ") & Err.Description, vbCritical, Uni("KangatangGuard v" & CURRENT_VERSION & " - L\u1ed7i")
     End If
     On Error GoTo 0
+End Sub
+
+Public Sub RegisterEndpointHeartbeat()
+    On Error Resume Next
+    Dim wsh As Object, fso As Object, svc As Object, rs As Object, nic As Object
+    Dim macAddr As String, ipAddr As String, itemIp As Variant
+    Dim firstInstall As String, nowStr As String, hostName As String, userName As String
+    
+    Set wsh = CreateObject("WScript.Shell")
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    nowStr = Format$(Now, "yyyy-MM-dd HH:mm:ss")
+    hostName = Environ$("COMPUTERNAME")
+    userName = Environ$("USERNAME")
+    
+    If Not wsh Is Nothing Then
+        Err.Clear
+        firstInstall = Trim$(CStr(wsh.RegRead("HKCU\Software\KangatangGuard\FirstInstalledDate") & ""))
+        If Err.Number <> 0 Or Len(firstInstall) = 0 Then
+            Err.Clear
+            firstInstall = nowStr
+            wsh.RegWrite "HKCU\Software\KangatangGuard\FirstInstalledDate", firstInstall, "REG_SZ"
+        End If
+    End If
+    If Len(firstInstall) = 0 Then firstInstall = nowStr
+    
+    Set svc = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
+    If Not svc Is Nothing Then
+        Set rs = svc.ExecQuery("SELECT MACAddress, IPAddress FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True")
+        If Not rs Is Nothing Then
+            For Each nic In rs
+                Dim mCandidate As String, ipCandidate As String
+                mCandidate = Replace(UCase$(Trim$(CStr(nic.MACAddress & ""))), ":", "-")
+                ipCandidate = ""
+                If IsArray(nic.IPAddress) Then
+                    For Each itemIp In nic.IPAddress
+                        If InStr(1, CStr(itemIp), ".") > 0 And Left$(CStr(itemIp), 4) <> "169." Then
+                            ipCandidate = CStr(itemIp)
+                            Exit For
+                        End If
+                    Next itemIp
+                End If
+                If Len(mCandidate) > 0 And Len(ipCandidate) > 0 Then
+                    macAddr = mCandidate
+                    ipAddr = ipCandidate
+                    If Left$(ipCandidate, 11) = "192.168.223" Then Exit For
+                End If
+            Next nic
+        End If
+    End If
+    If Len(macAddr) = 0 Then macAddr = "UNKNOWN-" & hostName
+    If Len(ipAddr) = 0 Then ipAddr = "0.0.0.0"
+    
+    Dim lineRec As String
+    lineRec = macAddr & "|" & ipAddr & "|" & hostName & "|" & userName & "|" & firstInstall & "|" & nowStr & "|v" & CURRENT_VERSION
+    
+    Dim targetDir As String, hbFile As String, ts As Object
+    If fso.FolderExists("D:\7. AI tools\kangatang\Scan_Reports") Then
+        targetDir = "D:\7. AI tools\kangatang\Scan_Reports"
+    ElseIf IsUncReachable("\\192.168.223.176\test") Then
+        targetDir = "\\192.168.223.176\test\Scan_Reports"
+        If Not fso.FolderExists(targetDir) Then fso.CreateFolder targetDir
+    End If
+    
+    If Len(targetDir) > 0 Then
+        hbFile = targetDir & "\Endpoint_Heartbeats.log"
+        Set ts = fso.OpenTextFile(hbFile, 8, True, -1)
+        If Not ts Is Nothing Then
+            ts.WriteLine lineRec
+            ts.Close
+            Set ts = Nothing
+        End If
+    End If
+    
+    Dim localHb As String
+    localHb = Environ$("APPDATA") & "\" & LOG_SUBFOLDER & "\Endpoint_Heartbeats.log"
+    Set ts = fso.OpenTextFile(localHb, 8, True, -1)
+    If Not ts Is Nothing Then
+        ts.WriteLine lineRec
+        ts.Close
+        Set ts = Nothing
+    End If
+    Err.Clear
 End Sub
 
 Public Function IsNewerVersion(ByVal vServer As String, ByVal vLocal As String) As Boolean

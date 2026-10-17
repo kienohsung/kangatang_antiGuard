@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao %APPDATA%\Microsoft\AddIns
-# Phien ban: v3.20.2 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
+# Phien ban: v3.21.0 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.20.2"
+$InstallerVersion = "3.21.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
@@ -504,6 +504,33 @@ if (-not (Test-Path $guardRegKey)) {
 Remove-ItemProperty -Path $guardRegKey -Name "ScannerScript" -Force -ErrorAction SilentlyContinue
 Set-ItemProperty -Path $guardRegKey -Name "InstalledVersion" -Value $InstallerVersion -Force
 Set-ItemProperty -Path $guardRegKey -Name "UpdateSource" -Value "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang" -Force
+$nowInstallTs = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+$firstInstDate = (Get-ItemProperty -Path $guardRegKey -Name "FirstInstalledDate" -ErrorAction SilentlyContinue).FirstInstalledDate
+if ([string]::IsNullOrWhiteSpace($firstInstDate)) {
+    $firstInstDate = $nowInstallTs
+    Set-ItemProperty -Path $guardRegKey -Name "FirstInstalledDate" -Value $firstInstDate -Force
+}
+try {
+    $macAddr = ""
+    $ipAddr  = ""
+    $nics = Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "IPEnabled = True" -ErrorAction SilentlyContinue
+    foreach ($nic in $nics) {
+        $mCand = ([string]$nic.MACAddress).Trim().ToUpperInvariant().Replace(":", "-")
+        $ipCand = ""
+        foreach ($ip in @($nic.IPAddress)) {
+            if ($ip -match '^\d+\.\d+\.\d+\.\d+$' -and (-not $ip.StartsWith("169."))) { $ipCand = $ip; break }
+        }
+        if ($mCand -and $ipCand) {
+            $macAddr = $mCand; $ipAddr = $ipCand
+            if ($ipCand.StartsWith("192.168.223.")) { break }
+        }
+    }
+    if (-not $macAddr) { $macAddr = "UNKNOWN-$env:COMPUTERNAME" }
+    if (-not $ipAddr)  { $ipAddr  = "0.0.0.0" }
+    $hbLine = "$macAddr|$ipAddr|$env:COMPUTERNAME|$env:USERNAME|$firstInstDate|$nowInstallTs|v$InstallerVersion`r`n"
+    $repDir = if (Test-Path "D:\7. AI tools\kangatang\Scan_Reports") { "D:\7. AI tools\kangatang\Scan_Reports" } elseif (Test-Path "\\192.168.223.176\test\Scan_Reports") { "\\192.168.223.176\test\Scan_Reports" } else { $logDir }
+    [System.IO.File]::AppendAllText((Join-Path $repDir "Endpoint_Heartbeats.log"), $hbLine, [System.Text.Encoding]::Unicode)
+} catch {}
 Write-Host "   -> [OK] Da dang ky InstalledVersion: v$InstallerVersion (100% Native VBA Scanner)" -ForegroundColor Green
 Write-Host "   -> [OK] Da dang ky UpdateSource: \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang" -ForegroundColor Green
 

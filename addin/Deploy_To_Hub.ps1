@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.20.2"
+$ReleaseVersion = "3.21.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -61,11 +61,15 @@ foreach ($psFile in @(
         'v3\.\d+\.\d+'               = "v$ReleaseVersion"
     }
 }
+Sync-FileRegex (Join-Path $AddinDir "Sync_ScanReports.ps1") @{
+    '\$AppVersion\s*=\s*"[^"]+"' = "`$AppVersion = `"$ReleaseVersion`""
+}
 foreach ($batFile in @(
     (Join-Path $AddinDir "Chay_Diet_Virus_Ngoai.bat"),
     (Join-Path $LocalDist "Chay_Diet_Virus_Ngoai.bat"),
     (Join-Path $RootDir "Chay_Diet_Virus.bat"),
     (Join-Path $RootDir "Diet_Virus_Kangatang.bat"),
+    (Join-Path $RootDir "Xuat_Bao_Cao_Dinh_Ky.bat"),
     (Join-Path $LocalDist "README_HUONG_DAN_CLIENT.txt")
 )) {
     Sync-FileRegex $batFile @{
@@ -102,9 +106,8 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    # v3.17.1: Unified Version Synchronization & 100% Native VBA Antivirus-Safe Engine
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Unified Version Synchronization & 100% Native VBA Antivirus-Safe Engine: Dong bo 100% so phien ban giua Add-in Excel va Trinh quet virus tren toan he thong; giam thoi gian cho kiem tra cap nhat tu dong khi mo Excel xuong 1 phut; tich hop Native VBA Folder Scanner khong bi Antivirus (Seqrite / Quick Heal) nhan nham."
+    changelog         = "v${ReleaseVersion} - Executive Multi-Sheet Excel Report (1-Page A4 Dashboard) & Endpoint MAC Telemetry: Xuat bao cao Excel 6 Sheets (1_Dashboard_A4, 2_Thiet_Bi_Addin voi MAC PK, 3_Xep_Hang_Phong_Ban, 4_So_Cai_File_Nhiem voi Last Saved By & Re-infected, 5_Bien_The_Virus, 6_Lich_Su_Phat_Trien)."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
@@ -130,6 +133,9 @@ try { Set-ItemProperty -Path $targetLocalXlam -Name IsReadOnly -Value $false -Er
 # Chep cac script vao distribution
 Copy-Item -Path (Join-Path $AddinDir "Kangatang_Standalone_Scanner.ps1") -Destination (Join-Path $LocalDist "Kangatang_Standalone_Scanner.ps1") -Force
 Copy-Item -Path (Join-Path $AddinDir "Kangatang_FolderScanner.ps1") -Destination (Join-Path $LocalDist "Kangatang_FolderScanner.ps1") -Force
+if (Test-Path (Join-Path $AddinDir "Sync_ScanReports.ps1")) {
+    Copy-Item -Path (Join-Path $AddinDir "Sync_ScanReports.ps1") -Destination (Join-Path $LocalDist "Sync_ScanReports.ps1") -Force
+}
 if (Test-Path (Join-Path $AddinDir "Chay_Diet_Virus_Ngoai.bat")) {
     Copy-Item -Path (Join-Path $AddinDir "Chay_Diet_Virus_Ngoai.bat") -Destination (Join-Path $LocalDist "Chay_Diet_Virus_Ngoai.bat") -Force
 } else {

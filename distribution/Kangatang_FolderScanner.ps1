@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.20.2 (Detailed Project Audit Logging & Periodic Report Engine)
+# Phien ban: v3.21.0 (Detailed Project Audit Logging & Periodic Report Engine)
 # ==============================================================================
 
 param (
@@ -69,7 +69,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.20.2"
+$AppVersion = "3.21.0"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -237,9 +237,10 @@ if (-not $xlamPath) {
 # Su dung 2 Parallel Excel COM Workers (On-Demand) cho .xls/Macro (85% tep .xlsx da duoc xu ly boi Zero-COM ZIP)
 $workerCount = if ($MaxWorkers -gt 0) { $MaxWorkers } else { 2 }
 
-# 5. Nap du lieu Fast Resume tu scanned_files.log vao RAM Hashtable
+# 5. Nap du lieu Fast Resume tu scanned_files.log vao RAM Hashtable & HashSet phat hien Tai nhiem (RE_INFECTED)
 $resumeMap = @{}
-if ($isResume -and (Test-Path -LiteralPath $scannedLogFile)) {
+$script:everScannedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+if (Test-Path -LiteralPath $scannedLogFile) {
     try {
         foreach ($line in [System.IO.File]::ReadAllLines($scannedLogFile)) {
             $trimmed = $line.Trim()
@@ -248,16 +249,20 @@ if ($isResume -and (Test-Path -LiteralPath $scannedLogFile)) {
                 if ($idxSep -gt 0) {
                     $k = $trimmed.Substring(0, $idxSep).ToLowerInvariant()
                     $v = $trimmed.Substring($idxSep + 1)
-                    $resumeMap[$k] = $v
+                    [void]$script:everScannedPaths.Add($k)
+                    if ($isResume) {
+                        $resumeMap[$k] = $v
+                    }
                 }
             }
         }
     } catch {}
-} else {
+}
+if (-not $isResume) {
     try { [System.IO.File]::WriteAllText($scannedLogFile, "", [System.Text.Encoding]::Unicode) } catch {}
 }
 
-# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.20.2)
+# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.21.0)
 # Luu truc tiep vao thu muc du an D:\7. AI tools\kangatang\Scan_Reports (hoac \\192.168.223.176\test\Scan_Reports tu may tram LAN)
 $script:projectReportDir = if (Test-Path "D:\7. AI tools\kangatang") {
     "D:\7. AI tools\kangatang\Scan_Reports"
@@ -272,6 +277,40 @@ foreach ($rDir in @($script:projectReportDir, (Join-Path $script:projectReportDi
         try { New-Item -ItemType Directory -Path $rDir -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
     }
 }
+
+# Ghi nhan nhip tim Thiet bi (MAC Address la Khoa chinh + IPv4 + Host + User + Version) vao Endpoint_Heartbeats.log
+try {
+    $macAddr = ""
+    $ipAddr  = ""
+    $nics = Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "IPEnabled = True" -ErrorAction SilentlyContinue
+    foreach ($nic in $nics) {
+        $mCand = ([string]$nic.MACAddress).Trim().ToUpperInvariant().Replace(":", "-")
+        $ipCand = ""
+        foreach ($ip in @($nic.IPAddress)) {
+            if ($ip -match '^\d+\.\d+\.\d+\.\d+$' -and (-not $ip.StartsWith("169."))) {
+                $ipCand = $ip
+                break
+            }
+        }
+        if ($mCand -and $ipCand) {
+            $macAddr = $mCand
+            $ipAddr  = $ipCand
+            if ($ipCand.StartsWith("192.168.223.")) { break }
+        }
+    }
+    if (-not $macAddr) { $macAddr = "UNKNOWN-$env:COMPUTERNAME" }
+    if (-not $ipAddr)  { $ipAddr  = "0.0.0.0" }
+    $regKeyKg = "HKCU:\Software\KangatangGuard"
+    if (-not (Test-Path $regKeyKg)) { New-Item -Path $regKeyKg -Force | Out-Null }
+    $firstInst = (Get-ItemProperty -Path $regKeyKg -Name "FirstInstalledDate" -ErrorAction SilentlyContinue).FirstInstalledDate
+    $nowHb = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+    if ([string]::IsNullOrWhiteSpace($firstInst)) {
+        $firstInst = $nowHb
+        Set-ItemProperty -Path $regKeyKg -Name "FirstInstalledDate" -Value $firstInst -Force -ErrorAction SilentlyContinue
+    }
+    $hbLine = "$macAddr|$ipAddr|$env:COMPUTERNAME|$env:USERNAME|$firstInst|$nowHb|v$AppVersion`r`n"
+    [System.IO.File]::AppendAllText((Join-Path $script:projectReportDir "Endpoint_Heartbeats.log"), $hbLine, [System.Text.Encoding]::Unicode)
+} catch {}
 
 $script:sessionId        = "SCAN_" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_" + $env:COMPUTERNAME
 $safeLeafName            = ([System.IO.Path]::GetFileName($TargetFolder) -replace '[^a-zA-Z0-9_\-]', '_')
@@ -289,6 +328,7 @@ $script:ledgerBuffer     = New-Object System.Collections.Generic.List[string]
 $script:infectedRecords  = New-Object System.Collections.Generic.List[pscustomobject]
 $script:deptStats        = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::OrdinalIgnoreCase)
 $script:lastReportSyncMs = -30000
+$script:totalReInfected  = 0
 
 function Format-CsvField([string]$val) {
     if ($null -eq $val) { return '""' }
@@ -1080,11 +1120,23 @@ function Drain-WorkerResults {
             Update-DeptStat $fPath "CLEANED"
             $isPurge = $r.StartsWith("CLEANED_PURGE|")
             $threatFamily = if ($isPurge) { "Excel5_ModuleSheet_Hidden" } else { "VBA_Macro_Kangatang" }
-            $detail = if ($isPurge) { "Module-Sheet Excel 5.0: " + $r.Substring(14) } else { $r.Substring(8) }
+            $rawSub = if ($isPurge) { "Module-Sheet Excel 5.0: " + $r.Substring(14) } else { $r.Substring(8) }
+            $lastSavedBy = "(Khong ro)"
+            $detail = $rawSub
+            $idxAuth = $rawSub.IndexOf("|||")
+            if ($idxAuth -ge 0) {
+                $detail = $rawSub.Substring(0, $idxAuth)
+                $lastSavedBy = $rawSub.Substring($idxAuth + 3).Trim()
+                if (-not $lastSavedBy) { $lastSavedBy = "(Khong ro)" }
+            }
+            $isReInfected = ($null -ne $script:everScannedPaths) -and $script:everScannedPaths.Contains([string]$resItem.LowPath)
+            if ($isReInfected) { $script:totalReInfected++ }
+            $discoveryType = if ($isReInfected) { "RE_INFECTED" } else { "FIRST_TIME_CLEAN" }
+
             $nowDt = Get-Date
             $ts = $nowDt.ToString("HH:mm:ss")
             $tsFull = $nowDt.ToString("yyyy-MM-dd HH:mm:ss")
-            Add-RecentThreatLog "> [$ts] [DA DIET] $fName ($detail)"
+            Add-RecentThreatLog "> [$ts] [DA DIET] $fName ($detail | Luu cuoi: $lastSavedBy)"
             $deptName = Get-TopDepartmentName $fPath
             $folderDir = ""
             try { $folderDir = [System.IO.Path]::GetDirectoryName($fPath) } catch {}
@@ -1097,18 +1149,20 @@ function Drain-WorkerResults {
             } catch {}
 
             [void]$script:infectedRecords.Add([pscustomobject]@{
-                Time         = $tsFull
-                TimeShort    = $ts
-                Department   = $deptName
-                FileName     = $fName
-                FolderPath   = $folderDir
-                FullPath     = $fPath
-                Extension    = $extStr
-                SizeKB       = $sizeKb
-                ThreatFamily = $threatFamily
-                ThreatDetail = $detail
-                Action       = "CLEANED_AND_QUARANTINED"
-                WorkerId     = $wId
+                Time          = $tsFull
+                TimeShort     = $ts
+                Department    = $deptName
+                FileName      = $fName
+                FolderPath    = $folderDir
+                FullPath      = $fPath
+                Extension     = $extStr
+                SizeKB        = $sizeKb
+                ThreatFamily  = $threatFamily
+                ThreatDetail  = "$detail [LastSavedBy=$lastSavedBy] [Discovery=$discoveryType]"
+                LastSavedBy   = $lastSavedBy
+                DiscoveryType = $discoveryType
+                Action        = "CLEANED_AND_QUARANTINED"
+                WorkerId      = $wId
             })
 
             $csvRow = "{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}" -f `
@@ -1122,11 +1176,11 @@ function Drain-WorkerResults {
                 (Format-CsvField $extStr),
                 $sizeKb,
                 (Format-CsvField $threatFamily),
-                (Format-CsvField $detail),
+                (Format-CsvField "$detail [LastSavedBy=$lastSavedBy] [Discovery=$discoveryType]"),
                 (Format-CsvField "CLEANED_AND_QUARANTINED"),
                 $wId
             $script:ledgerBuffer.Add($csvRow)
-            Add-DetailAuditEvent "DETECTED_CLEANED" $fPath $wId $threatFamily "Da diet & cach ly thanh cong ($detail)"
+            Add-DetailAuditEvent "DETECTED_CLEANED" $fPath $wId $threatFamily "Da diet & cach ly thanh cong ($detail | LastSavedBy=$lastSavedBy | Discovery=$discoveryType)"
 
             try {
                 $fAfter = New-Object System.IO.FileInfo($fPath)
@@ -1138,10 +1192,22 @@ function Drain-WorkerResults {
             $script:totalInfected++
             $script:totalErrors++
             Update-DeptStat $fPath "INFECTED_LOCKED"
+            $lastSavedBy = "(Khong ro)"
+            $detail = $r
+            $idxAuth = $r.IndexOf("|||")
+            if ($idxAuth -ge 0) {
+                $detail = $r.Substring(0, $idxAuth)
+                $lastSavedBy = $r.Substring($idxAuth + 3).Trim()
+                if (-not $lastSavedBy) { $lastSavedBy = "(Khong ro)" }
+            }
+            $isReInfected = ($null -ne $script:everScannedPaths) -and $script:everScannedPaths.Contains([string]$resItem.LowPath)
+            if ($isReInfected) { $script:totalReInfected++ }
+            $discoveryType = if ($isReInfected) { "RE_INFECTED" } else { "FIRST_TIME_CLEAN" }
+
             $nowDt = Get-Date
             $ts = $nowDt.ToString("HH:mm:ss")
             $tsFull = $nowDt.ToString("yyyy-MM-dd HH:mm:ss")
-            Add-RecentThreatLog "! [$ts] [KHOA/READONLY] $fName ($r)"
+            Add-RecentThreatLog "! [$ts] [KHOA/READONLY] $fName ($detail | Luu cuoi: $lastSavedBy)"
             $deptName = Get-TopDepartmentName $fPath
             $folderDir = ""
             try { $folderDir = [System.IO.Path]::GetDirectoryName($fPath) } catch {}
@@ -1154,18 +1220,20 @@ function Drain-WorkerResults {
             } catch {}
 
             [void]$script:infectedRecords.Add([pscustomobject]@{
-                Time         = $tsFull
-                TimeShort    = $ts
-                Department   = $deptName
-                FileName     = $fName
-                FolderPath   = $folderDir
-                FullPath     = $fPath
-                Extension    = $extStr
-                SizeKB       = $sizeKb
-                ThreatFamily = "Locked_Infected_Workbook"
-                ThreatDetail = $r
-                Action       = "INFECTED_LOCKED_NEED_UNLOCK"
-                WorkerId     = $wId
+                Time          = $tsFull
+                TimeShort     = $ts
+                Department    = $deptName
+                FileName      = $fName
+                FolderPath    = $folderDir
+                FullPath      = $fPath
+                Extension     = $extStr
+                SizeKB        = $sizeKb
+                ThreatFamily  = "Locked_Infected_Workbook"
+                ThreatDetail  = "$detail [LastSavedBy=$lastSavedBy] [Discovery=$discoveryType]"
+                LastSavedBy   = $lastSavedBy
+                DiscoveryType = $discoveryType
+                Action        = "INFECTED_LOCKED_NEED_UNLOCK"
+                WorkerId      = $wId
             })
 
             $csvRow = "{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}" -f `
@@ -1179,11 +1247,11 @@ function Drain-WorkerResults {
                 (Format-CsvField $extStr),
                 $sizeKb,
                 (Format-CsvField "Locked_Infected_Workbook"),
-                (Format-CsvField $r),
+                (Format-CsvField "$detail [LastSavedBy=$lastSavedBy] [Discovery=$discoveryType]"),
                 (Format-CsvField "INFECTED_LOCKED_NEED_UNLOCK"),
                 $wId
             $script:ledgerBuffer.Add($csvRow)
-            Add-DetailAuditEvent "DETECTED_LOCKED" $fPath $wId "Locked_Infected_Workbook" "Phat hien nhiem nhung tep dang bi khoa/ReadOnly ($r)"
+            Add-DetailAuditEvent "DETECTED_LOCKED" $fPath $wId "Locked_Infected_Workbook" "Phat hien nhiem nhung tep dang bi khoa/ReadOnly ($detail | LastSavedBy=$lastSavedBy | Discovery=$discoveryType)"
         } else {
             $script:totalScanned++
             $script:totalErrors++
@@ -1382,6 +1450,15 @@ try {
     $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion - HOAN TAT ($totalSec giay) | Da quet: $($script:totalScanned) | Da diet: $($script:totalCleaned)"
     Write-Host "`n   [HOAN TAT] Qua trinh quet thu muc da ket thuc trong $totalSec giay!" -ForegroundColor Green
     Write-Host "   [BAO CAO]  $($script:latestMdPath)" -ForegroundColor Cyan
+
+    # v3.21.0: Tu dong dong bo va xuat Bao cao Quan tri Excel 6 Sheets (1-Page A4 Dashboard)
+    $syncReportScript = Join-Path $PSScriptRoot "Sync_ScanReports.ps1"
+    if (Test-Path -LiteralPath $syncReportScript) {
+        try {
+            Write-Host "   [DONG BO]  Dang cap nhat Bao_Cao_Quan_Tri_KangatangGuard.xlsx (6 Sheets)..." -ForegroundColor Yellow
+            & $syncReportScript
+        } catch {}
+    }
 } catch {
     try {
         $errMsg = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Top-level error: $($_.Exception.Message)`r`n$($_.ScriptStackTrace)`r`n"

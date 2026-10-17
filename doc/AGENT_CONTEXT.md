@@ -6,22 +6,22 @@
 
 ## 1. THÔNG TIN PHIÊN BẢN & HẠ TẦNG MẠNG LAN (CRITICAL TOPOLOGY)
 
-- **Phiên bản hiện tại:** `v3.20.2` (`RAM-Only DDE Isolation + Zero-Freeze Manual Calculation + UTF-8 Resume Session Reader`)
+- **Phiên bản hiện tại:** `v3.21.0` (`Executive Multi-Sheet Excel Report [1-Page A4 Dashboard] + Endpoint MAC Telemetry + Last Saved By Forensics`)
 - **Phân tách vai trò 2 máy chủ LAN (BẤT BIẾN):**
   | Máy chủ | Đường dẫn UNC / Local | Vai trò duy nhất | Quy tắc CẤM (Hard Constraint) |
   | :--- | :--- | :--- | :--- |
   | **`192.168.223.7`** *(Distribution Hub)* | `\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang` | Phân phối gói cài đặt & tự động cập nhật (`KangatangGuard.xlam`, `version.json`, `Install_Client.ps1`, `Kangatang_FolderScanner.ps1`) | 🛑 **TUYỆT ĐỐI KHÔNG** lưu `Quarantine_Backup`, `Threat_Samples` hoặc `Scan_Reports` trên `223.7`! |
-  | **`192.168.223.176`** *(Master & Threat Vault)* | Local: `D:\7. AI tools\kangatang\`<br>LAN Share: `\\192.168.223.176\test\Quarantine_Backup`, `\Threat_Samples` & `\Scan_Reports` | Lưu trữ tập trung mẫu mã độc (`Threat_Samples/`), bản sao lưu file nhiễm (`Quarantine_Backup/`) và Báo cáo định kỳ / Nhật ký chi tiết (`Scan_Reports/`) | Không dùng làm Hub cập nhật chính cho Client (chỉ lưu bản Clone tại `distribution/`) |
+  | **`192.168.223.176`** *(Master & Threat Vault)* | Local: `D:\7. AI tools\kangatang\`<br>LAN Share: `\\192.168.223.176\test\Quarantine_Backup`, `\Threat_Samples` & `\Scan_Reports` | Lưu trữ tập trung mẫu mã độc (`Threat_Samples/`), bản sao lưu file nhiễm (`Quarantine_Backup/`) và Báo cáo Quản trị Đa Sheet / Nhật ký (`Scan_Reports/`) | Không dùng làm Hub cập nhật chính cho Client (chỉ lưu bản Clone tại `distribution/`) |
 
 - **Vị trí cài đặt chuẩn trên máy Client/Master:**
   - Add-in & Trình quét ngoài tiến trình: `%APPDATA%\Microsoft\AddIns\KangatangGuard.xlam` và `%APPDATA%\Microsoft\AddIns\Kangatang_FolderScanner.ps1` (**KHÔNG** chép `.xlam` vào `XLSTART`).
   - Tự động nạp qua Registry: `HKCU\Software\Microsoft\Office\<16.0|15.0|14.0>\Excel\Options\OPEN* = "KangatangGuard.xlam"` (bảo toàn các Add-in khác như `MyExcel.xlam`).
   - Thư mục Log & Session cục bộ: `%APPDATA%\KangatangGuard\` (`scan_log_YYYYMMDD.txt`, `last_session.json`, `scanned_files.log`, `scan_request.json`). **TUYỆT ĐỐI KHÔNG lưu file `.ps1` trong `%APPDATA%\KangatangGuard\`.**
-  - Thư mục Báo cáo định kỳ & Log chi tiết trong dự án (`v3.20.0+`): `D:\7. AI tools\kangatang\Scan_Reports\` (`LATEST_SCAN_REPORT.md`, `Scan_Summary_History.csv`, `Infected_Files_Ledger_YYYYMM.csv`, `scan_detail_log_YYYYMMDD.txt`, `Sessions\Report_<SessionID>.md`).
+  - Thư mục Báo cáo Quản trị & Log chi tiết trong dự án (`v3.20.0` – `v3.21.0`): `D:\7. AI tools\kangatang\Scan_Reports\` (`Bao_Cao_Quan_Tri_KangatangGuard.xlsx` [6 Sheets, 1-Page A4 Dashboard], `Endpoint_Registry.csv` [Khóa chính `MAC Address`], `LATEST_SCAN_REPORT.md`, `Scan_Summary_History.csv`, `Infected_Files_Ledger_YYYYMM.csv`, `scan_detail_log_YYYYMMDD.txt`).
 
 ---
 
-## 2. BẢN ĐỒ TỌA ĐỘ DÒNG CODE (`addin/KangatangGuard_Code.vba` — 4.260 DÒNG)
+## 2. BẢN ĐỒ TỌA ĐỘ DÒNG CODE (`addin/KangatangGuard_Code.vba` — 4.355 DÒNG)
 
 > 💡 **Mẹo tiết kiệm Token:** Khi dùng `view_file` trên `addin/KangatangGuard_Code.vba`, hãy chỉ định đúng `StartLine` và `EndLine` theo bảng dưới đây:
 
@@ -30,26 +30,26 @@
 | :--- | :--- | :--- | :--- |
 | `ThisWorkbook` | Document Module | `L13` – `L41` | Hook `Workbook_Open` (tự động phân luồng `_Worker_` vs User Excel), `Workbook_AddinInstall`, `Workbook_BeforeClose` |
 | `clsAppEvents` | Class Module | `L44` – `L114` | Bắt sự kiện toàn cục `xlApp_WorkbookOpen`, `BeforeSave`, `NewWorkbook`, `SheetActivate`, `WorkbookActivate` |
-| `modKangatangScanner` | Standard Module | `L117` – `L2689` | Engine quét/diệt virus, Out-of-Process Launcher (`IsScannerCurrentlyRunning`, `ReadUtf8FileText`), Worker Macros (`InitWorkerMode`, `ClearExcelIgnoreDdeRegistryBit`, `ScanSingleFileForWorker`), Copy/Paste Shortcuts, Ribbon Callbacks, LAN Auto-Update |
-| `modKangatangShield` | Standard Module | `L2692` – `L3988` | Nhận diện chữ ký/IOC virus, Startup Sweep, Quarantine, CleanAddInCollisions, Two-Phase Module-Sheet Purge |
-| `modLogger` | Standard Module | `L3991` – `L4042` | Ghi nhật ký kiểm toán `WriteLog` ra `%APPDATA%\KangatangGuard\scan_log_YYYYMMDD.txt` và đồng bộ về `D:\7. AI tools\kangatang\Scan_Reports\scan_detail_log_YYYYMMDD.txt` |
-| `modThreatCollector` | Standard Module | `L4045` – `L4260` | Băm Pure Native VBA Dual-Seed 32-bit (`ComputeThreatHash`) & thu thập mẫu mã độc JSON (`CollectThreatSample`) về máy `223.176` |
+| `modKangatangScanner` | Standard Module | `L117` – `L2784` | Engine quét/diệt virus, Out-of-Process Launcher (`IsScannerCurrentlyRunning`, `ReadUtf8FileText`), Worker Macros (`InitWorkerMode`, `ClearExcelIgnoreDdeRegistryBit`, `ScanSingleFileForWorker`), Truy vết `GetWorkbookLastAuthor`, Đồng bộ `RegisterEndpointHeartbeat` (`MAC/IP`), Copy/Paste Shortcuts, Ribbon Callbacks, LAN Auto-Update |
+| `modKangatangShield` | Standard Module | `L2787` – `L4083` | Nhận diện chữ ký/IOC virus, Startup Sweep, Quarantine, CleanAddInCollisions, Two-Phase Module-Sheet Purge |
+| `modLogger` | Standard Module | `L4086` – `L4137` | Ghi nhật ký kiểm toán `WriteLog` ra `%APPDATA%\KangatangGuard\scan_log_YYYYMMDD.txt` và đồng bộ về `D:\7. AI tools\kangatang\Scan_Reports\scan_detail_log_YYYYMMDD.txt` |
+| `modThreatCollector` | Standard Module | `L4140` – `L4355` | Băm Pure Native VBA Dual-Seed 32-bit (`ComputeThreatHash`) & thu thập mẫu mã độc JSON (`CollectThreatSample`) về máy `223.176` |
 
-### B. Tọa độ các hàm trọng yếu trong `modKangatangScanner` (`L117` – `L2689`)
-- **Hằng số phiên bản & cấu hình (`CURRENT_VERSION = "3.20.2"`, `CENTRAL_BACKUP_HUB`):** `L120` – `L160`
+### B. Tọa độ các hàm trọng yếu trong `modKangatangScanner` (`L117` – `L2784`)
+- **Hằng số phiên bản & cấu hình (`CURRENT_VERSION = "3.21.0"`, `CENTRAL_BACKUP_HUB`):** `L120` – `L160`
 - **Unicode & Headless-safe Dialog (`Uni`, `MsgBoxW`):** `L161` – `L208`
 - **ScanCache chống lag khi Save (`IsScanCacheExpired`, `UpdateScanCache`):** `L209` – `L245`
 - **Khởi tạo & Ribbon Callbacks (`InitializeGuard`, `EnsureGuardAlive`, `Ribbon_*`):** `L246` – `L366`
 - **Kiểm tra nhiễm virus (`IsWhitelisted`, `CheckWorkbookInfection`):** `L367` – `L513`
-- **Quét Workbook đơn lẻ (`ScanWorkbook`):** `L519` – `L635`
-- **Khởi chạy Trình Quét Ngoài Tiến Trình (`LaunchBackgroundScanner`, `WriteScanRequestJson`, `EnsureFolderScannerScript`):** `L642` – `L925`
-- **Worker Macros cho PowerShell Turbo (`InitWorkerMode`, `ClearExcelIgnoreDdeRegistryBit`, `GetPreFilterRegex`, `ScanSingleFileForWorker`, `WorkerDeleteOneModuleSheet`, `WorkerFinishCleanAndClose`):** `L930` – `L1085`
-- **Trình Quét Thư Mục Native VBA Dự Phòng (`RunNativeFolderScan`, `CollectExcelFilesRecursive`, `WriteScanSessionJson`):** `L1087` – `L1445`
-- **Sao lưu cách ly tập trung về `223.176` (`BackupBeforeClean`):** `L1450` – `L1535`
-- **Định tuyến Copy/Paste/Cut & Khôi phục UI (`Kangatang_ShortcutCopy/Paste/Cut`, `EnsureClipboardShortcutsAndMenus`, `RestoreExcelClipboardAndUI`):** `L1537` – `L1730`
-- **Làm sạch Workbook nhiễm (`TryUnprotectWorkbook/Sheet`, `CleanInfectedWorkbook`):** `L1735` – `L1990`
-- **Hộp thoại Quét Thư Mục & Fast Resume (`ScanFolderDialog`, `ResumeScanDialog`):** `L1962` – `L2074`
-- **Cập nhật tự động qua LAN (`CheckForLanUpdates`, `IsNewerVersion`, `PerformLanUpdate`):** `L2164` – `L2496`
+- **Truy vết Tác giả Lưu cuối & Quét Workbook (`GetWorkbookLastAuthor`, `ScanWorkbook`):** `L518` – `L645`
+- **Khởi chạy Trình Quét Ngoài Tiến Trình (`LaunchBackgroundScanner`, `WriteScanRequestJson`, `EnsureFolderScannerScript`):** `L650` – `L935`
+- **Worker Macros cho PowerShell Turbo (`InitWorkerMode`, `ClearExcelIgnoreDdeRegistryBit`, `GetPreFilterRegex`, `ScanSingleFileForWorker`, `WorkerDeleteOneModuleSheet`, `WorkerFinishCleanAndClose`):** `L940` – `L1130`
+- **Trình Quét Thư Mục Native VBA Dự Phòng (`RunNativeFolderScan`, `CollectExcelFilesRecursive`, `WriteScanSessionJson`):** `L1135` – `L1490`
+- **Sao lưu cách ly tập trung về `223.176` (`BackupBeforeClean`):** `L1495` – `L1580`
+- **Định tuyến Copy/Paste/Cut & Khôi phục UI (`Kangatang_ShortcutCopy/Paste/Cut`, `EnsureClipboardShortcutsAndMenus`, `RestoreExcelClipboardAndUI`):** `L1582` – `L1775`
+- **Làm sạch Workbook nhiễm (`TryUnprotectWorkbook/Sheet`, `CleanInfectedWorkbook`):** `L1780` – `L2035`
+- **Hộp thoại Quét Thư Mục & Fast Resume (`ScanFolderDialog`, `ResumeScanDialog`):** `L2000` – `L2120`
+- **Cập nhật tự động qua LAN & Heartbeat MAC/IP (`CheckForLanUpdates`, `RegisterEndpointHeartbeat`, `PerformLanUpdate`):** `L2200` – `L2615`
 
 ---
 
