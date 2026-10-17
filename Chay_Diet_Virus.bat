@@ -1,13 +1,17 @@
-﻿@echo off
-:: ============================================================================
-:: TRÌNH CHẠY TỰ ĐỘNG DIỆT VIRUS EXCEL KANGATANG (STANDALONE v3.8.1)
-:: ============================================================================
+@echo off
+REM ============================================================================
+REM KANGATANGGUARD v3.17.1 - STANDALONE 1-CLICK SCANNER
+REM ============================================================================
 
-title DIET VIRUS EXCEL KANGATANG - EXCEL CLEANER v3.8.1
+title KANGATANGGUARD v3.17.1 - STANDALONE SCANNER
 chcp 65001 >nul
 
 pushd "%~dp0"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Kangatang_Standalone_Scanner.ps1"
+if exist "%~dp0addin\Kangatang_Standalone_Scanner.ps1" (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0addin\Kangatang_Standalone_Scanner.ps1"
+) else (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Kangatang_Standalone_Scanner.ps1"
+)
 popd
 
 echo.

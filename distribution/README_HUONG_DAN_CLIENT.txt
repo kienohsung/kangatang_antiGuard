@@ -1,5 +1,5 @@
 ==============================================================================
-   HƯỚNG DẪN SỬ DỤNG BỘ CÔNG CỤ DIỆT VIRUS EXCEL KANGATANG (v3.8.1)
+   HƯỚNG DẪN SỬ DỤNG BỘ CÔNG CỤ DIỆT VIRUS EXCEL KANGATANG (v3.17.1)
    Máy chủ Tệp Trung tâm: \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang
 ==============================================================================
 
@@ -18,28 +18,21 @@ khi mở file và tự động nhận bản cập nhật mới nhất từ máy 
 4. Bấm đúp chuột vào tệp:
    Install_Client_Kangatang.bat
 5. Cửa sổ cài đặt tự động hoàn tất trong 2-3 giây.
-6. Mở Excel lên, bạn sẽ thấy menu "KangatangGuard" trên thanh công cụ.
+6. Mở Excel lên, bạn sẽ thấy thanh công cụ "KangatangGuard" trên Ribbon.
 
 ------------------------------------------------------------------------------
 CÁCH 2: CHẠY QUÉT ĐỘC LẬP (DÀNH CHO MÁY KHÔNG CÀI ĐƯỢC ADD-IN)
 ------------------------------------------------------------------------------
-Áp dụng khi máy tính bị chính sách công ty chặn cài Add-in, hoặc máy bạn chỉ muốn
-quét sạch virus 1 lần cho máy tính/thư mục dữ liệu mà không muốn can thiệp vào Excel:
+Áp dụng khi máy tính chỉ muốn quét sạch virus 1 lần cho thư mục dữ liệu:
 
 1. Mở thư mục chia sẻ máy chủ (hoặc tải gói addin_kangatang.zip về giải nén):
    \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang
 2. Bấm đúp chuột vào tệp:
    Chay_Diet_Virus_Ngoai.bat
-3. Cửa sổ dòng lệnh sẽ hiển thị Menu lựa chọn:
-   [1] Quét Thư mục Tùy chọn (Hỗ trợ hộp thoại chọn thư mục hoặc nhập đường dẫn UNC)
-   [2] Quét Toàn bộ Máy tính (Tất cả ổ đĩa C:, D:, E:...)
-   [3] Tiếp tục Phiên quét dở dang (Fast Resume từ Checkpoint nếu từng bị ngắt)
-   [4] Dọn dẹp Mầm bệnh Hệ thống (XLSTART, Registry, AddIns)
-   [5] Mở Thư mục Nhật ký Kiểm toán (Audit Logs)
-   [0] Thoát chương trình
+3. Chọn thư mục cần quét trên hộp thoại để chương trình tự động kiểm tra và diệt sạch.
 
-* LƯU Ý KHI CHẠY:
-- Không dùng chuột bôi đen văn bản trong cửa sổ đen (tránh Windows QuickEdit tạm dừng tiến trình).
-- Nếu vô tình nhấp chuột làm màn hình đứng yên, chỉ cần nhấn phím ENTER để chương trình chạy tiếp.
-- Mọi tệp nhiễm virus trước khi xử lý đều được tự động sao lưu an toàn vào thư mục "_Backup_Kangatang".
+* LƯU Ý:
+- Phiên bản v3.17.1 tích hợp 100% Native VBA Folder Scanner bên trong KangatangGuard.xlam,
+  hoàn toàn tương thích với mọi phần mềm Antivirus/EDR (Seqrite Endpoint Security / Quick Heal).
+- Mọi tệp nhiễm virus trước khi xử lý đều được tự động sao lưu cách ly an toàn về máy chủ 192.168.223.176.
 ==============================================================================

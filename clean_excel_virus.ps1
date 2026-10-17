@@ -1,13 +1,20 @@
-﻿# ==============================================================================
-# clean_excel_virus.ps1 -> Chuyển tiếp tương thích ngược sang Kangatang_Standalone_Scanner.ps1
-# Phiên bản: v3.8.1
+# ==============================================================================
+# clean_excel_virus.ps1 -> Chuyen tiep tuong thich nguoc sang Kangatang_Standalone_Scanner.ps1
+# Phien ban: v3.17.1
 # ==============================================================================
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$standaloneScanner = Join-Path $ScriptDir "Kangatang_Standalone_Scanner.ps1"
+$candidates = @(
+    (Join-Path $ScriptDir "Kangatang_Standalone_Scanner.ps1"),
+    (Join-Path $ScriptDir "addin\Kangatang_Standalone_Scanner.ps1")
+)
+$standaloneScanner = $null
+foreach ($c in $candidates) {
+    if (Test-Path $c) { $standaloneScanner = $c; break }
+}
 
-if (Test-Path $standaloneScanner) {
+if ($standaloneScanner) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $standaloneScanner @args
 } else {
-    Write-Host "[LỖI] Không tìm thấy Kangatang_Standalone_Scanner.ps1 tại $ScriptDir" -ForegroundColor Red
+    Write-Host "[LOI] Khong tim thay Kangatang_Standalone_Scanner.ps1 tai $ScriptDir" -ForegroundColor Red
 }

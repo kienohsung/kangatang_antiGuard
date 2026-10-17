@@ -131,7 +131,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.17.0"
+Public Const CURRENT_VERSION As String = "3.17.1"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -144,7 +144,7 @@ Private Const BACKUP_FOLDER_NAME As String = "_Backup_Kangatang"
 Public Const LOG_SUBFOLDER As String = "KangatangGuard"
 Private Const SCAN_CACHE_MINUTES As Long = 5
 Private Const RELAUNCH_FOLDER_MINUTES As Long = 30
-Private Const UPDATE_CHECK_HOURS As Long = 6
+Private Const UPDATE_CHECK_MINUTES As Long = 1
 
 ' --- v3.10.0: Chu ky virus da chuyen sang modKangatangShield (IsVirusName / CodeHasIOC) ---
 ' Loai bo tu khoa chuoi con "Kanga" (gay xoa nham sheet/module hop le nhu "Kangaroo").
@@ -1787,7 +1787,8 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
     
     Set wsh = CreateObject("WScript.Shell")
     
-    ' v3.8.6: Rate-limit 24h khi chay ngam de Excel khoi dong tuc thi, khong bao gio bi timeout mang
+    ' v3.17.1: Rate-limit 1 phut khi chay ngam de moi lan mo lai Excel deu nhan cap nhat tuc thi,
+    ' nhung khong kiem tra lap lai khi mo nhieu file lien tiep trong cung 1 phut!
     If bSilent Then
         Dim lastCheck As String
         On Error Resume Next
@@ -1795,7 +1796,7 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
         On Error GoTo UpdateErr
         If Len(lastCheck) > 0 Then
             If IsDate(lastCheck) Then
-                If DateDiff("h", CDate(lastCheck), Now) < UPDATE_CHECK_HOURS Then
+                If DateDiff("n", CDate(lastCheck), Now) < UPDATE_CHECK_MINUTES Then
                     Set wsh = Nothing
                     Exit Sub
                 End If

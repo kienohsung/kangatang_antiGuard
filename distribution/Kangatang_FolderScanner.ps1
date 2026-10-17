@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh khoi chay Quet Thu Muc qua Engine Native VBA cua KangatangGuard.xlam
-# Phien ban: v3.17.0 (Antivirus-Safe Pure COM Wrapper - Zero P/Invoke, Zero IOC)
+# Phien ban: v3.17.1 (Unified Version Sync & Antivirus-Safe Pure COM Wrapper)
 # ==============================================================================
 
 param (
@@ -15,7 +15,23 @@ param (
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
-$AppVersion = "3.17.0"
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+
+# Dong bo phien ban dong tu version.json hoac Registry InstalledVersion (khong bao gio lech phien ban voi Add-in)
+$AppVersion = "3.17.1"
+$verJsonPath = Join-Path $ScriptDir "version.json"
+if (Test-Path $verJsonPath) {
+    try {
+        $vMeta = Get-Content -Path $verJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($vMeta.version) { $AppVersion = $vMeta.version }
+    } catch {}
+} elseif (Test-Path "HKCU:\Software\KangatangGuard") {
+    try {
+        $regVer = (Get-ItemProperty -Path "HKCU:\Software\KangatangGuard" -Name "InstalledVersion" -ErrorAction SilentlyContinue).InstalledVersion
+        if ($regVer) { $AppVersion = $regVer }
+    } catch {}
+}
+
 $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion - Trinh Quet Thu Muc (Native VBA Engine)"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
@@ -31,7 +47,6 @@ foreach ($ver in @("16.0", "15.0", "14.0", "12.0")) {
 }
 
 # 2. Xac dinh thu muc can quet neu chua truyen tham so
-$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $logDir = Join-Path $env:APPDATA "KangatangGuard"
 $lastSessionFile = Join-Path $logDir "last_session.json"
 
@@ -74,7 +89,7 @@ if (-not $xlamPath) {
     exit 1
 }
 
-Write-Host "`n[1/2] Dang khoi tao Engine KangatangGuard.xlam..." -ForegroundColor Yellow
+Write-Host "`n[1/2] Dang khoi tao Engine KangatangGuard.xlam (v$AppVersion)..." -ForegroundColor Yellow
 Write-Host "   -> Add-in : $xlamPath" -ForegroundColor Gray
 Write-Host "   -> Thu muc: $TargetFolder" -ForegroundColor Gray
 
@@ -84,11 +99,11 @@ try {
     $excel.Visible = $false
     $excel.DisplayAlerts = $false
     $wbAddin = $excel.Workbooks.Open($xlamPath, 0, $true)
-    Write-Host "`n[2/2] Dang thuc thi RunNativeFolderScan..." -ForegroundColor Yellow
+    Write-Host "`n[2/2] Dang thuc thi RunNativeFolderScan (v$AppVersion)..." -ForegroundColor Yellow
     $excel.Run("'$($wbAddin.Name)'!RunNativeFolderScan", [string]$TargetFolder, [bool]$Resume, $true)
     if (Test-Path $lastSessionFile) {
         $resMeta = Get-Content -Path $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        Write-Host "`n[HOAN TAT] Tong so tep: $($resMeta.TotalFiles) | Da quet: $($resMeta.TotalScanned) | Da lam sach: $($resMeta.TotalCleaned)" -ForegroundColor Green
+        Write-Host "`n[HOAN TAT - v$AppVersion] Tong so tep: $($resMeta.TotalFiles) | Da quet: $($resMeta.TotalScanned) | Da lam sach: $($resMeta.TotalCleaned)" -ForegroundColor Green
     }
     $wbAddin.Close($false)
 } catch {

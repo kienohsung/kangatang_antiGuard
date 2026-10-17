@@ -1,7 +1,7 @@
 # ==============================================================================
 # Deploy_To_Hub.ps1
 # Lenh Phat hanh va Dong bo Phien ban moi len May chu LAN & Tao Clone Cuc bo
-# Phien ban: v3.8.1 (Ho tro Bo cong cu Standalone & Dual-Mirror Release)
+# Phien ban: v3.17.1 (Unified Version Synchronization & Dual-Mirror Release)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -17,11 +17,62 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.17.0"
+$ReleaseVersion = "3.17.1"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
+
+# 0. Cổng Đồng bộ Phiên bản Tự động (Single Source of Truth Version Gate)
+Write-Host "`n[0/6] Dang dong bo hoa so phien ban v$ReleaseVersion tren toan bo ma nguon & script..." -ForegroundColor Yellow
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+function Sync-FileRegex([string]$filePath, [hashtable]$replacements) {
+    if (-not (Test-Path $filePath)) { return }
+    $raw = [System.IO.File]::ReadAllText($filePath, [System.Text.Encoding]::UTF8)
+    $orig = $raw
+    foreach ($k in $replacements.Keys) {
+        $raw = [regex]::Replace($raw, $k, $replacements[$k])
+    }
+    if ($raw -ne $orig) {
+        [System.IO.File]::WriteAllText($filePath, $raw, $utf8NoBom)
+    }
+}
+
+Sync-FileRegex (Join-Path $AddinDir "KangatangGuard_Code.vba") @{
+    'Public Const CURRENT_VERSION As String = "[^"]+"' = "Public Const CURRENT_VERSION As String = `"$ReleaseVersion`""
+}
+Sync-FileRegex (Join-Path $AddinDir "Install_KangatangGuard.ps1") @{
+    '\$InstallerVersion\s*=\s*"[^"]+"' = "`$InstallerVersion = `"$ReleaseVersion`""
+    '# Phien ban: v3\.\d+\.\d+'        = "# Phien ban: v$ReleaseVersion"
+}
+Sync-FileRegex (Join-Path $LocalDist "Install_Client.ps1") @{
+    '\$versionInfo\s*=\s*"[^"]+"' = "`$versionInfo = `"$ReleaseVersion`""
+    'CLIENT v3\.\d+\.\d+'         = "CLIENT v$ReleaseVersion"
+    '# Phien ban: v3\.\d+\.\d+'   = "# Phien ban: v$ReleaseVersion"
+}
+foreach ($psFile in @(
+    (Join-Path $AddinDir "Kangatang_FolderScanner.ps1"),
+    (Join-Path $AddinDir "Kangatang_Standalone_Scanner.ps1"),
+    (Join-Path $RootDir "clean_excel_virus.ps1")
+)) {
+    Sync-FileRegex $psFile @{
+        '\$AppVersion\s*=\s*"[^"]+"' = "`$AppVersion = `"$ReleaseVersion`""
+        'v3\.\d+\.\d+'               = "v$ReleaseVersion"
+    }
+}
+foreach ($batFile in @(
+    (Join-Path $AddinDir "Chay_Diet_Virus_Ngoai.bat"),
+    (Join-Path $LocalDist "Chay_Diet_Virus_Ngoai.bat"),
+    (Join-Path $RootDir "Chay_Diet_Virus.bat"),
+    (Join-Path $RootDir "Diet_Virus_Kangatang.bat"),
+    (Join-Path $LocalDist "README_HUONG_DAN_CLIENT.txt")
+)) {
+    Sync-FileRegex $batFile @{
+        'v3\.\d+\.\d+' = "v$ReleaseVersion"
+    }
+}
+Write-Host "   -> [OK] Da dong bo 100% phien ban v$ReleaseVersion giua Add-in va Trinh quet!" -ForegroundColor Green
 
 # 1. Bien dich Add-in .xlam tren May chu
 Write-Host "`n[1/6] Dang bien dich KangatangGuard.xlam v$ReleaseVersion tu ma nguon VBA..." -ForegroundColor Yellow
@@ -51,9 +102,9 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    # v3.17.0: 100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture
+    # v3.17.1: Unified Version Synchronization & 100% Native VBA Antivirus-Safe Engine
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - 100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture: Khac phuc triet de loi Antivirus (Seqrite Endpoint Security / Quick Heal) nhan nham va cach ly Kangatang_FolderScanner.ps1 trong %APPDATA%\KangatangGuard; tich hop trinh quet thu muc RunNativeFolderScan 100% Native VBA ben trong KangatangGuard.xlam, tu dong xoa bo file .ps1 cu trong %APPDATA%\KangatangGuard va loai bo toan bo ma C# P/Invoke trong cac script ho tro."
+    changelog         = "v${ReleaseVersion} - Unified Version Synchronization & 100% Native VBA Antivirus-Safe Engine: Dong bo 100% so phien ban giua Add-in Excel va Trinh quet virus tren toan he thong; giam thoi gian cho kiem tra cap nhat tu dong khi mo Excel xuong 1 phut; tich hop Native VBA Folder Scanner khong bi Antivirus (Seqrite / Quick Heal) nhan nham."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
