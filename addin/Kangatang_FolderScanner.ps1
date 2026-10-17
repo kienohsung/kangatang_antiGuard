@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.21.2 (Adaptive Hardware-Aware Multi-Worker Scaling: 2 / 4 / 6 Workers)
+# Phien ban: v3.21.3 (Cross-Machine Shared Resume State & Direct Server Scan on 223.7 -> Log to 223.176)
 # ==============================================================================
 
 param (
@@ -10,7 +10,9 @@ param (
     [Parameter(Mandatory=$false)]
     [switch]$Resume,
     [Parameter(Mandatory=$false)]
-    [int]$MaxWorkers = 0
+    [int]$MaxWorkers = 0,
+    [Parameter(Mandatory=$false)]
+    [switch]$InteractivePrompt
 )
 
 # 0. Chot chan Don Tien Trinh Tuyet Doi (Single-Instance Mutex + Active Session Heartbeat)
@@ -38,7 +40,7 @@ if (Test-Path -LiteralPath $lastSessionFile) {
     try {
         $sessItem = Get-Item -LiteralPath $lastSessionFile -ErrorAction SilentlyContinue
         $sessMeta = Get-Content -LiteralPath $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($sessMeta -and ($sessMeta.Status -eq "IN_PROGRESS")) {
+        if ($sessMeta -and ($sessMeta.Status -eq "IN_PROGRESS") -and ((-not $sessMeta.HostName) -or ($sessMeta.HostName -eq $env:COMPUTERNAME))) {
             $activeOther = $false
             if ($sessMeta.ScannerPid -and ([int]$sessMeta.ScannerPid -ne $PID)) {
                 $pObj = Get-Process -Id ([int]$sessMeta.ScannerPid) -ErrorAction SilentlyContinue
@@ -69,7 +71,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.21.2"
+$AppVersion = "3.21.3"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -156,15 +158,59 @@ foreach ($ver in @("16.0", "15.0", "14.0", "12.0")) {
     }
 }
 
-# 3. Doc yeu cau quet tu scan_request.json (khi duoc goi tu Excel LaunchBackgroundScanner)
+# 3. Doc yeu cau quet tu scan_request.json & Dong bo Shared_Resume_State giua may 223.176 va may chu 223.7
 $logDir = Join-Path $env:APPDATA "KangatangGuard"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $scanReqFile     = Join-Path $logDir "scan_request.json"
 $lastSessionFile = Join-Path $logDir "last_session.json"
 $scannedLogFile  = Join-Path $logDir "scanned_files.log"
 
+$sharedStateCandidates = @(
+    "D:\7. AI tools\kangatang\Scan_Reports\Shared_Resume_State",
+    "\\192.168.223.176\test\Scan_Reports\Shared_Resume_State",
+    (Join-Path $ScriptDir "Shared_Resume_State"),
+    "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang\Shared_Resume_State"
+)
+$script:sharedResumeDirs = New-Object System.Collections.Generic.List[string]
+foreach ($sc in $sharedStateCandidates) {
+    if (-not $sc) { continue }
+    $parentSc = [System.IO.Path]::GetDirectoryName($sc)
+    if ($parentSc -and (Test-Path -LiteralPath $parentSc)) {
+        if (-not (Test-Path -LiteralPath $sc)) {
+            try { New-Item -ItemType Directory -Path $sc -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
+        }
+        if ((Test-Path -LiteralPath $sc) -and (-not $script:sharedResumeDirs.Contains($sc))) {
+            $script:sharedResumeDirs.Add($sc)
+        }
+    }
+}
+
+# Neu may hien tai (vd 223.7) chua co scanned_files.log hoac ban tren Shared_Resume_State moi/day du hon -> ke thua ngay!
+foreach ($sDir in $script:sharedResumeDirs) {
+    $sharedLog  = Join-Path $sDir "scanned_files.log"
+    $sharedSess = Join-Path $sDir "last_session.json"
+    try {
+        if (Test-Path -LiteralPath $sharedLog) {
+            $shLen  = (Get-Item -LiteralPath $sharedLog -ErrorAction SilentlyContinue).Length
+            $locLen = if (Test-Path -LiteralPath $scannedLogFile) { (Get-Item -LiteralPath $scannedLogFile -ErrorAction SilentlyContinue).Length } else { 0 }
+            if ($shLen -gt $locLen) {
+                Copy-Item -LiteralPath $sharedLog -Destination $scannedLogFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if ((Test-Path -LiteralPath $sharedSess) -and (-not (Test-Path -LiteralPath $lastSessionFile))) {
+            Copy-Item -LiteralPath $sharedSess -Destination $lastSessionFile -Force -ErrorAction SilentlyContinue
+        } elseif ((Test-Path -LiteralPath $sharedSess) -and (Test-Path -LiteralPath $lastSessionFile)) {
+            $shMeta  = Get-Content -LiteralPath $sharedSess -Raw -Encoding UTF8 | ConvertFrom-Json
+            $locMeta = Get-Content -LiteralPath $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($shMeta -and $locMeta -and ([int]$shMeta.TotalScanned -gt [int]$locMeta.TotalScanned)) {
+                Copy-Item -LiteralPath $sharedSess -Destination $lastSessionFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch {}
+}
+
 $isResume = [bool]$Resume
-if ((-not $TargetFolder) -and (Test-Path $scanReqFile)) {
+if ((-not $InteractivePrompt) -and (-not $TargetFolder) -and (Test-Path $scanReqFile)) {
     try {
         $reqMeta = Get-Content -Path $scanReqFile -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($reqMeta.TargetFolder) { $TargetFolder = [string]$reqMeta.TargetFolder }
@@ -173,31 +219,70 @@ if ((-not $TargetFolder) -and (Test-Path $scanReqFile)) {
     Remove-Item -Path $scanReqFile -Force -ErrorAction SilentlyContinue
 }
 
-$prevSessionTotal   = 0
-$prevSessionCleaned = 0
-$prevSessionStart   = ""
-if (Test-Path $lastSessionFile) {
-    try {
-        $meta = Get-Content -Path $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($isResume -and (-not $TargetFolder) -and $meta.TargetFolder) {
-            $TargetFolder = [string]$meta.TargetFolder
-        }
-        if ($meta.TargetFolder -and ($meta.TargetFolder -eq $TargetFolder) -and ($meta.TotalFiles -gt 0)) {
-            $prevSessionTotal = [int]$meta.TotalFiles
-        }
-        if ($isResume -and $meta.TargetFolder -and ($meta.TargetFolder -eq $TargetFolder)) {
-            if ($meta.TotalCleaned -gt 0) { $prevSessionCleaned = [int]$meta.TotalCleaned }
-            if ($meta.StartTime) { $prevSessionStart = [string]$meta.StartTime }
-        }
-    } catch {}
+# Ham chuan hoa duong dan tuong doi \vietnam\... giua Local Disk (tren 223.7) va UNC (\\192.168.223.7\file_shared\vietnam)
+function Get-VietnamRootPrefix([string]$pathStr) {
+    if ([string]::IsNullOrWhiteSpace($pathStr)) { return "" }
+    if ($pathStr -match '(?i)^(.*?\\vietnam)(?:\\.*)?$') {
+        return $Matches[1]
+    }
+    return ""
 }
 
-if (-not $TargetFolder) {
+function ConvertTo-TargetVietnamPath([string]$rawPath, [string]$localVnRoot) {
+    if ([string]::IsNullOrWhiteSpace($rawPath) -or [string]::IsNullOrWhiteSpace($localVnRoot)) { return $rawPath }
+    if ($rawPath -match '(?i)^.*?\\vietnam(\\.+)$') {
+        return ($localVnRoot + $Matches[1])
+    }
+    if ($rawPath -match '(?i)^.*?\\vietnam$') {
+        return $localVnRoot
+    }
+    return $rawPath
+}
+
+if ($InteractivePrompt -or (-not $TargetFolder)) {
     Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+    Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
+
+    # Tu dong tim duong dan O CUNG NOI BO cua file_shared\vietnam neu dang chay truc tiep tren may chu 223.7
+    $defaultFolder = ""
+    try {
+        $smbShare = Get-SmbShare -Name "file_shared" -ErrorAction SilentlyContinue
+        if ($smbShare -and $smbShare.Path) {
+            $candVn = Join-Path $smbShare.Path "vietnam"
+            if (Test-Path -LiteralPath $candVn) { $defaultFolder = $candVn }
+            elseif (Test-Path -LiteralPath $smbShare.Path) { $defaultFolder = $smbShare.Path }
+        }
+    } catch {}
+    if (-not $defaultFolder) {
+        foreach ($drv in @("D:", "E:", "F:", "C:")) {
+            foreach ($sub in @("file_shared\vietnam", "vietnam")) {
+                $cand = "$drv\$sub"
+                if (Test-Path -LiteralPath $cand) { $defaultFolder = $cand; break }
+            }
+            if ($defaultFolder) { break }
+        }
+    }
+    if ((-not $defaultFolder) -and (Test-Path -LiteralPath "\\192.168.223.7\file_shared\vietnam")) {
+        $defaultFolder = "\\192.168.223.7\file_shared\vietnam"
+    }
+
+    $topForm = New-Object System.Windows.Forms.Form
+    $topForm.TopMost = $true
+    $topForm.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $topForm.Width = 1; $topForm.Height = 1; $topForm.ShowInTaskbar = $false; $topForm.Opacity = 0
+    $topForm.Show()
+    [void]$topForm.Focus()
+
     $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dlg.Description = "KangatangGuard v$AppVersion - Chon thu muc can quet:"
+    $dlg.Description = "KangatangGuard v$AppVersion - Chon thu muc can quet (Goi y: Chon o dia noi bo D:\...\vietnam tren may 223.7 de dat toc do toi da):"
     $dlg.ShowNewFolderButton = $false
-    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    if ($defaultFolder) { $dlg.SelectedPath = $defaultFolder }
+
+    $dlgRes = $dlg.ShowDialog($topForm)
+    $topForm.Close()
+    $topForm.Dispose()
+
+    if ($dlgRes -eq [System.Windows.Forms.DialogResult]::OK) {
         $TargetFolder = $dlg.SelectedPath
     } else {
         Write-Host "`n[HUY] Nguoi dung da huy chon thu muc." -ForegroundColor Yellow
@@ -213,6 +298,28 @@ while ($TargetFolder.Length -gt 3 -and $TargetFolder.EndsWith("\")) {
 if (-not (Test-Path -LiteralPath $TargetFolder)) {
     Write-Host "`n[LOI] Khong tim thay thu muc can quet: $TargetFolder" -ForegroundColor Red
     exit 1
+}
+
+$script:localVietnamRoot = Get-VietnamRootPrefix $TargetFolder
+
+$prevSessionTotal   = 0
+$prevSessionCleaned = 0
+$prevSessionStart   = ""
+if (Test-Path $lastSessionFile) {
+    try {
+        $meta = Get-Content -Path $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $metaTarget = if ($meta.TargetFolder) { ConvertTo-TargetVietnamPath ([string]$meta.TargetFolder) $script:localVietnamRoot } else { "" }
+        if ($isResume -and (-not $TargetFolder) -and $metaTarget) {
+            $TargetFolder = $metaTarget
+        }
+        if ($metaTarget -and $metaTarget.Equals($TargetFolder, [System.StringComparison]::OrdinalIgnoreCase) -and ($meta.TotalFiles -gt 0)) {
+            $prevSessionTotal = [int]$meta.TotalFiles
+        }
+        if ($metaTarget -and $metaTarget.Equals($TargetFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+            if ($meta.TotalCleaned -gt 0) { $prevSessionCleaned = [int]$meta.TotalCleaned }
+            if ($meta.StartTime) { $prevSessionStart = [string]$meta.StartTime }
+        }
+    } catch {}
 }
 
 # 4. Xac dinh duong dan KangatangGuard.xlam
@@ -258,12 +365,17 @@ $workerCount = if ($MaxWorkers -gt 0) {
 }
 $maxQueueDepth = [Math]::Max(60, $workerCount * 30)
 
-# 5. Nap du lieu Fast Resume tu scanned_files.log vao RAM Hashtable & HashSet phat hien Tai nhiem (RE_INFECTED)
+# 5. Nap du lieu Fast Resume tu scanned_files.log (Tu dong anh xa Local Disk <-> UNC cho thu muc vietnam)
 $resumeMap = @{}
+$tempResumeMap     = @{}
+$tempOrderedDirs   = New-Object 'System.Collections.Generic.List[string]'
+$tempSeenDirs      = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 $script:everScannedPaths   = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 $script:scannedDirsSet     = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 $script:orderedScannedDirs = New-Object 'System.Collections.Generic.List[string]'
 $targetPrefixInit = $TargetFolder.ToLowerInvariant()
+$matchedResumeCount = 0
+
 if (Test-Path -LiteralPath $scannedLogFile) {
     try {
         foreach ($line in [System.IO.File]::ReadAllLines($scannedLogFile)) {
@@ -271,17 +383,17 @@ if (Test-Path -LiteralPath $scannedLogFile) {
             if ($trimmed.Length -gt 0) {
                 $idxSep = $trimmed.IndexOf("|")
                 if ($idxSep -gt 0) {
-                    $rawPath = $trimmed.Substring(0, $idxSep)
+                    $origPath = $trimmed.Substring(0, $idxSep)
+                    $rawPath  = ConvertTo-TargetVietnamPath $origPath $script:localVietnamRoot
                     $k = $rawPath.ToLowerInvariant()
                     $v = $trimmed.Substring($idxSep + 1)
                     [void]$script:everScannedPaths.Add($k)
-                    if ($isResume) {
-                        $resumeMap[$k] = $v
-                        if ($k.StartsWith($targetPrefixInit)) {
-                            $dName = [System.IO.Path]::GetDirectoryName($rawPath)
-                            if ($dName -and $script:scannedDirsSet.Add($dName)) {
-                                $script:orderedScannedDirs.Add($dName)
-                            }
+                    $tempResumeMap[$k] = $v
+                    if ($k.StartsWith($targetPrefixInit)) {
+                        $matchedResumeCount++
+                        $dName = [System.IO.Path]::GetDirectoryName($rawPath)
+                        if ($dName -and $tempSeenDirs.Add($dName)) {
+                            $tempOrderedDirs.Add($dName)
                         }
                     }
                 }
@@ -289,11 +401,46 @@ if (Test-Path -LiteralPath $scannedLogFile) {
         }
     } catch {}
 }
-if (-not $isResume) {
-    try { [System.IO.File]::WriteAllText($scannedLogFile, "", [System.Text.Encoding]::Unicode) } catch {}
+
+# Neu chay che do InteractivePrompt va phat hien co du lieu da quet truoc do -> Hoi nguoi dung Tiep tuc quet hay Quet moi
+if ($InteractivePrompt -and (-not $Resume) -and ($matchedResumeCount -gt 0)) {
+    try {
+        $msgPrompt = "Phat hien $($matchedResumeCount.ToString('N0')) tep Excel da duoc quet an toan truoc do trong thu muc:`r`n$TargetFolder`r`n`r`n" +
+                     "- Bam [YES] de TIEP TUC QUET (Ke thua ngay $($matchedResumeCount.ToString('N0')) tep da quet trong 0.1s, chi quet cac tep con lai).`r`n" +
+                     "- Bam [NO] de QUET MOI TU DAU.`r`n`r`n" +
+                     "(Toan bo Ket qua, Bao cao & Log se tu dong luu ve may 192.168.223.176)"
+        $ans = [System.Windows.Forms.MessageBox]::Show(
+            $msgPrompt,
+            "KangatangGuard v$AppVersion - Tiep tuc phien quet?",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question,
+            [System.Windows.Forms.MessageBoxDefaultButton]::Button1,
+            [System.Windows.Forms.MessageBoxOptions]::DefaultDesktopOnly
+        )
+        if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) {
+            $isResume = $true
+        } else {
+            $isResume = $false
+            $prevSessionCleaned = 0
+            $prevSessionStart   = ""
+        }
+    } catch {
+        $isResume = $true
+    }
 }
 
-# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.21.2)
+if ($isResume) {
+    $resumeMap = $tempResumeMap
+    $script:scannedDirsSet     = $tempSeenDirs
+    $script:orderedScannedDirs = $tempOrderedDirs
+} else {
+    $prevSessionCleaned = 0
+    $prevSessionStart   = ""
+    try { [System.IO.File]::WriteAllText($scannedLogFile, "", [System.Text.Encoding]::Unicode) } catch {}
+}
+$tempResumeMap = $null
+
+# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.21.3)
 # Luu truc tiep vao thu muc du an D:\7. AI tools\kangatang\Scan_Reports (hoac \\192.168.223.176\test\Scan_Reports tu may tram LAN)
 $script:projectReportDir = if (Test-Path "D:\7. AI tools\kangatang") {
     "D:\7. AI tools\kangatang\Scan_Reports"
@@ -544,6 +691,9 @@ function Flush-ScanLogs([string]$status, [int]$totalDiscovered, [int]$scanned, [
         try {
             $chunk = ($script:logBuffer -join "`r`n") + "`r`n"
             [System.IO.File]::AppendAllText($scannedLogFile, $chunk, [System.Text.Encoding]::Unicode)
+            foreach ($sDir in $script:sharedResumeDirs) {
+                try { [System.IO.File]::AppendAllText((Join-Path $sDir "scanned_files.log"), $chunk, [System.Text.Encoding]::Unicode) } catch {}
+            }
             $script:logBuffer.Clear()
         } catch {}
     }
@@ -555,6 +705,7 @@ function Flush-ScanLogs([string]$status, [int]$totalDiscovered, [int]$scanned, [
             LastUpdate        = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
             Status            = $status
             ScannerPid        = $PID
+            HostName          = $env:COMPUTERNAME
             TotalFiles        = $totalDiscovered
             TotalScanned      = $scanned
             TotalSafe         = [int]$script:totalSafe
@@ -566,6 +717,9 @@ function Flush-ScanLogs([string]$status, [int]$totalDiscovered, [int]$scanned, [
         }
         $json = $obj | ConvertTo-Json -Depth 3
         [System.IO.File]::WriteAllText($lastSessionFile, $json, $utf8NoBom)
+        foreach ($sDir in $script:sharedResumeDirs) {
+            try { [System.IO.File]::WriteAllText((Join-Path $sDir "last_session.json"), $json, $utf8NoBom) } catch {}
+        }
     } catch {}
 
     # Ghi lo su kien chi tiet ra Scan_Reports\scan_detail_log_YYYYMMDD.txt
@@ -1571,7 +1725,7 @@ try {
     Write-Host "`n   [HOAN TAT] Qua trinh quet thu muc da ket thuc trong $totalSec giay!" -ForegroundColor Green
     Write-Host "   [BAO CAO]  $($script:latestMdPath)" -ForegroundColor Cyan
 
-    # v3.21.2: Tu dong dong bo va xuat Bao cao Quan tri Excel 6 Sheets (1-Page A4 Dashboard)
+    # v3.21.3: Tu dong dong bo va xuat Bao cao Quan tri Excel 6 Sheets (1-Page A4 Dashboard)
     $syncReportScript = Join-Path $PSScriptRoot "Sync_ScanReports.ps1"
     if (Test-Path -LiteralPath $syncReportScript) {
         try {

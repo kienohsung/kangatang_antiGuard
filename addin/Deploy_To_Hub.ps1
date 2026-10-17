@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.21.2"
+$ReleaseVersion = "3.21.3"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -147,6 +147,9 @@ if (Test-Path (Join-Path $AddinDir "Chay_Diet_Virus_Ngoai.bat")) {
 } else {
     Copy-Item -Path (Join-Path $RootDir "Chay_Diet_Virus_Ngoai.bat") -Destination (Join-Path $LocalDist "Chay_Diet_Virus_Ngoai.bat") -Force
 }
+if (Test-Path (Join-Path $AddinDir "Chay_Quet_Truc_Tiep_Tren_223.7.bat")) {
+    Copy-Item -Path (Join-Path $AddinDir "Chay_Quet_Truc_Tiep_Tren_223.7.bat") -Destination (Join-Path $LocalDist "Chay_Quet_Truc_Tiep_Tren_223.7.bat") -Force
+}
 
 Write-Host "   -> [OK] Ban CLONE cuc bo tren may 223.176 da duoc dong bo day du." -ForegroundColor Green
 
@@ -203,6 +206,9 @@ if (-not (Test-Path $PrimaryRemoteHub)) {
     Copy-Item -Path (Join-Path $LocalDist "Kangatang_FolderScanner.ps1") -Destination (Join-Path $PrimaryRemoteHub "Kangatang_FolderScanner.ps1") -Force
     Copy-Item -Path (Join-Path $LocalDist "Kangatang_Standalone_Scanner.ps1") -Destination (Join-Path $PrimaryRemoteHub "Kangatang_Standalone_Scanner.ps1") -Force
     Copy-Item -Path (Join-Path $LocalDist "Chay_Diet_Virus_Ngoai.bat") -Destination (Join-Path $PrimaryRemoteHub "Chay_Diet_Virus_Ngoai.bat") -Force
+    if (Test-Path (Join-Path $LocalDist "Chay_Quet_Truc_Tiep_Tren_223.7.bat")) {
+        Copy-Item -Path (Join-Path $LocalDist "Chay_Quet_Truc_Tiep_Tren_223.7.bat") -Destination (Join-Path $PrimaryRemoteHub "Chay_Quet_Truc_Tiep_Tren_223.7.bat") -Force
+    }
     Copy-Item -Path $localJsonPath -Destination (Join-Path $PrimaryRemoteHub "version.json") -Force
     Copy-Item -Path (Join-Path $LocalDist "Install_Client_Kangatang.bat") -Destination (Join-Path $PrimaryRemoteHub "Install_Client_Kangatang.bat") -Force
     Copy-Item -Path (Join-Path $LocalDist "Install_Client.ps1") -Destination (Join-Path $PrimaryRemoteHub "Install_Client.ps1") -Force
