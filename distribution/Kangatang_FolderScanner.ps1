@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.21.1 (Detailed Project Audit Logging & Periodic Report Engine)
+# Phien ban: v3.21.2 (Adaptive Hardware-Aware Multi-Worker Scaling: 2 / 4 / 6 Workers)
 # ==============================================================================
 
 param (
@@ -69,7 +69,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.21.1"
+$AppVersion = "3.21.2"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -234,8 +234,29 @@ if (-not $xlamPath) {
     exit 1
 }
 
-# Su dung 2 Parallel Excel COM Workers (On-Demand) cho .xls/Macro (85% tep .xlsx da duoc xu ly boi Zero-COM ZIP)
-$workerCount = if ($MaxWorkers -gt 0) { $MaxWorkers } else { 2 }
+# Co che tu dong phan luong theo cau hinh phan cung (Adaptive Hardware-Aware Worker Scaling):
+# - May cau hinh cao (>= 12 luong CPU va >= 16 GB RAM, vd: 223.176 i7-12700 20T/32GB): 6 Parallel Excel COM Workers
+# - May tam trung (>= 8 luong CPU va >= 8 GB RAM): 4 Parallel Excel COM Workers
+# - May van phong pho thong (< 8 luong CPU hoac < 8 GB RAM): 2 Parallel Excel COM Workers
+$logicalCpus = [int][Environment]::ProcessorCount
+$ramGb = 8.0
+try {
+    $csInfo = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
+    if ($csInfo -and $csInfo.TotalPhysicalMemory) {
+        $ramGb = [Math]::Round($csInfo.TotalPhysicalMemory / 1GB, 1)
+    }
+} catch {}
+
+$workerCount = if ($MaxWorkers -gt 0) {
+    $MaxWorkers
+} elseif ($logicalCpus -ge 12 -and $ramGb -ge 16) {
+    6
+} elseif ($logicalCpus -ge 8 -and $ramGb -ge 8) {
+    4
+} else {
+    2
+}
+$maxQueueDepth = [Math]::Max(60, $workerCount * 30)
 
 # 5. Nap du lieu Fast Resume tu scanned_files.log vao RAM Hashtable & HashSet phat hien Tai nhiem (RE_INFECTED)
 $resumeMap = @{}
@@ -262,7 +283,7 @@ if (-not $isResume) {
     try { [System.IO.File]::WriteAllText($scannedLogFile, "", [System.Text.Encoding]::Unicode) } catch {}
 }
 
-# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.21.1)
+# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.21.2)
 # Luu truc tiep vao thu muc du an D:\7. AI tools\kangatang\Scan_Reports (hoac \\192.168.223.176\test\Scan_Reports tu may tram LAN)
 $script:projectReportDir = if (Test-Path "D:\7. AI tools\kangatang") {
     "D:\7. AI tools\kangatang\Scan_Reports"
@@ -715,14 +736,18 @@ $counterScript = {
     $state.CountDone          = $true
 }
 
-$script:counterPs = [powershell]::Create()
-[void]$script:counterPs.AddScript($counterScript).AddArgument($TargetFolder).AddArgument($sharedState)
-$script:counterHandle = $script:counterPs.BeginInvoke()
+$script:counterPs = $null
+$script:counterHandle = $null
+if ($prevSessionTotal -le 0) {
+    $script:counterPs = [powershell]::Create()
+    [void]$script:counterPs.AddScript($counterScript).AddArgument($TargetFolder).AddArgument($sharedState)
+    $script:counterHandle = $script:counterPs.BeginInvoke()
+}
 
 $workerScript = {
     param($workerId, $xlamPath, $workQueue, $resultQueue, $state)
 
-    Start-Sleep -Milliseconds (($workerId - 1) * 350)
+    Start-Sleep -Milliseconds (($workerId - 1) * 250)
     $script:excel = $null
     $script:wbAddin = $null
     $workerGuardDir = Join-Path $env:APPDATA "KangatangGuard"
@@ -1033,7 +1058,7 @@ function Render-LiveDashboard([bool]$force = $false, [bool]$isCompleted = $false
     $folderTag = if ($totalFolders -gt 0) { "[#$($script:folderIdx)/$totalFolders]" } else { "[#$($script:folderIdx)]" }
     $activeFolderDisplay = Format-MiddleTruncate $script:currentFolder (71 - $folderTag.Length)
 
-    $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion | Tien do: $($pctDone.ToString('0.0'))% (Con lai: $($pctRem.ToString('0.0'))%) | Da quet: $($script:totalScanned)/$totalTarget | Da diet: $($script:totalCleaned)"
+    $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion ($workerCount Workers) | Tien do: $($pctDone.ToString('0.0'))% (Con lai: $($pctRem.ToString('0.0'))%) | Da quet: $($script:totalScanned)/$totalTarget | Da diet: $($script:totalCleaned)"
 
     # DONG 1: Ten tep dang xu ly & Duong dan thu muc dang thuc hien
     Write-FixedLine (" [1] TEP DANG XU LY    : $activeFileDisplay") ([System.ConsoleColor]::White)
@@ -1265,8 +1290,25 @@ function Drain-WorkerResults {
     }
 }
 
-Add-DetailAuditEvent "SESSION_START" $TargetFolder 0 "(ALL)" "Bat dau phien quet thu muc v$AppVersion (Resume=$isResume, Workers=$maxWorkers)"
-Flush-ScanLogs "IN_PROGRESS" $prevSessionTotal 0 0 $startTimeStr
+$script:preCountedResumeSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+if ($isResume -and $resumeMap.Count -gt 0) {
+    $targetPrefix = $TargetFolder.ToLowerInvariant()
+    foreach ($rk in $resumeMap.Keys) {
+        if ($rk.StartsWith($targetPrefix)) {
+            [void]$script:preCountedResumeSet.Add($rk)
+            $script:totalSkipped++
+            $script:totalScanned++
+            $script:totalSafe++
+            Update-DeptStat $rk "SAFE"
+        }
+    }
+}
+$script:lastFlushMs = 0
+
+Add-DetailAuditEvent "SESSION_START" $TargetFolder 0 "(ALL)" "Bat dau phien quet thu muc v$AppVersion (Resume=$isResume, Workers=$workerCount)"
+Ensure-WorkerPoolStarted
+$initTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalScanned)
+Flush-ScanLogs "IN_PROGRESS" $initTarget $script:totalScanned $script:totalCleaned $startTimeStr
 Render-LiveDashboard $true $false
 
 $dirQueue  = New-Object System.Collections.Generic.Queue[string]
@@ -1277,29 +1319,22 @@ try {
     while ($dirQueue.Count -gt 0) {
         $folder = $dirQueue.Dequeue()
 
-        # Tang 1: Streaming Queue - Day cac thu muc con vao hang doi ngay khi duyet toi
+        # Tang 1: Single-Pass SMB Enumeration (1 SMB FindFirstFileW lay ca SubDirs + FileInfo kem Length/LastWriteTime)
+        $excelFiles = New-Object System.Collections.Generic.List[System.IO.FileInfo]
         try {
-            $subDirs = [System.IO.Directory]::GetDirectories($folder)
-            foreach ($sd in $subDirs) {
-                $dirName = [System.IO.Path]::GetFileName($sd)
-                if (-not (Test-SkippedFolderName $dirName)) {
-                    $dirQueue.Enqueue($sd)
-                }
-            }
-        } catch {}
-
-        # Loc danh sach tep Excel trong thu muc hien tai
-        $excelFiles = New-Object System.Collections.Generic.List[string]
-        try {
-            $allFiles = [System.IO.Directory]::GetFiles($folder)
-            foreach ($fPath in $allFiles) {
-                try {
-                    $fName = [System.IO.Path]::GetFileName($fPath)
-                    $ext   = [System.IO.Path]::GetExtension($fName).ToLowerInvariant()
-                    if (($ext -in $validExts) -and (-not $fName.StartsWith('~$')) -and (-not $fName.ToLowerInvariant().StartsWith("kangatangguard"))) {
-                        $excelFiles.Add($fPath)
+            $dirInfo = New-Object System.IO.DirectoryInfo($folder)
+            foreach ($fsi in $dirInfo.GetFileSystemInfos()) {
+                if (($fsi.Attributes -band [System.IO.FileAttributes]::Directory) -ne 0) {
+                    if (-not (Test-SkippedFolderName $fsi.Name)) {
+                        $dirQueue.Enqueue($fsi.FullName)
                     }
-                } catch {}
+                } else {
+                    $fName = $fsi.Name
+                    $ext   = $fsi.Extension.ToLowerInvariant()
+                    if (($ext -in $validExts) -and (-not $fName.StartsWith('~$')) -and (-not $fName.ToLowerInvariant().StartsWith("kangatangguard"))) {
+                        $excelFiles.Add([System.IO.FileInfo]$fsi)
+                    }
+                }
             }
         } catch {
             continue
@@ -1310,30 +1345,25 @@ try {
         $script:currentFolder = $folder
         $script:totalDiscovered += $excelFiles.Count
 
-        foreach ($filePath in $excelFiles) {
+        foreach ($fInfo in $excelFiles) {
+            $filePath = $fInfo.FullName
             try {
-                $fileName = [System.IO.Path]::GetFileName($filePath)
-                $ext      = [System.IO.Path]::GetExtension($fileName).ToLowerInvariant()
+                $fileName = $fInfo.Name
+                $ext      = $fInfo.Extension.ToLowerInvariant()
                 $script:currentFile = $fileName
                 $lowPath  = $filePath.ToLowerInvariant()
 
                 # TANG 1: Fast Resume trong RAM (0.001ms - Zero SMB FileInfo Round-Trip)
                 if ($isResume -and $resumeMap.ContainsKey($lowPath)) {
-                    $script:totalSkipped++
-                    $script:totalScanned++
-                    $script:totalSafe++
-                    Update-DeptStat $filePath "SAFE"
-                    if (($script:totalSkipped % 2000) -eq 0) {
-                        $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
-                        Flush-ScanLogs "IN_PROGRESS" $totalTarget $script:totalScanned $script:totalCleaned $startTimeStr
+                    if (-not $script:preCountedResumeSet.Contains($lowPath)) {
+                        $script:totalSkipped++
+                        $script:totalScanned++
+                        $script:totalSafe++
+                        Update-DeptStat $filePath "SAFE"
                     }
                     Render-LiveDashboard $false $false
                     continue
                 }
-
-                $fInfo = $null
-                try { $fInfo = New-Object System.IO.FileInfo($filePath) } catch { continue }
-                if (-not $fInfo -or (-not $fInfo.Exists)) { continue }
 
                 $fileSig = "$($fInfo.Length)|$($fInfo.LastWriteTime.ToString('yyyyMMddHHmmss'))"
 
@@ -1364,10 +1394,10 @@ try {
             Drain-WorkerResults
             Render-LiveDashboard $false $false
 
-            # Dieu tiet hang doi (Backpressure): neu hang doi Deep COM > 60 tep thi cho Worker Pool xu ly bot
+            # Dieu tiet hang doi (Backpressure): neu hang doi Deep COM > $maxQueueDepth tep thi cho Worker Pool xu ly bot
             $bpTicks = 0
             $prevQueueLen = $comWorkQueue.Count
-            while ($comWorkQueue.Count -gt 60) {
+            while ($comWorkQueue.Count -gt $maxQueueDepth) {
                 Ensure-WorkerPoolStarted
                 Drain-WorkerResults
                 Render-LiveDashboard $false $false
@@ -1393,8 +1423,12 @@ try {
         }
 
         Drain-WorkerResults
-        $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
-        Flush-ScanLogs "IN_PROGRESS" $totalTarget $script:totalScanned $script:totalCleaned $startTimeStr
+        $nowFlushMs = $stopwatch.ElapsedMilliseconds
+        if (($script:logBuffer.Count -ge 40) -or ($script:ledgerBuffer.Count -gt 0) -or (($nowFlushMs - $script:lastFlushMs) -ge 3000)) {
+            $script:lastFlushMs = $nowFlushMs
+            $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [Math]::Max([int]$script:totalDiscovered, [int]$script:totalScanned))
+            Flush-ScanLogs "IN_PROGRESS" $totalTarget $script:totalScanned $script:totalCleaned $startTimeStr
+        }
     }
 
     $sharedState.TotalTargetFiles   = $script:totalDiscovered
@@ -1447,7 +1481,7 @@ try {
     Write-Host "`n   [HOAN TAT] Qua trinh quet thu muc da ket thuc trong $totalSec giay!" -ForegroundColor Green
     Write-Host "   [BAO CAO]  $($script:latestMdPath)" -ForegroundColor Cyan
 
-    # v3.21.1: Tu dong dong bo va xuat Bao cao Quan tri Excel 6 Sheets (1-Page A4 Dashboard)
+    # v3.21.2: Tu dong dong bo va xuat Bao cao Quan tri Excel 6 Sheets (1-Page A4 Dashboard)
     $syncReportScript = Join-Path $PSScriptRoot "Sync_ScanReports.ps1"
     if (Test-Path -LiteralPath $syncReportScript) {
         try {

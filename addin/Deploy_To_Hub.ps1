@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.21.1"
+$ReleaseVersion = "3.21.2"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -91,6 +91,7 @@ if (-not (Test-Path $compiledXlam)) {
     exit 1
 }
 try { Copy-Item -LiteralPath $compiledXlam -Destination $addinsXlam -Force -ErrorAction SilentlyContinue } catch {}
+try { Copy-Item -LiteralPath (Join-Path $AddinDir "Kangatang_FolderScanner.ps1") -Destination (Join-Path $env:APPDATA "Microsoft\AddIns\Kangatang_FolderScanner.ps1") -Force -ErrorAction SilentlyContinue } catch {}
 Write-Host "   -> [OK] Bien dich thanh cong KangatangGuard.xlam" -ForegroundColor Green
 
 # 2. Tao file sieu du lieu version.json
@@ -110,12 +111,14 @@ $versionObj = @{
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Zero-Restore-Popup Worker Guard & Executive Multi-Sheet Excel Report: Go dang ky Windows Application Restart (UnregisterApplicationRestart + SetErrorMode) tren Worker ngam va tu dong dong tuc thi moi tien trinh EXCEL.EXE /restore rong khong noi dung."
+    changelog         = "v${ReleaseVersion} - Adaptive Hardware-Aware Multi-Worker Scaling (2 / 4 / 6 Workers): Tu dong phan luong Excel COM Worker theo cau hinh CPU/RAM (6 Workers tren may 223.176 20T/32GB, 4 Workers tren may tam trung, 2 Workers tren may pho thong) kem Zero-Restore-Popup Guard."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
 $localJsonPath = Join-Path $LocalDist "version.json"
 [System.IO.File]::WriteAllText($localJsonPath, $versionJsonContent, [System.Text.Encoding]::UTF8)
+try { [System.IO.File]::WriteAllText((Join-Path $AddinDir "version.json"), $versionJsonContent, [System.Text.Encoding]::UTF8) } catch {}
+try { [System.IO.File]::WriteAllText((Join-Path $env:APPDATA "Microsoft\AddIns\version.json"), $versionJsonContent, [System.Text.Encoding]::UTF8) } catch {}
 Write-Host "   -> [OK] Da tao version.json: $localJsonPath" -ForegroundColor Green
 
 # 3. Dong bo tap tin vao Ban Clone Cuc bo (Local Clone tren may 223.176)

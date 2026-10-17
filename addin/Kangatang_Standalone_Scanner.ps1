@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_Standalone_Scanner.ps1
-# Trinh Quet & Diet Virus Macro Excel Doc Lap (Standalone Wrapper v3.21.1)
-# Phien ban: v3.21.1 (Real-Time Streaming Console & 100% Antivirus-Safe)
+# Trinh Quet & Diet Virus Macro Excel Doc Lap (Standalone Wrapper v3.21.2)
+# Phien ban: v3.21.2 (Real-Time Streaming Console & 100% Antivirus-Safe)
 # ==============================================================================
 
 param (
@@ -19,7 +19,7 @@ $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
-$AppVersion = "3.21.1"
+$AppVersion = "3.21.2"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
