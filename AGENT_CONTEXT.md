@@ -1,5 +1,6 @@
 # ⚡ AGENT QUICK-START CONTEXT & ARCHITECTURE MAP (`AGENT_CONTEXT.md`)
-> **MỤC ĐÍCH:** Đọc tệp này ĐẦU TIÊN trong mỗi phiên làm việc để nắm toàn bộ kiến trúc, quy tắc bất biến và tọa độ dòng lệnh (`StartLine`–`EndLine`) mà **không cần đọc toàn bộ file `KangatangGuard_Code.vba` (3.651 dòng)** — tiết kiệm **85–90% token** và tăng tốc xử lý.
+> **MỤC ĐÍCH:** Đọc tệp này ĐẦU TIÊN trong mỗi phiên làm việc để nắm toàn bộ kiến trúc, quy tắc bất biến và tọa độ dòng lệnh (`StartLine`–`EndLine`) mà **không cần đọc toàn bộ file `KangatangGuard_Code.vba` (3.633 dòng)** — tiết kiệm **85–90% token** và tăng tốc xử lý.
+> 🧠 **TRA CỨU BUGS, THUẬT TOÁN & BÀI HỌC CÁC PHIÊN BẢN:** Xem ngay **[`LEARN.md`](file:///d:/7.%20AI%20tools/kangatang/LEARN.md)** (`learn/01_bugs_and_root_causes.md`, `learn/02_algorithms_and_optimizations.md`, `learn/03_version_lessons_and_architecture.md`).
 
 ---
 
