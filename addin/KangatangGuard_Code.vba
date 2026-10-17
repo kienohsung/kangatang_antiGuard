@@ -135,7 +135,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.20.1"
+Public Const CURRENT_VERSION As String = "3.20.2"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -679,6 +679,40 @@ Public Function IsScannerCurrentlyRunning() As Boolean
         End If
     End If
     Err.Clear
+End Function
+
+Private Function ReadUtf8FileText(ByVal fso As Object, ByVal filePath As String) As String
+    On Error Resume Next
+    Dim stm As Object, txt As String
+    Set stm = CreateObject("ADODB.Stream")
+    If Not stm Is Nothing Then
+        stm.Type = 2 ' adTypeText
+        stm.Charset = "utf-8"
+        stm.Open
+        stm.LoadFromFile filePath
+        If Err.Number = 0 Then
+            txt = stm.ReadText(-1) ' adReadAll
+        End If
+        stm.Close
+        Set stm = Nothing
+    End If
+    If Len(txt) = 0 Then
+        Err.Clear
+        If fso Is Nothing Then Set fso = CreateObject("Scripting.FileSystemObject")
+        If Not fso Is Nothing Then
+            If fso.FileExists(filePath) Then
+                Dim ts As Object
+                Set ts = fso.OpenTextFile(filePath, 1, False, -2)
+                If Not ts Is Nothing Then
+                    If Not ts.AtEndOfStream Then txt = ts.ReadAll
+                    ts.Close
+                    Set ts = Nothing
+                End If
+            End If
+        End If
+    End If
+    Err.Clear
+    ReadUtf8FileText = txt
 End Function
 
 ' ===========================================================================
@@ -2130,12 +2164,8 @@ Public Sub ResumeScanDialog()
         Exit Sub
     End If
     
-    Dim ts As Object
-    Set ts = fso.OpenTextFile(lastSessionPath, 1, False, -2)
     Dim jsonText As String
-    jsonText = ts.ReadAll
-    ts.Close
-    Set ts = Nothing
+    jsonText = ReadUtf8FileText(fso, lastSessionPath)
     Set fso = Nothing
     
     Dim statusVal As String, targetVal As String, scannedVal As String, cleanedVal As String, timeVal As String
@@ -2144,6 +2174,18 @@ Public Sub ResumeScanDialog()
     scannedVal = ExtractJsonValue(jsonText, "TotalScanned")
     cleanedVal = ExtractJsonValue(jsonText, "TotalCleaned")
     timeVal = ExtractJsonValue(jsonText, "StartTime")
+    
+    If IsScannerCurrentlyRunning() Then
+        On Error Resume Next
+        AppActivate "KangatangGuard"
+        On Error GoTo ResumeErr
+        MsgBoxW Uni("Tr\u00ecnh qu\u00e9t th\u01b0 m\u1ee5c KangatangGuard hi\u1ec7n \u0111ang ch\u1ea1y!" & vbCrLf & vbCrLf) & _
+                Uni("\u2022 Th\u01b0 m\u1ee5c: ") & targetVal & vbCrLf & _
+                Uni("\u2022 Ti\u1ebfn \u0111\u1ed9 hi\u1ec7n t\u1ea1i: \u0110\u00e3 qu\u00e9t ") & scannedVal & Uni(" t\u1ec7p (\u0110\u00e3 di\u1ec7t: ") & cleanedVal & Uni(" t\u1ec7p)" & vbCrLf & vbCrLf) & _
+                Uni("H\u1ec7 th\u1ed1ng gi\u1eef nguy\u00ean c\u1eeda s\u1ed5 PowerShell \u0111ang ho\u1ea1t \u0111\u1ed9ng."), _
+                vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - \u0110ang qu\u00e9t")
+        Exit Sub
+    End If
     
     If UCase(statusVal) = "COMPLETED" Then
         MsgBoxW Uni("Phi\u00ean qu\u00e9t g\u1ea7n nh\u1ea5t \u0111\u00e3 HO\u00c0N T\u1ea4T 100%!" & vbCrLf & _
