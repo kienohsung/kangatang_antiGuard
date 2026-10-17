@@ -6,7 +6,7 @@
 
 ## 1. THÔNG TIN PHIÊN BẢN & HẠ TẦNG MẠNG LAN (CRITICAL TOPOLOGY)
 
-- **Phiên bản hiện tại:** `v3.19.0` (`Non-Scrolling Live Dashboard UI + 4-Layer Turbo Folder Scanner`)
+- **Phiên bản hiện tại:** `v3.19.1` (`Crash-Proof Headless Worker + Zero-COM OLE2/OpenXML Pre-Filter + Non-Scrolling Live Dashboard UI`)
 - **Phân tách vai trò 2 máy chủ LAN (BẤT BIẾN):**
   | Máy chủ | Đường dẫn UNC / Local | Vai trò duy nhất | Quy tắc CẤM (Hard Constraint) |
   | :--- | :--- | :--- | :--- |
@@ -20,7 +20,7 @@
 
 ---
 
-## 2. BẢN ĐỒ TỌA ĐỘ DÒNG CODE (`addin/KangatangGuard_Code.vba` — 4.063 DÒNG)
+## 2. BẢN ĐỒ TỌA ĐỘ DÒNG CODE (`addin/KangatangGuard_Code.vba` — 4.080 DÒNG)
 
 > 💡 **Mẹo tiết kiệm Token:** Khi dùng `view_file` trên `addin/KangatangGuard_Code.vba`, hãy chỉ định đúng `StartLine` và `EndLine` theo bảng dưới đây:
 
@@ -29,13 +29,13 @@
 | :--- | :--- | :--- | :--- |
 | `ThisWorkbook` | Document Module | `L13` – `L36` | Hook `Workbook_Open`, `Workbook_AddinInstall`, `Workbook_BeforeClose` |
 | `clsAppEvents` | Class Module | `L39` – `L109` | Bắt sự kiện toàn cục `xlApp_WorkbookOpen`, `BeforeSave`, `NewWorkbook`, `SheetActivate`, `WorkbookActivate` |
-| `modKangatangScanner` | Standard Module | `L112` – `L2496` | Engine quét/diệt virus, Out-of-Process Launcher, Worker Macros (`ScanSingleFileForWorker`, `GetPreFilterRegex`), Copy/Paste Shortcuts, Ribbon Callbacks, LAN Auto-Update |
-| `modKangatangShield` | Standard Module | `L2499` – `L3781` | Nhận diện chữ ký/IOC virus, Startup Sweep, Quarantine, CleanAddInCollisions, Two-Phase Module-Sheet Purge |
-| `modLogger` | Standard Module | `L3784` – `L3816` | Ghi nhật ký kiểm toán `WriteLog` ra `%APPDATA%\KangatangGuard\scan_log_YYYYMMDD.txt` |
-| `modThreatCollector` | Standard Module | `L3819` – `L4063` | Băm MD5 (`ComputeThreatHash`) & thu thập mẫu mã độc JSON (`CollectThreatSample`) về máy `223.176` |
+| `modKangatangScanner` | Standard Module | `L112` – `L2528` | Engine quét/diệt virus, Out-of-Process Launcher, Worker Macros (`ScanSingleFileForWorker`, `PurgeWorkerStrayRestoreProcesses`), Copy/Paste Shortcuts, Ribbon Callbacks, LAN Auto-Update |
+| `modKangatangShield` | Standard Module | `L2531` – `L3814` | Nhận diện chữ ký/IOC virus, Startup Sweep, Quarantine, CleanAddInCollisions, Two-Phase Module-Sheet Purge |
+| `modLogger` | Standard Module | `L3817` – `L3849` | Ghi nhật ký kiểm toán `WriteLog` ra `%APPDATA%\KangatangGuard\scan_log_YYYYMMDD.txt` |
+| `modThreatCollector` | Standard Module | `L3852` – `L4080` | Băm Pure Native VBA Dual-Seed 32-bit (`ComputeThreatHash`) & thu thập mẫu mã độc JSON (`CollectThreatSample`) về máy `223.176` |
 
-### B. Tọa độ các hàm trọng yếu trong `modKangatangScanner` (`L112` – `L2496`)
-- **Hằng số phiên bản & cấu hình (`CURRENT_VERSION = "3.19.0"`, `CENTRAL_BACKUP_HUB`):** `L115` – `L155`
+### B. Tọa độ các hàm trọng yếu trong `modKangatangScanner` (`L112` – `L2528`)
+- **Hằng số phiên bản & cấu hình (`CURRENT_VERSION = "3.19.1"`, `CENTRAL_BACKUP_HUB`):** `L115` – `L155`
 - **Unicode & Headless-safe Dialog (`Uni`, `MsgBoxW`):** `L156` – `L203`
 - **ScanCache chống lag khi Save (`IsScanCacheExpired`, `UpdateScanCache`):** `L204` – `L240`
 - **Khởi tạo & Ribbon Callbacks (`InitializeGuard`, `EnsureGuardAlive`, `Ribbon_*`):** `L241` – `L356`

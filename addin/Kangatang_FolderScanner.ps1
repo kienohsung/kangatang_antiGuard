@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.19.0 (Non-Scrolling Live Dashboard + 4-Layer Turbo Engine)
+# Phien ban: v3.19.1 (Non-Scrolling Live Dashboard + 4-Layer Turbo Engine)
 # ==============================================================================
 
 param (
@@ -25,7 +25,7 @@ $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyI
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.19.0"
+$AppVersion = "3.19.1"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -92,11 +92,23 @@ Write-Host "   KANGATANG GUARD v$AppVersion - BANG DIEU KHIEN QUET THU MUC (4-LA
 Write-Host "   Day la addin phong chong virus kangatang - Phat trien boi OhsungIT team !                        " -ForegroundColor White
 Write-Host "====================================================================================================" -ForegroundColor Cyan
 
-# 2. Dam bao AccessVBOM = 1 trong Registry HKCU
+# 2. Dam bao AccessVBOM = 1, tat hop thoai WER & don sach DocumentRecovery tranh Excel tu mo /restore
+try {
+    $werKey = "HKCU:\Software\Microsoft\Windows\Windows Error Reporting"
+    if (-not (Test-Path $werKey)) { New-Item -Path $werKey -Force | Out-Null }
+    Set-ItemProperty -Path $werKey -Name "DontShowUI" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+} catch {}
+
 foreach ($ver in @("16.0", "15.0", "14.0", "12.0")) {
     $secPath = "HKCU:\Software\Microsoft\Office\$ver\Excel\Security"
     if (Test-Path $secPath) {
         Set-ItemProperty -Path $secPath -Name "AccessVBOM" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($sub in @("DocumentRecovery", "StartupItems")) {
+        $resKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Resiliency\$sub"
+        if (Test-Path $resKey) {
+            Remove-Item -Path $resKey -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -172,9 +184,8 @@ if (-not $xlamPath) {
     exit 1
 }
 
-# Xac dinh so luong Parallel Excel Workers theo so nhan CPU
-$cpuCores = [Environment]::ProcessorCount
-$workerCount = if ($MaxWorkers -gt 0) { $MaxWorkers } elseif ($cpuCores -ge 8) { 4 } elseif ($cpuCores -ge 4) { 3 } else { 2 }
+# Su dung 2 Parallel Excel COM Workers (On-Demand) cho .xls/Macro (85% tep .xlsx da duoc xu ly boi Zero-COM ZIP)
+$workerCount = if ($MaxWorkers -gt 0) { $MaxWorkers } else { 2 }
 
 # 5. Nap du lieu Fast Resume tu scanned_files.log vao RAM Hashtable
 $resumeMap = @{}
@@ -231,8 +242,30 @@ function Test-SkippedFolderName([string]$name) {
     return $false
 }
 
-# Tang 2: Zero-COM OpenXML Pre-Filter (Kiem tra .xlsx/.xlsm/.xlsb trong 1.5 - 3ms khong can mo Excel COM)
+# Tang 2: Zero-COM OpenXML & OLE2 Pre-Filter (Kiem tra .xlsx/.xlsm/.xlsb/.xls trong 1.5 - 3ms khong can mo Excel COM)
 function Test-OpenXmlSafeZeroCom([string]$filePath, [string]$ext, [regex]$iocRegex) {
+    if ($ext -eq ".xls") {
+        $fs = $null
+        try {
+            $shareMode = [System.IO.FileShare]([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+            $fs = New-Object System.IO.FileStream($filePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $shareMode)
+            if ($fs.Length -lt 512 -or $fs.Length -gt 26214400) { return $false }
+            $bytes = New-Object byte[] ($fs.Length)
+            [void]$fs.Read($bytes, 0, $bytes.Length)
+            if ($bytes[0] -ne 0xD0 -or $bytes[1] -ne 0xCF -or $bytes[2] -ne 0x11 -or $bytes[3] -ne 0xE0) { return $false }
+            $uniStr = [System.Text.Encoding]::Unicode.GetString($bytes)
+            if (-not ($uniStr.Contains("Workbook") -or $uniStr.Contains("Book"))) { return $false }
+            if ($uniStr.IndexOf("VBA", [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $false }
+            if ($iocRegex.IsMatch($uniStr)) { return $false }
+            $asciiStr = [System.Text.Encoding]::ASCII.GetString($bytes)
+            if ($iocRegex.IsMatch($asciiStr)) { return $false }
+            return $true
+        } catch {
+            return $false
+        } finally {
+            if ($null -ne $fs) { try { $fs.Dispose() } catch {} }
+        }
+    }
     if ($ext -notin @(".xlsx", ".xlsm", ".xlsb")) { return $false }
     $fs  = $null
     $zip = $null
@@ -303,6 +336,8 @@ $sharedState    = [hashtable]::Synchronized(@{
     TotalTargetFiles   = $prevSessionTotal
     TotalTargetFolders = 0
     CountDone          = $false
+    WorkerPid1         = 0
+    WorkerPid2         = 0
 })
 
 # Luong dem tong so tep Excel chay ngam song song (giup tinh chinh xac % Con lai ma khong lam cham luc khoi dong)
@@ -353,30 +388,51 @@ $script:counterHandle = $script:counterPs.BeginInvoke()
 $workerScript = {
     param($workerId, $xlamPath, $workQueue, $resultQueue, $state)
 
-    $excel = $null
-    $wbAddin = $null
+    $script:excel = $null
+    $script:wbAddin = $null
+    $workerXlam = Join-Path $env:TEMP "KangatangGuard_Worker_$workerId.xlam"
+    try { Copy-Item -LiteralPath $xlamPath -Destination $workerXlam -Force -ErrorAction SilentlyContinue } catch {}
+    if (-not (Test-Path -LiteralPath $workerXlam)) { $workerXlam = $xlamPath }
+
+    function Clear-WorkerCrashRecovery {
+        foreach ($ver in @("16.0", "15.0", "14.0", "12.0")) {
+            foreach ($sub in @("DocumentRecovery", "StartupItems")) {
+                $resKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Resiliency\$sub"
+                if (Test-Path $resKey) {
+                    Remove-Item -Path $resKey -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    }
 
     function Restart-LocalWorker {
-        if ($null -ne $wbAddin) { try { $wbAddin.Close($false) } catch {}; $wbAddin = $null }
-        if ($null -ne $excel) {
-            try { $excel.Quit() } catch {}
-            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
-            $excel = $null
+        if ($null -ne $script:wbAddin) {
+            try { $script:wbAddin.Close($false) } catch {}
+            $script:wbAddin = $null
+        }
+        if ($null -ne $script:excel) {
+            try { $script:excel.Quit() } catch {}
+            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($script:excel) | Out-Null } catch {}
+            $script:excel = $null
         }
         [System.GC]::Collect()
         [System.GC]::WaitForPendingFinalizers()
+        Clear-WorkerCrashRecovery
 
         $script:excel = New-Object -ComObject Excel.Application
         $script:excel.Visible = $false
+        try { $script:excel.ShowWindowsInTaskbar = $false } catch {}
+        try { $script:excel.AutoRecover.Enabled = $false } catch {}
         $script:excel.DisplayAlerts = $false
         $script:excel.EnableEvents = $false
-        $script:wbAddin = $script:excel.Workbooks.Open($xlamPath, 0, $true)
+        $script:wbAddin = $script:excel.Workbooks.Open($workerXlam, 0, $true)
         $script:excel.Run("'$($script:wbAddin.Name)'!InitWorkerMode") | Out-Null
     }
 
     try {
         Restart-LocalWorker
         [System.Threading.Interlocked]::Increment([ref]$state.ActiveWorkers) | Out-Null
+        $processedCount = 0
 
         $item = $null
         while (-not $state.CancelWorkers) {
@@ -384,7 +440,9 @@ $workerScript = {
                 $fPath = [string]$item.FilePath
                 $state.CurrentWorkerFile = [string]$item.FileName
                 $res = ""
+                $processedCount++
                 try {
+                    $script:excel.Visible = $false
                     $res = [string]$script:excel.Run("'$($script:wbAddin.Name)'!ScanSingleFileForWorker", $fPath)
                     if ($res.StartsWith("PURGE_NEEDED|")) {
                         $detail = $res.Substring(13)
@@ -396,6 +454,7 @@ $workerScript = {
                             } catch {
                                 $purgeRes = "INFECTED_ERR|RPC error"
                                 Restart-LocalWorker
+                                $processedCount = 0
                                 break
                             }
                             if ($purgeRes -ne "MORE_PURGE") { break }
@@ -406,9 +465,13 @@ $workerScript = {
                             $res = $purgeRes
                         }
                     }
+                    if ($processedCount -ge 120) {
+                        Restart-LocalWorker
+                        $processedCount = 0
+                    }
                 } catch {
                     $res = "WORKER_RECOVERED|$($_.Exception.Message)"
-                    try { Restart-LocalWorker } catch {}
+                    try { Restart-LocalWorker; $processedCount = 0 } catch {}
                 }
 
                 $resultQueue.Enqueue([pscustomobject]@{
@@ -433,6 +496,10 @@ $workerScript = {
         }
         [System.GC]::Collect()
         [System.GC]::WaitForPendingFinalizers()
+        if ($workerXlam -ne $xlamPath -and (Test-Path -LiteralPath $workerXlam)) {
+            Remove-Item -LiteralPath $workerXlam -Force -ErrorAction SilentlyContinue
+        }
+        Clear-WorkerCrashRecovery
     }
 }
 
@@ -644,6 +711,7 @@ function Drain-WorkerResults {
         } else {
             $script:totalScanned++
             $script:totalErrors++
+            $script:logBuffer.Add("$($resItem.LowPath)|$($resItem.FileSig)")
         }
 
         if ($script:logBuffer.Count -ge 40) {

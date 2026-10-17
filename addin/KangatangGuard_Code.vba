@@ -131,7 +131,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.19.0"
+Public Const CURRENT_VERSION As String = "3.19.1"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -265,10 +265,12 @@ End Sub
 
 Public Sub TerminateGuard()
     On Error Resume Next
-    Call EnsureVbomRegistryEnabled
-    Call SchedulePostExitVbomFix
-    Call RemoveMenu
-    Set oAppEvents.xlApp = Nothing
+    If Not bIsFolderScanning And Application.Visible Then
+        Call EnsureVbomRegistryEnabled
+        Call SchedulePostExitVbomFix
+        Call RemoveMenu
+    End If
+    If Not oAppEvents Is Nothing Then Set oAppEvents.xlApp = Nothing
     Set oAppEvents = Nothing
     Set dicScanCache = Nothing
     bIsFolderScanning = False
@@ -859,12 +861,39 @@ End Sub
 Public Sub InitWorkerMode()
     On Error Resume Next
     bIsFolderScanning = True
+    If Not oAppEvents Is Nothing Then Set oAppEvents.xlApp = Nothing
+    Set oAppEvents = Nothing
+    Application.Visible = False
+    Application.ShowWindowsInTaskbar = False
+    Application.AutoRecover.Enabled = False
     Application.EnableEvents = False
     Application.DisplayAlerts = False
     Application.ScreenUpdating = False
+    Dim wbStray As Workbook
+    For Each wbStray In Application.Workbooks
+        If Not wbStray Is ThisWorkbook Then
+            If Len(wbStray.Path) = 0 Then wbStray.Close SaveChanges:=False
+        End If
+    Next wbStray
     Call EnsureVbomRegistryEnabled
     Call NeutralizeVirusHooks
     Call CleanDocumentRecoveryRegistry
+    Call PurgeWorkerStrayRestoreProcesses
+    Err.Clear
+End Sub
+
+Public Sub PurgeWorkerStrayRestoreProcesses()
+    On Error Resume Next
+    Dim svc As Object, rs As Object, proc As Object, cmd As String
+    Set svc = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
+    If svc Is Nothing Then Exit Sub
+    Set rs = svc.ExecQuery("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name='EXCEL.EXE'")
+    For Each proc In rs
+        cmd = LCase$(CStr(proc.CommandLine & ""))
+        If InStr(1, cmd, "/restore", vbTextCompare) > 0 Then
+            proc.Terminate
+        End If
+    Next proc
     Err.Clear
 End Sub
 
@@ -878,9 +907,16 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     On Error GoTo WorkerFileErr
     
     bIsFolderScanning = True
+    On Error Resume Next
+    If Not oAppEvents Is Nothing Then Set oAppEvents.xlApp = Nothing
+    Application.Visible = False
+    Application.ShowWindowsInTaskbar = False
+    Application.AutoRecover.Enabled = False
     Application.EnableEvents = False
     Application.DisplayAlerts = False
     Application.ScreenUpdating = False
+    Err.Clear
+    On Error GoTo WorkerFileErr
     
     Dim wbTarget As Workbook
     Dim detailMsg As String, detailShort As String
@@ -1761,8 +1797,6 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
             If TypeName(wb.Sheets(i)) = "Module" Then
                 nModuleSheetsDeferred = nModuleSheetsDeferred + 1
             Else
-                ' Thu thap mau ma doc cua sheet truoc khi xoa
-                Call CollectThreatSample(wb, shtName, "[Sheet: " & shtName & ", Type: " & TypeName(wb.Sheets(i)) & "]", "InfectedSheet")
                 If DeleteSheetSafe(wb, i) Then
                     changed = True
                     WriteLog "[CLEAN] Removed sheet: " & shtName
@@ -2168,6 +2202,8 @@ Public Sub CheckForLanUpdatesManual()
 End Sub
 
 Public Sub CheckForLanUpdatesSilent()
+    On Error Resume Next
+    If bIsFolderScanning Or Not Application.Visible Then Exit Sub
     Call CheckForLanUpdates(bSilent:=True)
 End Sub
 
@@ -2780,6 +2816,7 @@ End Sub
 ' ===========================================================================
 Public Sub ShieldStartupSweep()
     On Error GoTo SweepErr
+    If bIsFolderScanning Or Not Application.Visible Then Exit Sub
     WriteLog "[SHIELD_STARTUP] Sweep started (v" & CURRENT_VERSION & ")"
     
     Call EnsureVbomRegistryEnabled
@@ -3896,41 +3933,24 @@ Private Function GetThreatSampleFolder() As String
 End Function
 
 ' ===========================================================================
-' TINH HASH MD5 DUA TREN .NET COM HOAC FALLBACK CHUOI AN TOAN
+' TINH HASH MA DOC 100% PURE NATIVE VBA (v3.19.1 - Zero .NET CLR mscorwks.dll Crash)
+' Khong nap .NET 2.0 CLR (mscorwks.dll) vao EXCEL.EXE de tranh loi 0xc00000fd / 0xc0000005
 ' ===========================================================================
 Public Function ComputeThreatHash(ByVal rawText As String) As String
-    On Error GoTo HashFallback
-    Dim enc As Object, md5 As Object
-    Set enc = CreateObject("System.Text.UTF8Encoding")
-    Set md5 = CreateObject("System.Security.Cryptography.MD5CryptoServiceProvider")
-    
-    Dim bytes As Variant, hashBytes As Variant
-    bytes = enc.GetBytes_4(rawText)
-    hashBytes = md5.ComputeHash_2((bytes))
-    
-    Dim hexStr As String, i As Long, b As Byte, h As String
-    hexStr = ""
-    For i = 1 To LenB(hashBytes)
-        b = AscB(MidB(hashBytes, i, 1))
-        h = Hex(b)
-        If Len(h) = 1 Then h = "0" & h
-        hexStr = hexStr & LCase$(h)
-    Next i
-    
-    If Len(hexStr) > 0 Then
-        ComputeThreatHash = hexStr
-        Exit Function
-    End If
-
-HashFallback:
-    ' Fallback hash neu COM .NET bi chan tren he thong
-    Dim hashVal As Long, codeLen As Long
+    On Error Resume Next
+    Dim v1 As Long, v2 As Long, codeLen As Long, i As Long, chCode As Long
     codeLen = Len(rawText)
-    hashVal = 5381
+    v1 = 5381
+    v2 = 16777619
     For i = 1 To codeLen
-        hashVal = ((hashVal * 33) Xor AscW(Mid$(rawText, i, 1))) And &H7FFFFFFF
+        chCode = AscW(Mid$(rawText, i, 1)) And &HFFFF&
+        v1 = (((v1 And &H1FFFFFF) * 33) Xor chCode) And &H7FFFFFFF
+        v2 = (((v2 And &HFFFFFF) * 67 + (i And &HFFF)) Xor chCode) And &H7FFFFFFF
     Next i
-    ComputeThreatHash = "fb_" & Hex(codeLen) & "_" & Hex(hashVal)
+    ComputeThreatHash = "vba_" & LCase$(Right$("000000" & Hex$(codeLen), 6) & "_" & _
+                        Right$("00000000" & Hex$(v1), 8) & "_" & _
+                        Right$("00000000" & Hex$(v2), 8))
+    Err.Clear
 End Function
 
 ' ===========================================================================

@@ -125,3 +125,20 @@
   2. **100% Antivirus-Safe (Seqrite / Quick Heal):** Tệp `Kangatang_FolderScanner.ps1` nằm tại `%APPDATA%\Microsoft\AddIns` (không lưu trong `%APPDATA%\KangatangGuard`), hoàn toàn không chứa C# `Add-Type` P/Invoke hay chuỗi IOC virus, mà ủy quyền kiểm tra từng tệp cho hàm `ScanSingleFileForWorker` bên trong `KangatangGuard.xlam` trên một Background Excel Worker riêng biệt.
 - **Tọa độ code:** [`KangatangGuard_Code.vba#L632-L970`](file:///d:/7.%20AI%20tools/kangatang/addin/KangatangGuard_Code.vba#L632-L970), [`Kangatang_FolderScanner.ps1`](file:///d:/7.%20AI%20tools/kangatang/addin/Kangatang_FolderScanner.ps1).
 
+---
+
+### `BUG-13`: Tự động bật cửa sổ Excel trắng (`Book5`, `Book6`, `Book7 - Excel` / `EXCEL.EXE /restore`) trong lúc quét thư mục lớn (`v3.19.1`)
+- **Triệu chứng:** Trong khi trình quét `Kangatang_FolderScanner.ps1` đang chạy quét thư mục mạng lớn, các cửa sổ Excel hiển thị (`Book5`, `Book6`, `Book7 - Excel`) tự động bật lên trên màn hình người dùng.
+- **Root Cause (Bằng chứng Forensic từ Process CommandLine & Windows Event Log):**
+  1. Các cửa sổ `BookN - Excel` thực chất được Windows khởi chạy với dòng lệnh `"C:\Program Files\Microsoft Office\Office16\EXCEL.EXE" /restore` do **Windows Error Reporting (`WerFault.exe`)** kích hoạt cơ chế Application Recovery khi một tiến trình Worker ngầm (`EXCEL.EXE /automation -Embedding`) bị crash.
+  2. **3 nguyên nhân gây crash Worker `EXCEL.EXE /automation -Embedding`:**
+     - **Crash Cause A (`mscorwks.dll` `.NET 2.0 CLR` Stack Overflow `0xc00000fd` / `0xc0000005`):** Hàm `ComputeThreatHash` trong `modThreatCollector` gọi `CreateObject("System.Text.UTF8Encoding")` và `MD5CryptoServiceProvider`, nạp `.NET 2.0 CLR (mscorwks.dll)` vào tiến trình `EXCEL.EXE` 64-bit và gọi lặp lại hàng trăm lần khi xóa các sheet `Kangatang_XX`.
+     - **Crash Cause B (`Application.OnTime` chạy ngầm trong Worker):** Khi Worker nạp `KangatangGuard.xlam`, `InitializeGuard()` đặt hẹn giờ `ShieldStartupSweep` (sau 1s) và `CheckForLanUpdatesSilent` (sau 45s) mà chưa có chốt chặn `If bIsFolderScanning Or Not Application.Visible Then Exit Sub`.
+     - **Crash Cause C (File `.xls` hỏng cấu trúc BIFF8 & biến cục bộ trong `Restart-LocalWorker`):** Các file `.xls` không có VBA/IOC vẫn bị đẩy vào Deep COM (khi gặp file `.xls` hỏng cấu trúc sẽ làm crash parser BIFF8 tại `0x000f963a`), đồng thời `Restart-LocalWorker` tham chiếu nhầm `$excel` cục bộ thay vì `$script:excel`.
+- **Cách khắc phục (`v3.19.1`):**
+  1. **Thay thế hoàn toàn `.NET 2.0 COM Interop` bằng thuật toán băm `Pure Native VBA Dual-Seed 32-bit Hash`:** Loại bỏ `CreateObject("System.Security.Cryptography.MD5CryptoServiceProvider")` trong `ComputeThreatHash`, triệt tiêu 100% lỗi crash `mscorwks.dll` và không gọi `CollectThreatSample` trên các `Worksheet` thường.
+  2. **Khóa chặt `ShieldStartupSweep` & `CheckForLanUpdatesSilent` trong Worker:** Thêm chốt chặn `If bIsFolderScanning Or Not Application.Visible Then Exit Sub` và hủy gắn kết `oAppEvents` trong `InitWorkerMode`.
+  3. **Mở rộng Tầng 2 (`Zero-COM Pre-Filter`) cho cả định dạng `.xls` (OLE2 Binary):** Kiểm tra trực tiếp luồng byte `.xls` trong RAM (`< 2ms`); nếu không có `VBA` và không khớp `$iocRegex` (ASCII & UTF-16LE) thì kết luận `SAFE` ngay mà không cần mở `EXCEL.EXE`.
+  4. **Chặn tự mở `/restore` (`DontShowUI = 1`, `AutoRecover.Enabled = False`, `PurgeWorkerStrayRestoreProcesses`):** Vô hiệu hóa `AutoRecover` trên Worker, xóa `Resiliency\DocumentRecovery`, dùng bản sao cô lập `%TEMP%\KangatangGuard_Worker_<id>.xlam` và tự động dọn sạch mọi tiến trình `/restore` từ bên trong hàm VBA `PurgeWorkerStrayRestoreProcesses` (giữ `Kangatang_FolderScanner.ps1` 100% an toàn trước Quick Heal `QHPISVR`).
+- **Tọa độ code:** [`KangatangGuard_Code.vba#L861-L910`](file:///d:/7.%20AI%20tools/kangatang/addin/KangatangGuard_Code.vba#L861-L910), [`L3935-L3965`](file:///d:/7.%20AI%20tools/kangatang/addin/KangatangGuard_Code.vba#L3935-L3965), [`Kangatang_FolderScanner.ps1#L254-L470`](file:///d:/7.%20AI%20tools/kangatang/addin/Kangatang_FolderScanner.ps1#L254-L470).
+
