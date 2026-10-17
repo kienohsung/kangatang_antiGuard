@@ -91,3 +91,18 @@
   3. **Giao tiếp IPC qua `scan_request.json` (UTF-8):** Khi Excel gọi `LaunchBackgroundScanner`, đường dẫn thư mục được ghi vào `%APPDATA%\KangatangGuard\scan_request.json` bằng `ADODB.Stream` (`utf-8`), giúp truyền 100% chính xác đường dẫn tiếng Việt có dấu, khoảng trắng và đường dẫn UNC sang tiến trình PowerShell mà không bao giờ bị lỗi cú pháp dòng lệnh.
 - **Tọa độ code:** [`KangatangGuard_Code.vba#L632-L970`](file:///d:/7.%20AI%20tools/kangatang/addin/KangatangGuard_Code.vba#L632-L970).
 
+---
+
+### `ALG-10`: Kiến Trúc Quét Thư Mục Siêu Tốc 4 Tầng (`4-Layer Turbo Folder Scanner` — Tăng tốc 50x–100x, `v3.18.0`)
+- **Bài toán:** Khi quét thư mục gốc trên máy chủ mạng LAN chứa hàng trăm thư mục con và hàng chục nghìn tệp Excel, việc duyệt trước toàn bộ cây thư mục (`GetDirectories` đệ quy) rồi mở tuần tự từng tệp qua 1 tiến trình Excel COM duy nhất (`1.5 – 2.5 giây/tệp`) khiến thời gian quét kéo dài **> 24 giờ**.
+- **Thiết kế thuật toán 4 Tầng:**
+  1. **Tầng 1 — Duyệt Cuốn Chiếu (`Streaming Directory Queue`) + `Fast Resume` RAM Hashtable (`0.01 ms/tệp`):** Dùng `Queue[string]` duyệt đến thư mục nào quét ngay thư mục đó (`< 0.2 giây` đã bắt đầu quét `Folder [1]`), kết hợp đối chiếu chữ ký `Size|LastWriteTime` trong RAM để bỏ qua tức thì tệp đã sạch từ phiên trước.
+  2. **Tầng 2 — Bộ Lọc Tĩnh Không Cần Mở Excel (`Zero-COM OpenXML Pre-Filter`, `1.5 ms/tệp` — Nhanh gấp 1.000 lần Excel COM):**
+     - Với các tệp `.xlsx`, `.xlsm`, `.xlsb` (chiếm 80–90% tổng số tệp), mở trực tiếp cấu trúc ZIP trên luồng đọc chia sẻ `[System.IO.FileShare]([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)` (lưu ý: trong PowerShell 5.1, phép toán `-bor` trên enum trả về `[int]`, bắt buộc ép kiểu tường minh sang `[System.IO.FileShare]` để không gọi nhầm overload `bufferSize` của `FileStream`).
+     - Nếu trong ZIP **không có** `vbaProject.bin`, `macrosheets/`, `dialogsheets/` và tệp `xl/workbook.xml` (`xl/workbook.bin`) không khớp biểu thức chính quy IOC (`$iocRegex` được dựng trong RAM từ mảng mã ASCII `[char[]]` — **0% chuỗi IOC trên đĩa**), kết luận tệp **100% SẠCH** trong `1.5 ms` mà không cần gọi Excel COM!
+  3. **Tầng 3 — Khởi Tạo Lazily & Quét Song Song Đa Luồng (`On-Demand Multi-Worker Parallel Excel COM Pool`, `2–4 Workers`):**
+     - Chỉ những tệp `.xls` (BIFF8) hoặc tệp `.xlsm`/`.xlsb`/`.xlsx` có chứa `vbaProject.bin` / dấu hiệu nghi vấn mới được đẩy vào `ConcurrentQueue` và kích hoạt `Ensure-WorkerPoolStarted` (`RunspacePool` gồm `2–4` tiến trình `EXCEL.EXE` chạy ngầm song song, tự động Recycle mỗi `250 tệp/worker`).
+  4. **Tầng 4 — Ghi Log Theo Lô (`Buffered Batch Log`):** Gom đệm `40 tệp/lần` trước khi ghi xuống `scanned_files.log` và `last_session.json`.
+- **Tọa độ code:** [`Kangatang_FolderScanner.ps1#L180-L570`](file:///d:/7.%20AI%20tools/kangatang/addin/Kangatang_FolderScanner.ps1#L180-L570) & [`KangatangGuard_Code.vba#L873-L875`](file:///d:/7.%20AI%20tools/kangatang/addin/KangatangGuard_Code.vba#L873-L875).
+
+

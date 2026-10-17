@@ -131,7 +131,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.17.3"
+Public Const CURRENT_VERSION As String = "3.18.0"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -867,6 +867,12 @@ Public Sub InitWorkerMode()
     Call CleanDocumentRecoveryRegistry
     Err.Clear
 End Sub
+
+' Cung cap mau Regex trong RAM cho Bo loc tinh Zero-COM OpenXML Pre-Filter (v3.18.0)
+' Giup file .ps1 tren dia KHONG chua bat ky chuoi IOC virus nao (100% Antivirus-Safe)
+Public Function GetPreFilterRegex() As String
+    GetPreFilterRegex = "kanga|myperson|!allocated|savecopyas|onsheetactivate|startuppath|xlstart"
+End Function
 
 Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     On Error GoTo WorkerFileErr

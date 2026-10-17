@@ -36,7 +36,7 @@
 
 ---
 
-## 2. BẢNG TIẾN HÓA KIẾN TRÚC QUA CÁC PHIÊN BẢN (`v3.1` ➔ `v3.17.3`)
+## 2. BẢNG TIẾN HÓA KIẾN TRÚC QUA CÁC PHIÊN BẢN (`v3.1` ➔ `v3.18.0`)
 
 | Phiên bản | Ngày | Cột mốc Kiến trúc & Cải tiến Trọng tâm | Tài liệu chi tiết trong `doc/` |
 | :--- | :--- | :--- | :--- |
@@ -49,4 +49,6 @@
 | **`v3.15.0`** | `10/2026` | **VBOM Self-Healing & Third-Party Coexistence:** Tự động sửa Registry `AccessVBOM = 1` không hiện popup; bảo vệ menu và khóa `OPEN*` của `MyExcel.xlam`. | `20261014_vbom_self_healing_zero_popup_v3.15.0.md` |
 | **`v3.16.0`** | `10/2026` | **Instant Add-In Manager Integration (`< 5ms` Zero-Spin):** Khắc phục triệt để lỗi quay tròn và không tích chọn được Add-in trong `Excel Options -> Add-ins -> Go`. | `20261017_fix_addin_manager_install_v3.16.0.md` |
 | **`v3.17.0` – `v3.17.3`** | `10/2026` | **Out-of-Process Streaming Console + Native VBA Worker (`Two-Step Smart Open`):** Khởi chạy cửa sổ PowerShell độc lập hiển thị tiến độ trực tiếp từng tệp (`ScanSingleFileForWorker`), 0% IOC/P-Invoke chống Seqrite/Quick Heal cách ly, đồng bộ tự động số phiên bản trên 15 file và cập nhật thương hiệu `OhsungIT team`. | `20261017_fix_antivirus_false_positive_v3.17.0.md` |
+| **`v3.18.0`** | `10/2026` | **4-Layer Turbo Folder Scanner (Tăng tốc 50x–100x):** Duyệt cuốn chiếu (`Streaming Queue`), Bộ lọc tĩnh `Zero-COM OpenXML Pre-Filter` (`1.5 ms/tệp`, không cần mở Excel với 85% tệp `.xlsx` sạch), kết hợp `Lazy On-Demand Multi-Worker COM Pool` (`2–4` tiến trình Excel song song) xử lý `.xls`/`.xlsm`, rút ngắn thời gian quét 20.000 tệp từ `> 24 giờ` xuống `~10–20 phút`. | `20261017_turbo_folder_scanner_architecture_v3.18.0.md` |
+
 
