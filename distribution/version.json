@@ -1,9 +1,9 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-10-17 19:45:51",
+    "release_timestamp":  "2026-10-17 20:15:47",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
     "mandatory":  true,
-    "version":  "3.21.0",
+    "version":  "3.21.1",
     "release_date":  "2026-10-17",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
@@ -12,6 +12,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.21.0 - Executive Multi-Sheet Excel Report (1-Page A4 Dashboard) \u0026 Endpoint MAC Telemetry: Xuat bao cao Excel 6 Sheets (1_Dashboard_A4, 2_Thiet_Bi_Addin voi MAC PK, 3_Xep_Hang_Phong_Ban, 4_So_Cai_File_Nhiem voi Last Saved By \u0026 Re-infected, 5_Bien_The_Virus, 6_Lich_Su_Phat_Trien).",
+    "changelog":  "v3.21.1 - Zero-Restore-Popup Worker Guard \u0026 Executive Multi-Sheet Excel Report: Go dang ky Windows Application Restart (UnregisterApplicationRestart + SetErrorMode) tren Worker ngam va tu dong dong tuc thi moi tien trinh EXCEL.EXE /restore rong khong noi dung.",
     "hub_ip":  "192.168.223.7"
 }

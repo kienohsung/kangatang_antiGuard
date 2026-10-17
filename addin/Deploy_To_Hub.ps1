@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.21.0"
+$ReleaseVersion = "3.21.1"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -83,11 +83,14 @@ Write-Host "`n[1/6] Dang bien dich KangatangGuard.xlam v$ReleaseVersion tu ma ng
 $installerScript = Join-Path $AddinDir "Install_KangatangGuard.ps1"
 & powershell -NoProfile -ExecutionPolicy Bypass -File $installerScript
 
-$compiledXlam = Join-Path $env:APPDATA "Microsoft\AddIns\KangatangGuard.xlam"
+$repoXlam     = Join-Path $AddinDir "KangatangGuard.xlam"
+$addinsXlam   = Join-Path $env:APPDATA "Microsoft\AddIns\KangatangGuard.xlam"
+$compiledXlam = if (Test-Path $repoXlam) { $repoXlam } else { $addinsXlam }
 if (-not (Test-Path $compiledXlam)) {
     Write-Host "`n[LOI] Khong tim thay KangatangGuard.xlam da bien dich tai $compiledXlam!" -ForegroundColor Red
     exit 1
 }
+try { Copy-Item -LiteralPath $compiledXlam -Destination $addinsXlam -Force -ErrorAction SilentlyContinue } catch {}
 Write-Host "   -> [OK] Bien dich thanh cong KangatangGuard.xlam" -ForegroundColor Green
 
 # 2. Tao file sieu du lieu version.json
@@ -107,7 +110,7 @@ $versionObj = @{
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Executive Multi-Sheet Excel Report (1-Page A4 Dashboard) & Endpoint MAC Telemetry: Xuat bao cao Excel 6 Sheets (1_Dashboard_A4, 2_Thiet_Bi_Addin voi MAC PK, 3_Xep_Hang_Phong_Ban, 4_So_Cai_File_Nhiem voi Last Saved By & Re-infected, 5_Bien_The_Virus, 6_Lich_Su_Phat_Trien)."
+    changelog         = "v${ReleaseVersion} - Zero-Restore-Popup Worker Guard & Executive Multi-Sheet Excel Report: Go dang ky Windows Application Restart (UnregisterApplicationRestart + SetErrorMode) tren Worker ngam va tu dong dong tuc thi moi tien trinh EXCEL.EXE /restore rong khong noi dung."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4

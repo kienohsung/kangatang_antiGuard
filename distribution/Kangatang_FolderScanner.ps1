@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.21.0 (Detailed Project Audit Logging & Periodic Report Engine)
+# Phien ban: v3.21.1 (Detailed Project Audit Logging & Periodic Report Engine)
 # ==============================================================================
 
 param (
@@ -69,7 +69,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.21.0"
+$AppVersion = "3.21.1"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -262,7 +262,7 @@ if (-not $isResume) {
     try { [System.IO.File]::WriteAllText($scannedLogFile, "", [System.Text.Encoding]::Unicode) } catch {}
 }
 
-# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.21.0)
+# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.21.1)
 # Luu truc tiep vao thu muc du an D:\7. AI tools\kangatang\Scan_Reports (hoac \\192.168.223.176\test\Scan_Reports tu may tram LAN)
 $script:projectReportDir = if (Test-Path "D:\7. AI tools\kangatang") {
     "D:\7. AI tools\kangatang\Scan_Reports"
@@ -758,18 +758,16 @@ $workerScript = {
     }
 
     function Restart-LocalWorker {
+        if ($null -ne $script:excel -and $null -ne $script:wbAddin) {
+            try { $script:excel.Run("'$($script:wbAddin.Name)'!PrepareWorkerShutdown") | Out-Null } catch {}
+        }
         if ($null -ne $script:wbAddin) {
-            try { $script:wbAddin.Close($false) } catch {}
+            try { $script:wbAddin.Saved = $true } catch {}
             try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:wbAddin) } catch {}
             $script:wbAddin = $null
         }
         if ($null -ne $script:excel) {
-            try {
-                $script:excel.DisplayAlerts = $false
-                foreach ($w in @($script:excel.Workbooks)) {
-                    try { $w.Close($false) } catch {}
-                }
-            } catch {}
+            try { $script:excel.DisplayAlerts = $false } catch {}
             try { $script:excel.IgnoreRemoteRequests = $false } catch {}
             try { $script:excel.Quit() } catch {}
             try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:excel) } catch {}
@@ -838,7 +836,7 @@ $workerScript = {
                             $res = $purgeRes
                         }
                     }
-                    if ($processedCount -ge 350) {
+                    if ($processedCount -ge 2500) {
                         try { Restart-LocalWorker } catch {}
                         $processedCount = 0
                     }
@@ -862,17 +860,15 @@ $workerScript = {
             }
         }
     } finally {
+        if ($null -ne $script:excel -and $null -ne $script:wbAddin) {
+            try { $script:excel.Run("'$($script:wbAddin.Name)'!PrepareWorkerShutdown") | Out-Null } catch {}
+        }
         if ($null -ne $script:wbAddin) {
-            try { $script:wbAddin.Close($false) } catch {}
+            try { $script:wbAddin.Saved = $true } catch {}
             try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:wbAddin) } catch {}
         }
         if ($null -ne $script:excel) {
-            try {
-                $script:excel.DisplayAlerts = $false
-                foreach ($w in @($script:excel.Workbooks)) {
-                    try { $w.Close($false) } catch {}
-                }
-            } catch {}
+            try { $script:excel.DisplayAlerts = $false } catch {}
             try { $script:excel.IgnoreRemoteRequests = $false } catch {}
             try { $script:excel.Quit() } catch {}
             try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:excel) } catch {}
@@ -1451,7 +1447,7 @@ try {
     Write-Host "`n   [HOAN TAT] Qua trinh quet thu muc da ket thuc trong $totalSec giay!" -ForegroundColor Green
     Write-Host "   [BAO CAO]  $($script:latestMdPath)" -ForegroundColor Cyan
 
-    # v3.21.0: Tu dong dong bo va xuat Bao cao Quan tri Excel 6 Sheets (1-Page A4 Dashboard)
+    # v3.21.1: Tu dong dong bo va xuat Bao cao Quan tri Excel 6 Sheets (1-Page A4 Dashboard)
     $syncReportScript = Join-Path $PSScriptRoot "Sync_ScanReports.ps1"
     if (Test-Path -LiteralPath $syncReportScript) {
         try {

@@ -21,6 +21,18 @@ Private Sub Workbook_Open()
         Call InitWorkerMode
         Exit Sub
     End If
+    ' v3.21.1: Chan tuc thi cua so Excel trang (/restore) do Windows Error Reporting tu bat khi Worker ngam gap tep loi
+    If IsCurrentProcessRestoreMode() Then
+        Application.Visible = False
+        Application.ShowWindowsInTaskbar = False
+        Application.DisplayAlerts = False
+        Application.EnableEvents = False
+        Call CleanDocumentRecoveryRegistry
+        Application.OnTime Now, "'" & ThisWorkbook.Name & "'!ForceQuitRestoreInstance"
+        Call PurgeWorkerStrayRestoreProcesses
+        Application.Quit
+        Exit Sub
+    End If
     ' v3.16.0: Instant Zero-Spin Startup (< 5ms)
     Call InitializeGuard
     Application.OnTime Now + TimeValue("00:00:45"), "'" & ThisWorkbook.Name & "'!CheckForLanUpdatesSilent"
@@ -118,11 +130,21 @@ End Sub
 
 Option Explicit
 
-' --- Windows API de hien thi Unicode tieng Viet co dau sac net ---
+' --- Windows API de hien thi Unicode tieng Viet & Chong Windows Restart Manager tu bat Excel /restore ---
 #If VBA7 Then
     Private Declare PtrSafe Function MessageBoxW Lib "user32" (ByVal hwnd As LongPtr, ByVal lpText As LongPtr, ByVal lpCaption As LongPtr, ByVal uType As Long) As Long
+    Private Declare PtrSafe Function UnregisterApplicationRestart Lib "kernel32" () As Long
+    Private Declare PtrSafe Function SetErrorMode Lib "kernel32" (ByVal uMode As Long) As Long
+    Private Declare PtrSafe Function GetCommandLineW Lib "kernel32" () As LongPtr
+    Private Declare PtrSafe Function lstrlenW Lib "kernel32" (ByVal lpString As LongPtr) As Long
+    Private Declare PtrSafe Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (ByVal Destination As LongPtr, ByVal Source As LongPtr, ByVal Length As LongPtr)
 #Else
     Private Declare Function MessageBoxW Lib "user32" (ByVal hwnd As Long, ByVal lpText As Long, ByVal lpCaption As Long, ByVal uType As Long) As Long
+    Private Declare Function UnregisterApplicationRestart Lib "kernel32" () As Long
+    Private Declare Function SetErrorMode Lib "kernel32" (ByVal uMode As Long) As Long
+    Private Declare Function GetCommandLineW Lib "kernel32" () As Long
+    Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
+    Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (ByVal Destination As Long, ByVal Source As Long, ByVal Length As Long)
 #End If
 
 ' --- Bien toan cuc ---
@@ -135,7 +157,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.21.0"
+Public Const CURRENT_VERSION As String = "3.21.1"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -978,9 +1000,79 @@ End Sub
 ' va su dung thuat toan Two-Step Smart Open (ReadOnly=True de kiem tra sieu toc,
 ' chi mo ReadOnly=False khi tep thuc su nhiem virus)!
 ' ===========================================================================
+Public Function GetCurrentProcessCommandLine() As String
+    On Error Resume Next
+    #If VBA7 Then
+        Dim pCmd As LongPtr
+    #Else
+        Dim pCmd As Long
+    #End If
+    Dim nLen As Long
+    pCmd = GetCommandLineW()
+    If pCmd = 0 Then Exit Function
+    nLen = lstrlenW(pCmd)
+    If nLen <= 0 Or nLen > 8192 Then Exit Function
+    Dim buf As String
+    buf = Space$(nLen)
+    CopyMemory StrPtr(buf), pCmd, nLen * 2
+    GetCurrentProcessCommandLine = buf
+    Err.Clear
+End Function
+
+Public Function IsCurrentProcessRestoreMode() As Boolean
+    On Error Resume Next
+    Dim cmd As String
+    cmd = LCase$(GetCurrentProcessCommandLine())
+    If Len(cmd) > 0 Then
+        If InStr(1, cmd, "/restore", vbBinaryCompare) > 0 Or InStr(1, cmd, "-restore", vbBinaryCompare) > 0 Then
+            IsCurrentProcessRestoreMode = True
+        End If
+    End If
+    Err.Clear
+End Function
+
+Public Sub SuppressWorkerCrashRestart()
+    On Error Resume Next
+    Call UnregisterApplicationRestart
+    Call SetErrorMode(&H8003&) ' SEM_FAILCRITICALERRORS (1) Or SEM_NOGPFAULTERRORBOX (2) Or SEM_NOOPENFILEERRORBOX (&H8000)
+    Err.Clear
+End Sub
+
+Public Sub ForceQuitRestoreInstance()
+    On Error Resume Next
+    Call SuppressWorkerCrashRestart
+    Application.Visible = False
+    Application.ShowWindowsInTaskbar = False
+    Application.DisplayAlerts = False
+    Dim wb As Workbook
+    For Each wb In Application.Workbooks
+        If Not wb Is ThisWorkbook Then wb.Close SaveChanges:=False
+    Next wb
+    Call PurgeWorkerStrayRestoreProcesses
+    Application.Quit
+    Err.Clear
+End Sub
+
+Public Sub PrepareWorkerShutdown()
+    On Error Resume Next
+    bIsFolderScanning = True
+    Call SuppressWorkerCrashRestart
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+    Dim wb As Workbook
+    For Each wb In Application.Workbooks
+        If Not wb Is ThisWorkbook Then wb.Close SaveChanges:=False
+    Next wb
+    Call CleanDocumentRecoveryRegistry
+    Call ClearExcelIgnoreDdeRegistryBit
+    Call SuppressWorkerCrashRestart
+    Err.Clear
+End Sub
+
 Public Sub InitWorkerMode()
     On Error Resume Next
     bIsFolderScanning = True
+    Call SuppressWorkerCrashRestart
     If Not oAppEvents Is Nothing Then Set oAppEvents.xlApp = Nothing
     Set oAppEvents = Nothing
     Application.Visible = False
@@ -1003,6 +1095,8 @@ Public Sub InitWorkerMode()
     Call EnsureVbomRegistryEnabled
     Call NeutralizeVirusHooks
     Call CleanDocumentRecoveryRegistry
+    Call PurgeWorkerStrayRestoreProcesses
+    Call SuppressWorkerCrashRestart
     Err.Clear
 End Sub
 
@@ -1028,6 +1122,18 @@ End Sub
 
 Public Sub PurgeWorkerStrayRestoreProcesses()
     On Error Resume Next
+    Dim wmi As Object, procs As Object, proc As Object, cmd As String
+    Set wmi = GetObject("winmgmts:\\.\root\cimv2")
+    If wmi Is Nothing Then Exit Sub
+    Set procs = wmi.ExecQuery("Select ProcessId, CommandLine From Win32_Process Where Name = 'EXCEL.EXE'")
+    For Each proc In procs
+        cmd = LCase$( Trim$(CStr(proc.CommandLine & "")) )
+        If InStr(1, cmd, "/restore", vbBinaryCompare) > 0 Or InStr(1, cmd, "-restore", vbBinaryCompare) > 0 Then
+            proc.Terminate
+        End If
+    Next proc
+    Set procs = Nothing
+    Set wmi = Nothing
     Err.Clear
 End Sub
 
@@ -1042,6 +1148,7 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     
     bIsFolderScanning = True
     On Error Resume Next
+    Call SuppressWorkerCrashRestart
     If Not oAppEvents Is Nothing Then Set oAppEvents.xlApp = Nothing
     Application.Visible = False
     Application.ShowWindowsInTaskbar = False
@@ -1064,6 +1171,7 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     Set wbTarget = Application.Workbooks.Open(FileName:=filePath, UpdateLinks:=0, ReadOnly:=True, _
                                               Password:="", IgnoreReadOnlyRecommended:=True, _
                                               Notify:=False, AddToMru:=False)
+    Call SuppressWorkerCrashRestart
     If Err.Number <> 0 Or wbTarget Is Nothing Then
         ScanSingleFileForWorker = "SKIP|" & Err.Description
         Err.Clear
@@ -1079,6 +1187,7 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     If virusFound Then
         lastAuthor = GetWorkbookLastAuthor(wbTarget)
     End If
+    Call SuppressWorkerCrashRestart
     wbTarget.Close SaveChanges:=False
     Set wbTarget = Nothing
     
@@ -1096,6 +1205,7 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     Set wbTarget = Application.Workbooks.Open(FileName:=filePath, UpdateLinks:=0, ReadOnly:=False, _
                                               Password:="", WriteResPassword:="", _
                                               IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+    Call SuppressWorkerCrashRestart
     If Err.Number <> 0 Or wbTarget Is Nothing Then
         ScanSingleFileForWorker = "INFECTED_LOCKED|" & detailShort & "|||" & lastAuthor
         Err.Clear
@@ -1125,6 +1235,7 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     
     bPurgeDeferred = False
     cleanOk = CleanInfectedWorkbook(wbTarget, True, True)
+    Call SuppressWorkerCrashRestart
     wbTarget.Close SaveChanges:=False
     Set wbTarget = Nothing
     
@@ -1140,6 +1251,7 @@ WorkerFileErr:
     Dim errDesc As String
     errDesc = Err.Description
     On Error Resume Next
+    Call SuppressWorkerCrashRestart
     If Not wbTarget Is Nothing Then wbTarget.Close SaveChanges:=False
     Set wbTarget = Nothing
     ScanSingleFileForWorker = "SKIP|" & errDesc
@@ -1149,6 +1261,7 @@ End Function
 Public Sub WorkerDeleteOneModuleSheet(ByVal filePath As String)
     On Error Resume Next
     bIsFolderScanning = True
+    Call SuppressWorkerCrashRestart
     Application.EnableEvents = False
     Application.DisplayAlerts = False
     
@@ -1174,8 +1287,10 @@ Public Sub WorkerDeleteOneModuleSheet(ByVal filePath As String)
                 Call CollectThreatSample(wb, nm, "[Legacy Excel 5.0 Module Sheet: " & nm & "]", "LegacyModuleSheet")
                 WriteLog "[PURGE] Worker removing legacy module sheet '" & nm & "' from " & wb.FullName
                 Application.DisplayAlerts = False
+                Call SuppressWorkerCrashRestart
                 sh.Visible = -1
                 sh.Delete
+                Call SuppressWorkerCrashRestart
                 Exit Sub
             End If
         End If
@@ -1185,6 +1300,7 @@ End Sub
 Public Function WorkerFinishCleanAndClose(ByVal filePath As String) As String
     On Error Resume Next
     Call InitWorkerMode
+    Call SuppressWorkerCrashRestart
     
     Dim wb As Workbook, cleanOk As Boolean
     Set wb = FindOpenWorkbookByPath(filePath)
@@ -1200,6 +1316,7 @@ Public Function WorkerFinishCleanAndClose(ByVal filePath As String) As String
     
     bPurgeDeferred = False
     cleanOk = CleanInfectedWorkbook(wb, True, True)
+    Call SuppressWorkerCrashRestart
     wb.Close SaveChanges:=False
     Set wb = Nothing
     

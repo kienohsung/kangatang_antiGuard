@@ -6,7 +6,7 @@
 
 ## 1. THÔNG TIN PHIÊN BẢN & HẠ TẦNG MẠNG LAN (CRITICAL TOPOLOGY)
 
-- **Phiên bản hiện tại:** `v3.21.0` (`Executive Multi-Sheet Excel Report [1-Page A4 Dashboard] + Endpoint MAC Telemetry + Last Saved By Forensics`)
+- **Phiên bản hiện tại:** `v3.21.1` (`Zero-Restore-Popup Worker Guard [UnregisterApplicationRestart + SetErrorMode + GetCommandLineW] + 6-Sheet Executive Excel Report + Endpoint MAC Telemetry`)
 - **Phân tách vai trò 2 máy chủ LAN (BẤT BIẾN):**
   | Máy chủ | Đường dẫn UNC / Local | Vai trò duy nhất | Quy tắc CẤM (Hard Constraint) |
   | :--- | :--- | :--- | :--- |

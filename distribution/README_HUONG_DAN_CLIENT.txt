@@ -1,5 +1,5 @@
 ==============================================================================
-   HƯỚNG DẪN SỬ DỤNG BỘ CÔNG CỤ DIỆT VIRUS EXCEL KANGATANG (v3.21.0)
+   HƯỚNG DẪN SỬ DỤNG BỘ CÔNG CỤ DIỆT VIRUS EXCEL KANGATANG (v3.21.1)
    Máy chủ Tệp Trung tâm: \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang
 ==============================================================================
 
@@ -32,7 +32,7 @@ CÁCH 2: CHẠY QUÉT ĐỘC LẬP (DÀNH CHO MÁY KHÔNG CÀI ĐƯỢC ADD-IN)
 3. Chọn thư mục cần quét trên hộp thoại để chương trình tự động kiểm tra và diệt sạch.
 
 * LƯU Ý:
-- Phiên bản v3.21.0 tích hợp 100% Native VBA Folder Scanner bên trong KangatangGuard.xlam,
+- Phiên bản v3.21.1 tích hợp 100% Native VBA Folder Scanner bên trong KangatangGuard.xlam,
   hoàn toàn tương thích với mọi phần mềm Antivirus/EDR (Seqrite Endpoint Security / Quick Heal).
 - Mọi tệp nhiễm virus trước khi xử lý đều được tự động sao lưu cách ly an toàn về máy chủ 192.168.223.176.
 ==============================================================================
