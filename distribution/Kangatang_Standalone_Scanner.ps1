@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_Standalone_Scanner.ps1
-# Trinh Quet & Diet Virus Macro Excel Doc Lap (Standalone Wrapper v3.17.2)
-# Phien ban: v3.17.2 (Unified Version Sync & Antivirus-Safe Pure COM Wrapper)
+# Trinh Quet & Diet Virus Macro Excel Doc Lap (Standalone Wrapper v3.17.3)
+# Phien ban: v3.17.3 (Real-Time Streaming Console & 100% Antivirus-Safe)
 # ==============================================================================
 
 param (
@@ -19,8 +19,7 @@ $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
-# Dong bo phien ban dong tu version.json hoac Registry InstalledVersion (khong bao gio lech phien ban voi Add-in)
-$AppVersion = "3.17.2"
+$AppVersion = "3.17.3"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -38,9 +37,9 @@ $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion - Trinh Diet Virus Exc
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD v$AppVersion - STANDALONE SCANNER (ANTIVIRUS-SAFE) " -ForegroundColor Cyan
+Write-Host "   Day la addin phong chong virus kangatang - Phat trien boi OhsungIT team !" -ForegroundColor White
 Write-Host "======================================================================" -ForegroundColor Cyan
 
-# 1. Dam bao AccessVBOM = 1 trong Registry HKCU
 foreach ($ver in @("16.0", "15.0", "14.0", "12.0")) {
     $secPath = "HKCU:\Software\Microsoft\Office\$ver\Excel\Security"
     if (Test-Path $secPath) {
@@ -48,10 +47,6 @@ foreach ($ver in @("16.0", "15.0", "14.0", "12.0")) {
     }
 }
 
-$logDir = Join-Path $env:APPDATA "KangatangGuard"
-$lastSessionFile = Join-Path $logDir "last_session.json"
-
-# 2. Xac dinh duong dan KangatangGuard.xlam
 $xlamCandidates = @(
     (Join-Path $ScriptDir "KangatangGuard.xlam"),
     (Join-Path $env:APPDATA "Microsoft\AddIns\KangatangGuard.xlam"),
@@ -59,7 +54,7 @@ $xlamCandidates = @(
 )
 $xlamPath = $null
 foreach ($c in $xlamCandidates) {
-    if ($c -and (Test-Path $c)) {
+    if ($c -and (Test-Path -LiteralPath $c)) {
         $xlamPath = $c
         break
     }
@@ -70,49 +65,18 @@ if (-not $xlamPath) {
     exit 1
 }
 
-if (-not $CleanSystemOnly) {
-    if ($Resume -and (-not $TargetFolder) -and (Test-Path $lastSessionFile)) {
-        try {
-            $meta = Get-Content -Path $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ($meta.TargetFolder) { $TargetFolder = $meta.TargetFolder }
-        } catch {}
-    }
-
-    if (-not $TargetFolder) {
-        Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
-        $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-        $dlg.Description = "KangatangGuard v$AppVersion - Chon thu muc can quet:"
-        $dlg.ShowNewFolderButton = $false
-        if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-            $TargetFolder = $dlg.SelectedPath
-        } else {
-            Write-Host "`n[HUY] Nguoi dung da huy chon thu muc." -ForegroundColor Yellow
-            exit 0
-        }
-    }
-}
-
-Write-Host "`n[1/2] Dang khoi tao Engine KangatangGuard.xlam (v$AppVersion)..." -ForegroundColor Yellow
+Write-Host "`n[BUOC 1] Dang quet & lam sach thu muc khoi dong Excel (XLSTART & Startup Vaccine)..." -ForegroundColor Yellow
 $excel = $null
 try {
     $excel = New-Object -ComObject Excel.Application
     $excel.Visible = $false
     $excel.DisplayAlerts = $false
     $wbAddin = $excel.Workbooks.Open($xlamPath, 0, $true)
-    $excel.Run("'$($wbAddin.Name)'!ShieldStartupSweep")
-    if (-not $CleanSystemOnly -and $TargetFolder) {
-        Write-Host "[2/2] Dang quet thu muc (v$AppVersion): $TargetFolder ..." -ForegroundColor Yellow
-        $excel.Run("'$($wbAddin.Name)'!RunNativeFolderScan", [string]$TargetFolder, [bool]$Resume, $true)
-        if (Test-Path $lastSessionFile) {
-            $resMeta = Get-Content -Path $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
-            Write-Host "`n[HOAN TAT - v$AppVersion] Tong so tep: $($resMeta.TotalFiles) | Da quet: $($resMeta.TotalScanned) | Da lam sach: $($resMeta.TotalCleaned)" -ForegroundColor Green
-        }
-    } else {
-        Write-Host "[2/2] Da hoan tat quet va bao ve he thong khoi dong Excel (v$AppVersion)." -ForegroundColor Green
-    }
+    $excel.Run("'$($wbAddin.Name)'!ShieldStartupSweep") | Out-Null
     $wbAddin.Close($false)
+    Write-Host "   -> [OK] Da bao ve thu muc khoi dong Excel thanh cong!" -ForegroundColor Green
 } catch {
-    Write-Host "`n[LOI] Loi khi thuc thi: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "   -> [CANH BAO] Loi khi quet he thong khoi dong: $($_.Exception.Message)" -ForegroundColor Yellow
 } finally {
     if ($null -ne $excel) {
         try { $excel.Quit() } catch {}
@@ -120,4 +84,21 @@ try {
     }
     [System.GC]::Collect()
     [System.GC]::WaitForPendingFinalizers()
+}
+
+if ($CleanSystemOnly) {
+    exit 0
+}
+
+$folderScannerPath = Join-Path $ScriptDir "Kangatang_FolderScanner.ps1"
+if (-not (Test-Path -LiteralPath $folderScannerPath)) {
+    $folderScannerPath = Join-Path $env:APPDATA "Microsoft\AddIns\Kangatang_FolderScanner.ps1"
+}
+
+if (Test-Path -LiteralPath $folderScannerPath) {
+    if ($Resume) {
+        & $folderScannerPath -TargetFolder $TargetFolder -Resume
+    } else {
+        & $folderScannerPath -TargetFolder $TargetFolder
+    }
 }

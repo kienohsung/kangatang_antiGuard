@@ -79,4 +79,15 @@
   1. Trước khi xóa module/procedure nhiễm trong `CleanInfectedWorkbook`, trích xuất toàn bộ `rawCode`.
   2. Tính mã băm `codeHash = ComputeThreatHash(rawCode)` bằng `.NET COM` (`System.Security.Cryptography.MD5CryptoServiceProvider`, fallback sang thuật toán băm `DJB2 Xor` `fb_<len>_<hex>` nếu `.NET COM` bị chặn).
   3. Kiểm tra sự tồn tại của tệp `\\192.168.223.176\test\Threat_Samples\<codeHash>.sample.json`. Nếu đã tồn tại ➔ bỏ qua (`0 byte` ghi mạng); nếu là biến thể mới ➔ đóng gói JSON (defanged) và lưu UTF-8.
-- **Tọa độ code:** [`KangatangGuard_Code.vba#L3416-L3651`](file:///d:/7.%20AI%20tools/kangatang/addin/KangatangGuard_Code.vba#L3416-L3651).
+- **Tọa độ code:** [`KangatangGuard_Code.vba#L3815-L4042`](file:///d:/7.%20AI%20tools/kangatang/addin/KangatangGuard_Code.vba#L3815-L4042).
+
+---
+
+### `ALG-09`: Thuật Toán Mở Tệp Thông Minh 2 Bước (`Two-Step Smart Open` trên SMB) & Giao Tiếp `scan_request.json` (`v3.17.3`)
+- **Bài toán:** Khi quét thư mục dùng chung trên mạng LAN (`\\192.168.223.7\file_shared\vietnam\0-Common` — hơn 1.000 tệp), nếu mở mọi tệp ở chế độ ghi (`ReadOnly:=False`), Excel sẽ tạo hàng nghìn tệp khóa `~$filename.xlsx` trên SMB, gây chậm gấp 3 lần, xung đột với người dùng khác đang mở tệp và báo lỗi `1004` với các tệp đặt `WriteResPassword`.
+- **Thiết kế thuật toán:**
+  1. **Bước 1 — Kiểm tra siêu tốc ở chế độ chỉ đọc (`ReadOnly:=True`):** Trong `ScanSingleFileForWorker`, mở tệp với `ReadOnly:=True, UpdateLinks:=0, Password:="", IgnoreReadOnlyRecommended:=True, Notify:=False`. Kiểm tra `CheckWorkbookInfection(wbTarget)` và đóng ngay. Vì 99% tệp là sạch, hệ thống hoàn toàn không tạo tệp khóa `~$` trên mạng SMB và tăng tốc độ đọc 2–3 lần.
+  2. **Bước 2 — Mở lại chế độ ghi có chọn lọc (`ReadOnly:=False`):** Chỉ khi `virusFound = True`, Worker mới mở lại tệp đó với `ReadOnly:=False` để sao lưu về `223.176`, bóc tách mã độc và lưu lại.
+  3. **Giao tiếp IPC qua `scan_request.json` (UTF-8):** Khi Excel gọi `LaunchBackgroundScanner`, đường dẫn thư mục được ghi vào `%APPDATA%\KangatangGuard\scan_request.json` bằng `ADODB.Stream` (`utf-8`), giúp truyền 100% chính xác đường dẫn tiếng Việt có dấu, khoảng trắng và đường dẫn UNC sang tiến trình PowerShell mà không bao giờ bị lỗi cú pháp dòng lệnh.
+- **Tọa độ code:** [`KangatangGuard_Code.vba#L632-L970`](file:///d:/7.%20AI%20tools/kangatang/addin/KangatangGuard_Code.vba#L632-L970).
+

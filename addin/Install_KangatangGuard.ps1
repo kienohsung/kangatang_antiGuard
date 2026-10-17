@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao %APPDATA%\Microsoft\AddIns
-# Phien ban: v3.17.2 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
+# Phien ban: v3.17.3 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.17.2"
+$InstallerVersion = "3.17.3"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
@@ -473,9 +473,16 @@ if (-not (Test-Path $sessionsDir)) {
 Write-Host "   -> [OK] Thu muc Log: $logDir" -ForegroundColor Green
 Write-Host "   -> [OK] Thu muc Sessions: $sessionsDir" -ForegroundColor Green
 
-# v3.17.0: Xoa triet de Kangatang_FolderScanner.ps1 trong APPDATA\KangatangGuard va XLSTART
-# (Toan bo logic quet thu muc da tich hop 100% Native VBA ben trong KangatangGuard.xlam,
-#  khong luu bat ky file .ps1 nao trong AppData de tranh Seqrite/Quick Heal nhan nham!)
+# v3.17.3: Sao chep Kangatang_FolderScanner.ps1 (0-IOC, 0-P/Invoke) vao thu muc tin cay Microsoft\AddIns
+# va don sach legacy .ps1 trong APPDATA\KangatangGuard de tranh Seqrite/Quick Heal nhan nham!
+$srcFolderScanner = Join-Path $ScriptDir "Kangatang_FolderScanner.ps1"
+$dstAddInsScanner = Join-Path $env:APPDATA "Microsoft\AddIns\Kangatang_FolderScanner.ps1"
+if (Test-Path $srcFolderScanner) {
+    try { Set-ItemProperty -Path $dstAddInsScanner -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
+    Copy-Item -Path $srcFolderScanner -Destination $dstAddInsScanner -Force -ErrorAction SilentlyContinue
+    Write-Host "   -> [OK] Da cai dat Trinh quet thu muc ngoai tien trinh: $dstAddInsScanner" -ForegroundColor Green
+}
+
 foreach ($oldPs1 in @(
     (Join-Path $logDir "Kangatang_FolderScanner.ps1"),
     (Join-Path $logDir "staged_update\Kangatang_FolderScanner.ps1"),

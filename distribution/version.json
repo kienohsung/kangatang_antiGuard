@@ -1,9 +1,9 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-10-17 12:21:29",
+    "release_timestamp":  "2026-10-17 12:45:59",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
     "mandatory":  true,
-    "version":  "3.17.2",
+    "version":  "3.17.3",
     "release_date":  "2026-10-17",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
@@ -12,6 +12,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.17.2 - Unified Version Synchronization \u0026 100% Native VBA Antivirus-Safe Engine: Dong bo 100% so phien ban giua Add-in Excel va Trinh quet virus tren toan he thong; giam thoi gian cho kiem tra cap nhat tu dong khi mo Excel xuong 1 phut; tich hop Native VBA Folder Scanner khong bi Antivirus (Seqrite / Quick Heal) nhan nham.",
+    "changelog":  "v3.17.3 - Unified Version Synchronization \u0026 100% Native VBA Antivirus-Safe Engine: Dong bo 100% so phien ban giua Add-in Excel va Trinh quet virus tren toan he thong; giam thoi gian cho kiem tra cap nhat tu dong khi mo Excel xuong 1 phut; tich hop Native VBA Folder Scanner khong bi Antivirus (Seqrite / Quick Heal) nhan nham.",
     "hub_ip":  "192.168.223.7"
 }

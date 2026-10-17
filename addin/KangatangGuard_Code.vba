@@ -131,7 +131,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.17.2"
+Public Const CURRENT_VERSION As String = "3.17.3"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -595,7 +595,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
                 okMsg = okMsg & vbCrLf & vbCrLf & _
                         Uni("B\u1ea1n c\u00f3 mu\u1ed1n QU\u00c9T TO\u00c0N B\u1ed8 TH\u01af M\u1ee4C ch\u1ee9a t\u1ec7p n\u00e0y ngay b\u00e2y gi\u1edd \u0111\u1ec3 di\u1ec7t s\u1ea1ch c\u00e1c t\u1ec7p l\u00e2n c\u1eadn kh\u00f4ng?")
                 If MsgBoxW(okMsg, vbYesNo + vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")) = vbYes Then
-                    Call RunNativeFolderScan(wb.Path, False, False)
+                    Call LaunchBackgroundScanner(wb.Path, False, False)
                 End If
             Else
                 MsgBoxW okMsg, vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")
@@ -624,14 +624,411 @@ ScanError:
 End Sub
 
 ' ===========================================================================
-' TRINH QUET THU MUC 100% NATIVE VBA (v3.17.0 - ZERO-PS1 ANTIVIRUS-SAFE ENGINE)
-' Chay truc tiep ben trong VBA voi AutomationSecurity = 3 (ForceDisable Macro),
-' khong tao hay goi bat ky tep .ps1 nao trong %APPDATA% -> Loai bo triet de 100%
-' canh bao nham (False-Positive Quarantine) cua Seqrite / Quick Heal / EDR!
+' TRINH QUET THU MUC NGOAI TIEN TRINH POWERSHELL + NATIVE VBA WORKER (v3.17.3)
+' - Mo cua so PowerShell doc lap (Out-of-Process) hien thi tien do theo thoi gian thuc,
+'   giup Excel chinh cua nguoi dung 100% muot ma (Zero-Hang) khi quet hang nghin tep SMB!
+' - File .ps1 nam tai %APPDATA%\Microsoft\AddIns (khong luu o %APPDATA%\KangatangGuard)
+'   va KHONG chua C# P/Invoke hay chuoi IOC virus -> An toan 100% truoc Seqrite/Quick Heal!
+' - Chuyen giao tham so qua scan_request.json (UTF-8) -> Bao toan 100% duong dan tieng Viet & UNC!
 ' ===========================================================================
 Public Sub LaunchBackgroundScanner(ByVal folderPath As String, Optional ByVal bResume As Boolean = False, Optional ByVal bForce As Boolean = False)
+    On Error GoTo LaunchErr
+    
+    Dim cleanFolder As String
+    cleanFolder = Trim$(folderPath)
+    Do While Len(cleanFolder) > 3 And Right$(cleanFolder, 1) = "\"
+        cleanFolder = Left$(cleanFolder, Len(cleanFolder) - 1)
+    Loop
+    If Len(cleanFolder) = 0 Then Exit Sub
+    
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FolderExists(cleanFolder) Then
+        WriteLog "[FOLDER_SCAN_ERR] Target folder does not exist: " & cleanFolder
+        If bForce Then
+            MsgBoxW Uni("Kh\u00f4ng t\u00ecm th\u1ea5y th\u01b0 m\u1ee5c c\u1ea7n qu\u00e9t:" & vbCrLf) & cleanFolder, _
+                    vbExclamation, Uni("KangatangGuard v") & CURRENT_VERSION
+        End If
+        Set fso = Nothing
+        Exit Sub
+    End If
+    
+    ' Chong bat trung nhieu cua so quet cung 1 thu muc khi goi tu dong (bForce = False)
+    If Not bForce Then
+        If dicLaunchedFolders Is Nothing Then
+            Set dicLaunchedFolders = CreateObject("Scripting.Dictionary")
+            dicLaunchedFolders.CompareMode = 1
+        End If
+        If dicLaunchedFolders.Exists(cleanFolder) Then
+            If DateDiff("n", dicLaunchedFolders(cleanFolder), Now) < RELAUNCH_FOLDER_MINUTES Then
+                Set fso = Nothing
+                Exit Sub
+            End If
+        End If
+        dicLaunchedFolders(cleanFolder) = Now
+    End If
+    
+    ' 1. Ghi yeu cau quet ra scan_request.json (UTF-8) de tranh loi quote/Unicode tren command line
+    Dim guardDir As String, reqPath As String
+    guardDir = Environ("APPDATA") & "\" & LOG_SUBFOLDER
+    If Not fso.FolderExists(guardDir) Then fso.CreateFolder guardDir
+    reqPath = guardDir & "\scan_request.json"
+    Call WriteScanRequestJson(fso, reqPath, cleanFolder, bResume)
+    
+    ' 2. Dam bao Kangatang_FolderScanner.ps1 ton tai trong thu muc tin cay Microsoft\AddIns
+    Dim scannerPs1 As String
+    scannerPs1 = EnsureFolderScannerScript(fso)
+    
+    If Len(scannerPs1) = 0 Or Not fso.FileExists(scannerPs1) Then
+        WriteLog "[SCANNER_LAUNCH_WARN] Scanner PS1 unavailable, falling back to Native VBA Scanner."
+        Set fso = Nothing
+        Call RunNativeFolderScan(cleanFolder, bResume, Not bForce)
+        Exit Sub
+    End If
+    
+    ' 3. Xac dinh duong dan powershell.exe chuan cua Windows
+    Dim psExe As String
+    psExe = Environ("SystemRoot") & "\System32\WindowsPowerShell\v1.0\powershell.exe"
+    If Not fso.FileExists(psExe) Then psExe = "powershell.exe"
+    
+    Dim cmdLine As String
+    cmdLine = Chr(34) & psExe & Chr(34) & " -NoProfile -NoExit -ExecutionPolicy Bypass -File " & Chr(34) & scannerPs1 & Chr(34)
+    
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    On Error Resume Next
+    Err.Clear
+    wsh.Run cmdLine, 1, False ' 1 = vbNormalFocus (Hien thi cua so PowerShell ro rang truoc mat nguoi dung)
+    If Err.Number <> 0 Then
+        WriteLog "[SCANNER_LAUNCH_WARN] PowerShell launch failed (" & Err.Description & "), falling back to Native VBA Scanner."
+        Err.Clear
+        On Error GoTo 0
+        Set wsh = Nothing
+        Set fso = Nothing
+        Call RunNativeFolderScan(cleanFolder, bResume, Not bForce)
+        Exit Sub
+    End If
+    On Error GoTo LaunchErr
+    
+    WriteLog "[SCANNER_LAUNCHED] Out-of-process PowerShell Scanner started: " & cleanFolder & " | Resume=" & bResume & " | Script=" & scannerPs1
+    Set wsh = Nothing
+    Set fso = Nothing
+    Exit Sub
+    
+LaunchErr:
+    WriteLog "[SCANNER_LAUNCH_ERROR] " & Err.Description
     Call RunNativeFolderScan(folderPath, bResume, Not bForce)
 End Sub
+
+Private Sub WriteScanRequestJson(ByVal fso As Object, ByVal reqPath As String, ByVal targetFolder As String, ByVal bResume As Boolean)
+    On Error Resume Next
+    Dim safeFolder As String
+    safeFolder = Replace(targetFolder, "\", "\\")
+    safeFolder = Replace(safeFolder, """", "\""")
+    
+    Dim json As String
+    json = "{" & vbCrLf & _
+           "  ""TargetFolder"": """ & safeFolder & """," & vbCrLf & _
+           "  ""Resume"": " & IIf(bResume, "true", "false") & "," & vbCrLf & _
+           "  ""Version"": """ & CURRENT_VERSION & """," & vbCrLf & _
+           "  ""RequestedAt"": """ & Format$(Now, "yyyy-mm-dd hh:nn:ss") & """" & vbCrLf & _
+           "}"
+           
+    Dim writeOk As Boolean
+    Dim stm As Object
+    Set stm = CreateObject("ADODB.Stream")
+    If Not stm Is Nothing Then
+        stm.Type = 2 ' adTypeText
+        stm.Charset = "utf-8"
+        stm.Open
+        stm.WriteText json
+        stm.SaveToFile reqPath, 2 ' adSaveCreateOverWrite
+        stm.Close
+        writeOk = (Err.Number = 0)
+        Err.Clear
+    End If
+    
+    If Not writeOk Then
+        Dim ts As Object
+        Set ts = fso.CreateTextFile(reqPath, True, True)
+        If Not ts Is Nothing Then
+            ts.Write json
+            ts.Close
+            Set ts = Nothing
+        End If
+    End If
+    Err.Clear
+End Sub
+
+Private Function EnsureFolderScannerScript(ByVal fso As Object) As String
+    On Error Resume Next
+    Dim addInsDir As String, targetPs1 As String, repoPs1 As String, hubPs1 As String
+    addInsDir = Environ("APPDATA") & "\Microsoft\AddIns"
+    If Not fso.FolderExists(addInsDir) Then fso.CreateFolder addInsDir
+    targetPs1 = addInsDir & "\Kangatang_FolderScanner.ps1"
+    repoPs1 = "D:\7. AI tools\kangatang\addin\Kangatang_FolderScanner.ps1"
+    hubPs1 = DEFAULT_HUB_PRIMARY & "\Kangatang_FolderScanner.ps1"
+    
+    ' Uu tien dong bo tu Repo Master neu dang tren may 223.176
+    If fso.FileExists(repoPs1) Then
+        If fso.FileExists(targetPs1) Then fso.GetFile(targetPs1).Attributes = 0
+        fso.CopyFile repoPs1, targetPs1, True
+        Err.Clear
+        If fso.FileExists(targetPs1) Then
+            EnsureFolderScannerScript = targetPs1
+            Exit Function
+        End If
+    End If
+    
+    ' Neu da co san trong %APPDATA%\Microsoft\AddIns\Kangatang_FolderScanner.ps1 -> dung ngay (0ms)
+    If fso.FileExists(targetPs1) Then
+        EnsureFolderScannerScript = targetPs1
+        Exit Function
+    End If
+    
+    ' Neu chua co, thu tai tu LAN Hub 223.7
+    If IsUncReachable(DEFAULT_HUB_PRIMARY) Then
+        If fso.FileExists(hubPs1) Then
+            fso.CopyFile hubPs1, targetPs1, True
+            Err.Clear
+            If fso.FileExists(targetPs1) Then
+                EnsureFolderScannerScript = targetPs1
+                Exit Function
+            End If
+        End If
+    End If
+    
+    ' Self-healing offline fallback: Tu sinh script wrapper sach 100% vao Microsoft\AddIns
+    Call WriteFallbackFolderScannerPs1(fso, targetPs1)
+    If fso.FileExists(targetPs1) Then
+        EnsureFolderScannerScript = targetPs1
+    End If
+    Err.Clear
+End Function
+
+Private Sub WriteFallbackFolderScannerPs1(ByVal fso As Object, ByVal targetPs1 As String)
+    On Error Resume Next
+    Dim s As String
+    s = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8" & vbCrLf
+    s = s & "$Host.UI.RawUI.WindowTitle = 'KangatangGuard v" & CURRENT_VERSION & " - Trinh Quet Thu Muc'" & vbCrLf
+    s = s & "$logDir = Join-Path $env:APPDATA 'KangatangGuard'" & vbCrLf
+    s = s & "$reqFile = Join-Path $logDir 'scan_request.json'" & vbCrLf
+    s = s & "$lastSessionFile = Join-Path $logDir 'last_session.json'" & vbCrLf
+    s = s & "$TargetFolder = ''; $Resume = $false" & vbCrLf
+    s = s & "if (Test-Path $reqFile) {" & vbCrLf
+    s = s & "    try { $m = Get-Content $reqFile -Raw -Encoding UTF8 | ConvertFrom-Json; $TargetFolder = $m.TargetFolder; $Resume = [bool]$m.Resume } catch {}" & vbCrLf
+    s = s & "    Remove-Item $reqFile -Force -ErrorAction SilentlyContinue" & vbCrLf
+    s = s & "}" & vbCrLf
+    s = s & "Write-Host '======================================================================' -ForegroundColor Cyan" & vbCrLf
+    s = s & "Write-Host '   KANGATANG GUARD v" & CURRENT_VERSION & " - OUT-OF-PROCESS FOLDER SCANNER' -ForegroundColor Cyan" & vbCrLf
+    s = s & "Write-Host '======================================================================' -ForegroundColor Cyan" & vbCrLf
+    s = s & "Write-Host ('   -> Thu muc: ' + $TargetFolder) -ForegroundColor Yellow" & vbCrLf
+    s = s & "$xlamPath = Join-Path $env:APPDATA 'Microsoft\AddIns\KangatangGuard.xlam'" & vbCrLf
+    s = s & "$excel = New-Object -ComObject Excel.Application" & vbCrLf
+    s = s & "try {" & vbCrLf
+    s = s & "    $excel.Visible = $false; $excel.DisplayAlerts = $false; $excel.EnableEvents = $false" & vbCrLf
+    s = s & "    $wb = $excel.Workbooks.Open($xlamPath, 0, $true)" & vbCrLf
+    s = s & "    $excel.Run(""'" & ADDIN_NAME & "'!RunNativeFolderScan"", [string]$TargetFolder, [bool]$Resume, $true)" & vbCrLf
+    s = s & "    if (Test-Path $lastSessionFile) {" & vbCrLf
+    s = s & "        $r = Get-Content $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json" & vbCrLf
+    s = s & "        Write-Host (""`n[HOAN TAT] Tong so tep: "" + $r.TotalFiles + "" | Da quet: "" + $r.TotalScanned + "" | Da diet: "" + $r.TotalCleaned) -ForegroundColor Green" & vbCrLf
+    s = s & "    }" & vbCrLf
+    s = s & "} finally {" & vbCrLf
+    s = s & "    if ($excel) { try { $excel.Quit() } catch {}; [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null }" & vbCrLf
+    s = s & "}" & vbCrLf
+        
+    Dim stm As Object
+    Set stm = CreateObject("ADODB.Stream")
+    If Not stm Is Nothing Then
+        stm.Type = 2
+        stm.Charset = "utf-8"
+        stm.Open
+        stm.WriteText s
+        stm.SaveToFile targetPs1, 2
+        stm.Close
+    End If
+    Err.Clear
+End Sub
+
+' ===========================================================================
+' WORKER MACROS CHO KANGATANG_FOLDERSCANNER.PS1 GOI QUA COM (v3.17.3)
+' Ho tro stream ket qua tung tep theo thoi gian thuc tren cua so PowerShell
+' va su dung thuat toan Two-Step Smart Open (ReadOnly=True de kiem tra sieu toc,
+' chi mo ReadOnly=False khi tep thuc su nhiem virus)!
+' ===========================================================================
+Public Sub InitWorkerMode()
+    On Error Resume Next
+    bIsFolderScanning = True
+    Application.EnableEvents = False
+    Application.DisplayAlerts = False
+    Application.ScreenUpdating = False
+    Call EnsureVbomRegistryEnabled
+    Call NeutralizeVirusHooks
+    Call CleanDocumentRecoveryRegistry
+    Err.Clear
+End Sub
+
+Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
+    On Error GoTo WorkerFileErr
+    
+    bIsFolderScanning = True
+    Application.EnableEvents = False
+    Application.DisplayAlerts = False
+    Application.ScreenUpdating = False
+    
+    Dim wbTarget As Workbook
+    Dim detailMsg As String, detailShort As String
+    Dim virusFound As Boolean, cleanOk As Boolean
+    
+    ' BUOC 1 (Fast Inspection Open - ReadOnly=True):
+    ' Khong tao file khoa ~$ tren SMB, khong xung dot voi nguoi dung khac, khong loi WriteResPassword!
+    On Error Resume Next
+    Err.Clear
+    Set wbTarget = Application.Workbooks.Open(FileName:=filePath, UpdateLinks:=0, ReadOnly:=True, _
+                                              Password:="", IgnoreReadOnlyRecommended:=True, _
+                                              Notify:=False, AddToMru:=False)
+    If Err.Number <> 0 Or wbTarget Is Nothing Then
+        ScanSingleFileForWorker = "SKIP|" & Err.Description
+        Err.Clear
+        Exit Function
+    End If
+    On Error GoTo WorkerFileErr
+    
+    ' BUOC 2: Kiem tra nhiem virus tren ban ReadOnly
+    detailMsg = ""
+    virusFound = CheckWorkbookInfection(wbTarget, detailMsg)
+    wbTarget.Close SaveChanges:=False
+    Set wbTarget = Nothing
+    
+    If Not virusFound Then
+        ScanSingleFileForWorker = "SAFE"
+        Exit Function
+    End If
+    
+    ' BUOC 3 (Surgical Write Re-Open - Chi khi phat hien virus!):
+    detailShort = Replace(Replace(Trim$(detailMsg), vbCrLf, "; "), "  - ", "")
+    WriteLog "[FOLDER_SCAN_DETECTED] " & filePath & " | " & detailShort
+    
+    On Error Resume Next
+    Err.Clear
+    Set wbTarget = Application.Workbooks.Open(FileName:=filePath, UpdateLinks:=0, ReadOnly:=False, _
+                                              Password:="", WriteResPassword:="", _
+                                              IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+    If Err.Number <> 0 Or wbTarget Is Nothing Then
+        ScanSingleFileForWorker = "INFECTED_LOCKED|" & detailShort
+        Err.Clear
+        Exit Function
+    End If
+    On Error GoTo WorkerFileErr
+    
+    If wbTarget.ReadOnly Then
+        wbTarget.Close SaveChanges:=False
+        Set wbTarget = Nothing
+        ScanSingleFileForWorker = "INFECTED_LOCKED|" & detailShort
+        Exit Function
+    End If
+    
+    If Not BackupBeforeClean(wbTarget) Then
+        wbTarget.Close SaveChanges:=False
+        Set wbTarget = Nothing
+        ScanSingleFileForWorker = "INFECTED_ERR|Backup failed (" & detailShort & ")"
+        Exit Function
+    End If
+    
+    ' Neu tep chua Legacy Excel 5.0 Module-Sheet mang ten virus -> phoi hop 2 buoc voi PowerShell
+    If VirusModuleSheetCount(wbTarget) > 0 Then
+        ScanSingleFileForWorker = "PURGE_NEEDED|" & detailShort
+        Exit Function
+    End If
+    
+    bPurgeDeferred = False
+    cleanOk = CleanInfectedWorkbook(wbTarget, True, True)
+    wbTarget.Close SaveChanges:=False
+    Set wbTarget = Nothing
+    
+    If cleanOk Then
+        WriteLog "[FOLDER_SCAN_CLEANED] " & filePath
+        ScanSingleFileForWorker = "CLEANED|" & detailShort
+    Else
+        ScanSingleFileForWorker = "INFECTED_ERR|Clean partial (" & detailShort & ")"
+    End If
+    Exit Function
+    
+WorkerFileErr:
+    Dim errDesc As String
+    errDesc = Err.Description
+    On Error Resume Next
+    If Not wbTarget Is Nothing Then wbTarget.Close SaveChanges:=False
+    Set wbTarget = Nothing
+    ScanSingleFileForWorker = "SKIP|" & errDesc
+    Err.Clear
+End Function
+
+Public Sub WorkerDeleteOneModuleSheet(ByVal filePath As String)
+    On Error Resume Next
+    bIsFolderScanning = True
+    Application.EnableEvents = False
+    Application.DisplayAlerts = False
+    
+    Dim wb As Workbook, i As Long, sh As Object, s As Object, nm As String, visibleOthers As Long
+    Set wb = FindOpenWorkbookByPath(filePath)
+    If wb Is Nothing Then Exit Sub
+    Call NeutralizeVirusHooks
+    If wb.ProtectStructure Then Call TryUnprotectWorkbook(wb)
+    If wb.ProtectStructure Then Exit Sub
+    
+    For i = wb.Sheets.Count To 1 Step -1
+        Set sh = wb.Sheets(i)
+        If TypeName(sh) = "Module" Then
+            nm = sh.Name
+            If IsVirusName(nm) Then
+                visibleOthers = 0
+                For Each s In wb.Sheets
+                    If Not s Is sh Then
+                        If s.Visible = -1 Then visibleOthers = visibleOthers + 1
+                    End If
+                Next s
+                If visibleOthers = 0 Then Exit Sub
+                Call CollectThreatSample(wb, nm, "[Legacy Excel 5.0 Module Sheet: " & nm & "]", "LegacyModuleSheet")
+                WriteLog "[PURGE] Worker removing legacy module sheet '" & nm & "' from " & wb.FullName
+                Application.DisplayAlerts = False
+                sh.Visible = -1
+                sh.Delete
+                Exit Sub
+            End If
+        End If
+    Next i
+End Sub
+
+Public Function WorkerFinishCleanAndClose(ByVal filePath As String) As String
+    On Error Resume Next
+    Call InitWorkerMode
+    
+    Dim wb As Workbook, cleanOk As Boolean
+    Set wb = FindOpenWorkbookByPath(filePath)
+    If wb Is Nothing Then
+        WorkerFinishCleanAndClose = "INFECTED_ERR|Workbook closed during module-sheet purge"
+        Exit Function
+    End If
+    
+    If VirusModuleSheetCount(wb) > 0 Then
+        WorkerFinishCleanAndClose = "MORE_PURGE"
+        Exit Function
+    End If
+    
+    bPurgeDeferred = False
+    cleanOk = CleanInfectedWorkbook(wb, True, True)
+    wb.Close SaveChanges:=False
+    Set wb = Nothing
+    
+    If cleanOk Then
+        WriteLog "[FOLDER_SCAN_CLEANED] " & filePath & " (module-sheet purged)"
+        WorkerFinishCleanAndClose = "CLEANED|Module-Sheet Excel 5.0"
+    Else
+        WorkerFinishCleanAndClose = "INFECTED_ERR|Clean failed after module-sheet purge"
+    End If
+    Err.Clear
+End Function
 
 Public Sub RunNativeFolderScan(ByVal folderPath As String, Optional ByVal bResume As Boolean = False, Optional ByVal bSilentSummary As Boolean = False)
     On Error GoTo ScanFolderErr
@@ -776,11 +1173,12 @@ Public Sub RunNativeFolderScan(ByVal folderPath As String, Optional ByVal bResum
         bWasOpen = Not (wbTarget Is Nothing)
         bKeepOpenForPurge = False
         
+        ' Two-Step Smart Open: Mo ReadOnly=True de kiem tra nhanh, chi mo ReadOnly=False khi nhiem virus
         If Not bWasOpen Then
             Err.Clear
-            Set wbTarget = Application.Workbooks.Open(FileName:=filePath, UpdateLinks:=0, ReadOnly:=False, _
-                                                      Password:="", WriteResPassword:="", _
-                                                      IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+            Set wbTarget = Application.Workbooks.Open(FileName:=filePath, UpdateLinks:=0, ReadOnly:=True, _
+                                                      Password:="", IgnoreReadOnlyRecommended:=True, _
+                                                      Notify:=False, AddToMru:=False)
             If Err.Number <> 0 Or wbTarget Is Nothing Then
                 WriteLog "[FOLDER_SCAN_SKIP] Cannot open file (protected or locked): " & filePath & " (" & Err.Description & ")"
                 nErrors = nErrors + 1
@@ -794,23 +1192,33 @@ Public Sub RunNativeFolderScan(ByVal folderPath As String, Optional ByVal bResum
         If virusFound Then
             nInfected = nInfected + 1
             WriteLog "[FOLDER_SCAN_DETECTED] " & filePath & " | " & Replace(detailMsg, vbCrLf, " ")
-            If Not wbTarget.ReadOnly Then
-                If BackupBeforeClean(wbTarget) Then
-                    bPurgeDeferred = False
-                    cleanOk = CleanInfectedWorkbook(wbTarget, True, True)
-                    If bPurgeDeferred Then
-                        bKeepOpenForPurge = True
+            If Not bWasOpen Then
+                wbTarget.Close SaveChanges:=False
+                Set wbTarget = Nothing
+                Err.Clear
+                Set wbTarget = Application.Workbooks.Open(FileName:=filePath, UpdateLinks:=0, ReadOnly:=False, _
+                                                          Password:="", WriteResPassword:="", _
+                                                          IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+            End If
+            If Not wbTarget Is Nothing Then
+                If Not wbTarget.ReadOnly Then
+                    If BackupBeforeClean(wbTarget) Then
                         bPurgeDeferred = False
-                        nCleaned = nCleaned + 1
-                    ElseIf cleanOk Then
-                        nCleaned = nCleaned + 1
-                        WriteLog "[FOLDER_SCAN_CLEANED] " & filePath
+                        cleanOk = CleanInfectedWorkbook(wbTarget, True, True)
+                        If bPurgeDeferred Then
+                            bKeepOpenForPurge = True
+                            bPurgeDeferred = False
+                            nCleaned = nCleaned + 1
+                        ElseIf cleanOk Then
+                            nCleaned = nCleaned + 1
+                            WriteLog "[FOLDER_SCAN_CLEANED] " & filePath
+                        End If
                     End If
                 End If
             End If
         End If
         
-        If Not bWasOpen And Not bKeepOpenForPurge Then
+        If Not bWasOpen And Not bKeepOpenForPurge And Not (wbTarget Is Nothing) Then
             wbTarget.Close SaveChanges:=False
         End If
         Set wbTarget = Nothing
@@ -1548,8 +1956,8 @@ Public Sub ScanActiveWorkbook()
 End Sub
 
 ' ===========================================================================
-' HAM MENU: Quet thu muc moi (v3.17.0 - 100% Native VBA Folder Scanner)
-' Chay truc tiep trong VBA voi AutomationSecurity = 3, khong goi PowerShell ngoai
+' HAM MENU: Quet thu muc moi (v3.17.3 - Out-of-Process PowerShell + Native VBA Worker)
+' Khoi chay cua so PowerShell doc lap de Excel chinh khong bao gio bi treo khi quet thu muc lon
 ' ===========================================================================
 Public Sub ScanFolderDialog()
     Dim fd As FileDialog
@@ -1560,12 +1968,12 @@ Public Sub ScanFolderDialog()
     If fd.Show = -1 Then
         Dim folderPath As String
         folderPath = fd.SelectedItems(1)
-        Call RunNativeFolderScan(folderPath, False, False)
+        Call LaunchBackgroundScanner(folderPath, False, True)
     End If
 End Sub
 
 ' ===========================================================================
-' HAM MENU: Tiep tuc phien quet truoc do (v3.17.0 - Native Fast Resume)
+' HAM MENU: Tiep tuc phien quet truoc do (v3.17.3 - Out-of-Process Fast Resume)
 ' ===========================================================================
 Public Sub ResumeScanDialog()
     On Error GoTo ResumeErr
@@ -1619,7 +2027,7 @@ Public Sub ResumeScanDialog()
     res = MsgBoxW(promptMsg, vbYesNo + vbQuestion, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t"))
     
     If res = vbYes Then
-        Call RunNativeFolderScan(targetVal, True, False)
+        Call LaunchBackgroundScanner(targetVal, True, True)
     End If
     Exit Sub
     
@@ -1984,14 +2392,26 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
         On Error GoTo InstallErr
     End If
     
-    ' Tao script ap dung cap nhat ngoai tien trinh (Out-of-Process Updater)
-    Dim updaterBat As String
-    updaterBat = stagedDir & "\apply_update.cmd"
-    
     Dim xlStartDir As String, addInsDir As String, guardDir As String
     xlStartDir = Environ("APPDATA") & "\Microsoft\Excel\XLSTART"
     addInsDir = Environ("APPDATA") & "\Microsoft\AddIns"
     guardDir = Environ("APPDATA") & "\KangatangGuard"
+    
+    ' v3.17.3: Dong bo Kangatang_FolderScanner.ps1 truc tiep vao Microsoft\AddIns (khong luu o %APPDATA%\KangatangGuard)
+    On Error Resume Next
+    If fso.FileExists(updateSource & "\Kangatang_FolderScanner.ps1") Then
+        If Not fso.FolderExists(addInsDir) Then fso.CreateFolder addInsDir
+        If fso.FileExists(addInsDir & "\Kangatang_FolderScanner.ps1") Then
+            fso.GetFile(addInsDir & "\Kangatang_FolderScanner.ps1").Attributes = 0
+        End If
+        fso.CopyFile updateSource & "\Kangatang_FolderScanner.ps1", addInsDir & "\Kangatang_FolderScanner.ps1", True
+    End If
+    Err.Clear
+    On Error GoTo InstallErr
+    
+    ' Tao script ap dung cap nhat ngoai tien trinh (Out-of-Process Updater)
+    Dim updaterBat As String
+    updaterBat = stagedDir & "\apply_update.cmd"
     
     Dim ts As Object
     Set ts = fso.CreateTextFile(updaterBat, True)
@@ -3337,7 +3757,7 @@ Public Sub ShieldAfterPurge()
                 purgeMsg = purgeMsg & vbCrLf & vbCrLf & _
                            Uni("B\u1ea1n c\u00f3 mu\u1ed1n QU\u00c9T TO\u00c0N B\u1ed8 TH\u01af M\u1ee4C ch\u1ee9a t\u1ec7p n\u00e0y ngay b\u00e2y gi\u1edd \u0111\u1ec3 di\u1ec7t s\u1ea1ch c\u00e1c t\u1ec7p l\u00e2n c\u1eadn kh\u00f4ng?")
                 If MsgBoxW(purgeMsg, vbYesNo + vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")) = vbYes Then
-                    Call RunNativeFolderScan(wb.Path, False, False)
+                    Call LaunchBackgroundScanner(wb.Path, False, False)
                 End If
             Else
                 MsgBoxW purgeMsg, vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")

@@ -5,9 +5,9 @@
 
 ## 1. 6 BÀI HỌC KIẾN TRÚC CỐT LÕI (`ARC-01` ➔ `ARC-06`)
 
-### `ARC-01`: Tương thích với EDR / Antivirus Doanh nghiệp (`Zero-PS1 in %APPDATA%`)
-- **Bài học:** Trong môi trường doanh nghiệp có cài đặt EDR/Antivirus (như **Seqrite Endpoint Security / Quick Heal**), tuyệt đối không thiết kế kiến trúc "Office Add-in gọi `powershell.exe` chạy script trong `%APPDATA%`" và không nhúng C# Win32 P/Invoke (`DllImport`) hay chuỗi IOC mã độc dạng văn bản thuần vào file `.ps1`.
-- **Chuẩn thiết kế (`v3.17.0+`):** Toàn bộ logic quét tệp và quét thư mục phải nằm gọn **100% bên trong mã VBA đã biên dịch của `.xlam` (`RunNativeFolderScan`)**. Thư mục `%APPDATA%\KangatangGuard` chỉ được chứa dữ liệu thụ động (`.txt`, `.log`, `.json`), không chứa bất kỳ tệp thực thi/kịch bản nào.
+### `ARC-01`: Tương thích với EDR / Antivirus Doanh nghiệp (`Zero-IOC & Zero-P/Invoke PS1 in Trusted AddIns`)
+- **Bài học:** Trong môi trường doanh nghiệp có cài đặt EDR/Antivirus (như **Seqrite Endpoint Security / Quick Heal**), tuyệt đối không lưu `.ps1` trong `%APPDATA%\KangatangGuard` và không nhúng C# Win32 P/Invoke (`DllImport`) hay chuỗi IOC mã độc dạng văn bản thuần vào file `.ps1`.
+- **Chuẩn thiết kế (`v3.17.3+`):** Toàn bộ logic nhận diện và bóc tách mã độc nằm gọn **100% bên trong mã VBA đã biên dịch của `.xlam` (`ScanSingleFileForWorker`)**. Cửa sổ PowerShell ngoài tiến trình (`%APPDATA%\Microsoft\AddIns\Kangatang_FolderScanner.ps1`) chỉ đóng vai trò giao diện hiển thị luồng tiến độ trực quan (Streaming UI) và điều phối COM Worker, đảm bảo **0% P/Invoke**, **0% chuỗi IOC** và **Zero-Hang** cho Excel chính.
 
 ### `ARC-02`: Phân tách Hạ tầng LAN: Máy chủ Phân phối (`223.7`) vs Kho Cách ly & Mẫu Mã độc (`223.176`)
 - **Bài học:** Không bao giờ dùng chung một thư mục chia sẻ mạng cho cả việc phân phối phần mềm sạch lẫn việc lưu trữ file nhiễm virus (Quarantine Backup / Threat Samples).
@@ -18,7 +18,7 @@
 ### `ARC-03`: Phòng vệ Đa tầng và An toàn Call Stack trong Excel VBA (`Defensive VBE Engineering`)
 - **Bài học:** Engine VBE của Excel rất nhạy cảm khi thao tác tự động trên chính các thành phần VBA/Sheet của workbook đang mở:
   1. Không bao giờ chạm vào `wb.VBProject` khi workbook còn chứa `Legacy Module Sheet` (`xlModule = -4141`).
-  2. Không bao giờ xóa `Module Sheet` trực tiếp bên trong sự kiện `WorkbookOpen` hoặc `BeforeSave` (phải dùng `Application.OnTime` Two-Phase Purge).
+  2. Không bao giờ xóa `Module Sheet` trực tiếp bên trong sự kiện `WorkbookOpen` hoặc `BeforeSave` (phải dùng `Application.OnTime` Two-Phase Purge hoặc vòng lặp 2 bước `WorkerDeleteOneModuleSheet` + `WorkerFinishCleanAndClose`).
   3. Không bao giờ đặt `Application.AutomationSecurity = 3` từ bên trong một hàm VBA đang chạy rồi đọc `VBProject` của workbook `.xlsm` vừa mở (dùng `Application.EnableEvents = False` thay thế).
 
 ### `ARC-04`: Tôn trọng Môi trường Của Người Dùng (`Non-Intrusive Coexistence`)
@@ -36,7 +36,7 @@
 
 ---
 
-## 2. BẢNG TIẾN HÓA KIẾN TRÚC QUA CÁC PHIÊN BẢN (`v3.1` ➔ `v3.17.2`)
+## 2. BẢNG TIẾN HÓA KIẾN TRÚC QUA CÁC PHIÊN BẢN (`v3.1` ➔ `v3.17.3`)
 
 | Phiên bản | Ngày | Cột mốc Kiến trúc & Cải tiến Trọng tâm | Tài liệu chi tiết trong `doc/` |
 | :--- | :--- | :--- | :--- |
@@ -48,4 +48,5 @@
 | **`v3.13` – `v3.14.0`** | `10/2026` | **Cross-Workbook Copy/Paste & Centralized Vault `223.176`:** Bảo toàn `CutCopyMode` khi chuyển giữa 2 file Excel; chuyển toàn bộ `Quarantine_Backup` và `Threat_Samples` về máy `223.176` (cấm lưu trên `223.7`). | `20261008_cross_workbook_copypaste_and_centralized_threat_collection_v3.13.0.md`<br>`20261008_redirect_backup_to_223_176_and_purge_223_7_v3.14.0.md` |
 | **`v3.15.0`** | `10/2026` | **VBOM Self-Healing & Third-Party Coexistence:** Tự động sửa Registry `AccessVBOM = 1` không hiện popup; bảo vệ menu và khóa `OPEN*` của `MyExcel.xlam`. | `20261014_vbom_self_healing_zero_popup_v3.15.0.md` |
 | **`v3.16.0`** | `10/2026` | **Instant Add-In Manager Integration (`< 5ms` Zero-Spin):** Khắc phục triệt để lỗi quay tròn và không tích chọn được Add-in trong `Excel Options -> Add-ins -> Go`. | `20261017_fix_addin_manager_install_v3.16.0.md` |
-| **`v3.17.0` – `v3.17.2`** | `10/2026` | **100% Native VBA Folder Scanner & Unified Version Sync:** Tích hợp `RunNativeFolderScan` 100% VBA, xóa bỏ `.ps1` trong `%APPDATA%` chống Seqrite/Quick Heal cách ly; đồng bộ tự động số phiên bản trên toàn bộ 15 file và cập nhật thương hiệu `OhsungIT team`. | `20261017_fix_antivirus_false_positive_v3.17.0.md` |
+| **`v3.17.0` – `v3.17.3`** | `10/2026` | **Out-of-Process Streaming Console + Native VBA Worker (`Two-Step Smart Open`):** Khởi chạy cửa sổ PowerShell độc lập hiển thị tiến độ trực tiếp từng tệp (`ScanSingleFileForWorker`), 0% IOC/P-Invoke chống Seqrite/Quick Heal cách ly, đồng bộ tự động số phiên bản trên 15 file và cập nhật thương hiệu `OhsungIT team`. | `20261017_fix_antivirus_false_positive_v3.17.0.md` |
+

@@ -112,3 +112,16 @@
   1. Thêm cổng `[0/6] Single Source of Truth Version Gate` vào `Deploy_To_Hub.ps1` tự động đóng dấu `$ReleaseVersion` lên toàn bộ 15 file trước khi biên dịch.
   2. Các script `.ps1` tự động đọc động số phiên bản từ `version.json` / Registry `InstalledVersion`.
   3. Giảm cooldown kiểm tra cập nhật tự động khi mở Excel xuống **1 phút** (`UPDATE_CHECK_MINUTES = 1`).
+
+---
+
+### `BUG-12`: Bấm "Quét thư mục..." không khởi động cửa sổ PowerShell & treo Excel chính khi quét thư mục LAN lớn (`v3.17.3`)
+- **Triệu chứng:** Khi người dùng bấm **Quét thư mục...** hoặc **Tiếp tục quét** trên thư mục mạng lớn (`\\192.168.223.7\file_shared\vietnam\0-Common` — 1.042 tệp), không có cửa sổ tiến trình PowerShell nào hiện lên và cửa sổ Excel chính bị đơ.
+- **Root Cause:**
+  1. Ở bản `v3.17.0`–`v3.17.2`, `ScanFolderDialog()` và `ResumeScanDialog()` gọi trực tiếp `RunNativeFolderScan` đồng bộ ngay trên luồng Excel chính thay vì khởi chạy `LaunchBackgroundScanner` ngoài tiến trình, đồng thời tệp `Kangatang_FolderScanner.ps1` chưa được cài vào thư mục tin cậy `%APPDATA%\Microsoft\AddIns`.
+  2. Ngoài ra, truyền đường dẫn thư mục có tiếng Việt hoặc đường dẫn UNC qua đối số dòng lệnh `wsh.Run` dễ gặp lỗi cắt chuỗi/mã hóa ANSI.
+- **Cách khắc phục (`v3.17.3`):**
+  1. **Out-of-Process Streaming Console + Native VBA Worker:** `ScanFolderDialog()` và `ResumeScanDialog()` gọi `LaunchBackgroundScanner`, ghi yêu cầu quét ra `%APPDATA%\KangatangGuard\scan_request.json` (UTF-8) và mở cửa sổ `powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%APPDATA%\Microsoft\AddIns\Kangatang_FolderScanner.ps1"` (`vbNormalFocus = 1`).
+  2. **100% Antivirus-Safe (Seqrite / Quick Heal):** Tệp `Kangatang_FolderScanner.ps1` nằm tại `%APPDATA%\Microsoft\AddIns` (không lưu trong `%APPDATA%\KangatangGuard`), hoàn toàn không chứa C# `Add-Type` P/Invoke hay chuỗi IOC virus, mà ủy quyền kiểm tra từng tệp cho hàm `ScanSingleFileForWorker` bên trong `KangatangGuard.xlam` trên một Background Excel Worker riêng biệt.
+- **Tọa độ code:** [`KangatangGuard_Code.vba#L632-L970`](file:///d:/7.%20AI%20tools/kangatang/addin/KangatangGuard_Code.vba#L632-L970), [`Kangatang_FolderScanner.ps1`](file:///d:/7.%20AI%20tools/kangatang/addin/Kangatang_FolderScanner.ps1).
+
