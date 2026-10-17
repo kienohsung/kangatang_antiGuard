@@ -6,7 +6,7 @@
 
 ## 1. THÔNG TIN PHIÊN BẢN & HẠ TẦNG MẠNG LAN (CRITICAL TOPOLOGY)
 
-- **Phiên bản hiện tại:** `v3.18.0` (`4-Layer Turbo Folder Scanner: Streaming Queue + Zero-COM OpenXML Pre-Filter + Multi-Worker Parallel COM Pool`)
+- **Phiên bản hiện tại:** `v3.19.0` (`Non-Scrolling Live Dashboard UI + 4-Layer Turbo Folder Scanner`)
 - **Phân tách vai trò 2 máy chủ LAN (BẤT BIẾN):**
   | Máy chủ | Đường dẫn UNC / Local | Vai trò duy nhất | Quy tắc CẤM (Hard Constraint) |
   | :--- | :--- | :--- | :--- |
@@ -35,7 +35,7 @@
 | `modThreatCollector` | Standard Module | `L3819` – `L4063` | Băm MD5 (`ComputeThreatHash`) & thu thập mẫu mã độc JSON (`CollectThreatSample`) về máy `223.176` |
 
 ### B. Tọa độ các hàm trọng yếu trong `modKangatangScanner` (`L112` – `L2496`)
-- **Hằng số phiên bản & cấu hình (`CURRENT_VERSION = "3.18.0"`, `CENTRAL_BACKUP_HUB`):** `L115` – `L155`
+- **Hằng số phiên bản & cấu hình (`CURRENT_VERSION = "3.19.0"`, `CENTRAL_BACKUP_HUB`):** `L115` – `L155`
 - **Unicode & Headless-safe Dialog (`Uni`, `MsgBoxW`):** `L156` – `L203`
 - **ScanCache chống lag khi Save (`IsScanCacheExpired`, `UpdateScanCache`):** `L204` – `L240`
 - **Khởi tạo & Ribbon Callbacks (`InitializeGuard`, `EnsureGuardAlive`, `Ribbon_*`):** `L241` – `L356`

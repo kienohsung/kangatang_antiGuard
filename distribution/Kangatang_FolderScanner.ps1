@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
-# Trinh Quet Thu Muc Sieu Toc 4 Tang (4-Layer Turbo Folder Scanner + Multi-Worker Pool)
-# Phien ban: v3.18.0 (Streaming Queue + Zero-COM OpenXML Pre-Filter + Parallel Excel Pool)
+# Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
+# Phien ban: v3.19.0 (Non-Scrolling Live Dashboard + 4-Layer Turbo Engine)
 # ==============================================================================
 
 param (
@@ -13,6 +13,7 @@ param (
     [int]$MaxWorkers = 0
 )
 
+try { $null = & cmd.exe /c "chcp 65001 >nul 2>&1" } catch {}
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding           = [System.Text.Encoding]::UTF8
@@ -24,7 +25,7 @@ $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyI
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.18.0"
+$AppVersion = "3.19.0"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -38,12 +39,58 @@ if (Test-Path $verJsonPath) {
     } catch {}
 }
 
-$Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion - 4-Layer Turbo Folder Scanner"
+$Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion - Bang Dieu Khien Quet Thu Muc (Live Dashboard)"
+try {
+    $rawUI = $Host.UI.RawUI
+    $bufSize = $rawUI.BufferSize
+    $winSize = $rawUI.WindowSize
+    if ($bufSize.Width -lt 106) { $bufSize.Width = 106; $rawUI.BufferSize = $bufSize }
+    if ($bufSize.Height -lt 300) { $bufSize.Height = 300; $rawUI.BufferSize = $bufSize }
+    if ($winSize.Width -lt 106) { $winSize.Width = 106 }
+    if ($winSize.Height -lt 32) { $winSize.Height = 32 }
+    $rawUI.WindowSize = $winSize
+} catch {}
 
-Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD v$AppVersion - 4-LAYER TURBO FOLDER SCANNER        " -ForegroundColor Cyan
-Write-Host "   Day la addin phong chong virus kangatang - Phat trien boi OhsungIT team !" -ForegroundColor White
-Write-Host "======================================================================" -ForegroundColor Cyan
+# Ham chuyen doi chuoi hien thi Console sang ASCII sach (Chong loi o vuong tren Windows Console & giu thang cot bang)
+function ConvertTo-DisplayAscii([string]$text) {
+    if ([string]::IsNullOrEmpty($text)) { return "" }
+    $s = $text.Replace([char]0x0111, 'd').Replace([char]0x0110, 'D')
+    $norm = $s.Normalize([System.Text.NormalizationForm]::FormD)
+    $sb = New-Object System.Text.StringBuilder($norm.Length)
+    foreach ($ch in $norm.ToCharArray()) {
+        $cat = [System.Globalization.CharUnicodeInfo]::GetUnicodeCategory($ch)
+        if ($cat -ne [System.Globalization.UnicodeCategory]::NonSpacingMark) {
+            $code = [int][char]$ch
+            if ($code -ge 32 -and $code -le 126) {
+                [void]$sb.Append($ch)
+            } elseif ($code -gt 126) {
+                [void]$sb.Append('?')
+            }
+        }
+    }
+    return $sb.ToString()
+}
+
+function Format-MiddleTruncate([string]$text, [int]$maxLen) {
+    $clean = ConvertTo-DisplayAscii $text
+    if ($clean.Length -le $maxLen) { return $clean }
+    if ($maxLen -le 10) { return $clean.Substring(0, $maxLen) }
+    $headLen = [Math]::Floor(($maxLen - 5) * 0.42)
+    $tailLen = $maxLen - 5 - $headLen
+    return ($clean.Substring(0, $headLen) + "\...\" + $clean.Substring($clean.Length - $tailLen))
+}
+
+function Format-EndTruncate([string]$text, [int]$maxLen) {
+    $clean = ConvertTo-DisplayAscii $text
+    if ($clean.Length -le $maxLen) { return $clean }
+    if ($maxLen -le 4) { return $clean.Substring(0, $maxLen) }
+    return ($clean.Substring(0, $maxLen - 3) + "...")
+}
+
+Write-Host "====================================================================================================" -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD v$AppVersion - BANG DIEU KHIEN QUET THU MUC (4-LAYER TURBO LIVE DASHBOARD)       " -ForegroundColor Cyan
+Write-Host "   Day la addin phong chong virus kangatang - Phat trien boi OhsungIT team !                        " -ForegroundColor White
+Write-Host "====================================================================================================" -ForegroundColor Cyan
 
 # 2. Dam bao AccessVBOM = 1 trong Registry HKCU
 foreach ($ver in @("16.0", "15.0", "14.0", "12.0")) {
@@ -70,10 +117,16 @@ if ((-not $TargetFolder) -and (Test-Path $scanReqFile)) {
     Remove-Item -Path $scanReqFile -Force -ErrorAction SilentlyContinue
 }
 
-if ($isResume -and (-not $TargetFolder) -and (Test-Path $lastSessionFile)) {
+$prevSessionTotal = 0
+if (Test-Path $lastSessionFile) {
     try {
         $meta = Get-Content -Path $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($meta.TargetFolder) { $TargetFolder = [string]$meta.TargetFolder }
+        if ($isResume -and (-not $TargetFolder) -and $meta.TargetFolder) {
+            $TargetFolder = [string]$meta.TargetFolder
+        }
+        if ($meta.TargetFolder -and ($meta.TargetFolder -eq $TargetFolder) -and ($meta.TotalFiles -gt 0)) {
+            $prevSessionTotal = [int]$meta.TotalFiles
+        }
     } catch {}
 }
 
@@ -123,12 +176,6 @@ if (-not $xlamPath) {
 $cpuCores = [Environment]::ProcessorCount
 $workerCount = if ($MaxWorkers -gt 0) { $MaxWorkers } elseif ($cpuCores -ge 8) { 4 } elseif ($cpuCores -ge 4) { 3 } else { 2 }
 
-$modeLabel = if ($isResume) { "Tiep tuc phien truoc (Fast Resume + 4-Layer Turbo)" } else { "Quet moi toan bo (4-Layer Turbo Engine)" }
-Write-Host "`n   -> Thu muc muc tieu : $TargetFolder" -ForegroundColor Yellow
-Write-Host "   -> Che do quet      : $modeLabel" -ForegroundColor Yellow
-Write-Host "   -> Cau hinh Turbo   : Zero-COM OpenXML Pre-Filter + $workerCount Parallel Excel Workers" -ForegroundColor Cyan
-Write-Host "   -> Engine Add-in    : $xlamPath (v$AppVersion)" -ForegroundColor Gray
-
 # 5. Nap du lieu Fast Resume tu scanned_files.log vao RAM Hashtable
 $resumeMap = @{}
 if ($isResume -and (Test-Path -LiteralPath $scannedLogFile)) {
@@ -144,7 +191,6 @@ if ($isResume -and (Test-Path -LiteralPath $scannedLogFile)) {
                 }
             }
         }
-        Write-Host "   -> Fast Resume      : Da nap $($resumeMap.Count) tep an toan tu phien truoc vao RAM." -ForegroundColor Green
     } catch {}
 } else {
     try { [System.IO.File]::WriteAllText($scannedLogFile, "", [System.Text.Encoding]::Unicode) } catch {}
@@ -200,7 +246,6 @@ function Test-OpenXmlSafeZeroCom([string]$filePath, [string]$ext, [regex]$iocReg
 
         foreach ($entry in $zip.Entries) {
             $fn = $entry.FullName.ToLowerInvariant().Replace('\', '/')
-            # Neu tep chua vbaProject.bin, macrosheets hoac dialogsheets -> Chuyen sang Tang 3 (Deep Excel COM Worker)
             if ($fn.Contains("vbaproject") -or $fn.Contains("macrosheet") -or $fn.Contains("dialogsheet")) {
                 return $false
             }
@@ -233,7 +278,6 @@ function Test-OpenXmlSafeZeroCom([string]$filePath, [string]$ext, [regex]$iocReg
             return $true
         }
     } catch {
-        # Neu tep bi ma hoa mat khau hoac khong phai dinh dang ZIP chuan -> Chuyen sang Tang 3
         return $false
     } finally {
         if ($null -ne $zip) { try { $zip.Dispose() } catch {} }
@@ -242,7 +286,6 @@ function Test-OpenXmlSafeZeroCom([string]$filePath, [string]$ext, [regex]$iocReg
 }
 
 # 6. Khoi tao bieu thuc Zero-COM trong RAM (0% chuoi IOC tren dia -> 100% Antivirus-Safe)
-# va Tang 3: Multi-Worker Parallel Excel COM Pool (Khoi tao On-Demand khi gap tep .xls/Macro)
 $t1 = -join ([char[]](107,97,110,103,97))
 $t2 = -join ([char[]](109,121,112,101,114,115,111,110))
 $t3 = -join ([char[]](33,97,108,108,111,99,97,116,101,100))
@@ -253,10 +296,59 @@ $iocRegex = [regex]::new("$t1|$t2|$t3|$t4|$t5", [System.Text.RegularExpressions.
 $comWorkQueue   = New-Object 'System.Collections.Concurrent.ConcurrentQueue[pscustomobject]'
 $comResultQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[pscustomobject]'
 $sharedState    = [hashtable]::Synchronized(@{
-    ProducerDone  = $false
-    CancelWorkers = $false
-    ActiveWorkers = 0
+    ProducerDone       = $false
+    CancelWorkers      = $false
+    ActiveWorkers      = 0
+    CurrentWorkerFile  = ""
+    TotalTargetFiles   = $prevSessionTotal
+    TotalTargetFolders = 0
+    CountDone          = $false
 })
+
+# Luong dem tong so tep Excel chay ngam song song (giup tinh chinh xac % Con lai ma khong lam cham luc khoi dong)
+$counterScript = {
+    param($rootFolder, $state)
+    $q = New-Object System.Collections.Generic.Queue[string]
+    $q.Enqueue($rootFolder)
+    $exts = @(".xls", ".xlsx", ".xlsm", ".xlsb")
+    $fCount = 0
+    $dCount = 0
+    while ($q.Count -gt 0 -and (-not $state.CancelWorkers)) {
+        $cur = $q.Dequeue()
+        try {
+            foreach ($sd in [System.IO.Directory]::GetDirectories($cur)) {
+                $dn = [System.IO.Path]::GetFileName($sd)
+                if (-not [string]::IsNullOrWhiteSpace($dn)) {
+                    $low = $dn.Trim().ToLowerInvariant()
+                    if ((-not $low.StartsWith(".")) -and (-not $low.StartsWith("$")) -and ($low -notin @("_backup_kangatang", "quarantine_backup", "threat_samples", "node_modules", "system volume information")) -and (-not $low.StartsWith("_backup_source_"))) {
+                        $q.Enqueue($sd)
+                    }
+                }
+            }
+        } catch {}
+        try {
+            $hasExcel = $false
+            foreach ($fp in [System.IO.Directory]::GetFiles($cur)) {
+                $fn = [System.IO.Path]::GetFileName($fp)
+                $ex = [System.IO.Path]::GetExtension($fn).ToLowerInvariant()
+                if (($ex -in $exts) -and (-not $fn.StartsWith('~$')) -and (-not $fn.ToLowerInvariant().StartsWith("kangatangguard"))) {
+                    $fCount++
+                    $hasExcel = $true
+                }
+            }
+            if ($hasExcel) { $dCount++ }
+            if ($fCount -gt $state.TotalTargetFiles) { $state.TotalTargetFiles = $fCount }
+            $state.TotalTargetFolders = $dCount
+        } catch {}
+    }
+    $state.TotalTargetFiles   = $fCount
+    $state.TotalTargetFolders = $dCount
+    $state.CountDone          = $true
+}
+
+$script:counterPs = [powershell]::Create()
+[void]$script:counterPs.AddScript($counterScript).AddArgument($TargetFolder).AddArgument($sharedState)
+$script:counterHandle = $script:counterPs.BeginInvoke()
 
 $workerScript = {
     param($workerId, $xlamPath, $workQueue, $resultQueue, $state)
@@ -290,6 +382,7 @@ $workerScript = {
         while (-not $state.CancelWorkers) {
             if ($workQueue.TryDequeue([ref]$item)) {
                 $fPath = [string]$item.FilePath
+                $state.CurrentWorkerFile = [string]$item.FileName
                 $res = ""
                 try {
                     $res = [string]$script:excel.Run("'$($script:wbAddin.Name)'!ScanSingleFileForWorker", $fPath)
@@ -363,65 +456,211 @@ function Ensure-WorkerPoolStarted {
     }
 }
 
-Write-Host "`n[1/2] Bo loc tinh Zero-COM OpenXML & Pool $workerCount Excel Workers (On-Demand) da san sang!" -ForegroundColor Green
-
-# 7. Ham xu ly ket qua tra ve tu Multi-Worker Pool
+# 7. Bien trang thai va Ham ve Bang Dieu Khien Co Dinh (Non-Scrolling Live Dashboard UI)
 $script:totalDiscovered = 0
 $script:totalScanned    = 0
 $script:totalSkipped    = 0
 $script:totalZeroCom    = 0
 $script:totalDeepCom    = 0
+$script:totalSafe       = 0
 $script:totalInfected   = 0
 $script:totalCleaned    = 0
 $script:totalErrors     = 0
+$script:currentFolder   = $TargetFolder
+$script:currentFile     = "Dang khoi tao bo quet..."
+$script:folderIdx       = 0
+$script:recentThreats   = New-Object System.Collections.Generic.List[string]
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $startTimeStr = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+$script:lastUiTick = 0
 
-function Drain-WorkerResults([bool]$clearLineBeforePrint = $false) {
+$script:canSetCursor = $true
+$script:dashboardTop = 0
+try {
+    $script:dashboardTop = [Console]::CursorTop
+    [Console]::CursorVisible = $false
+} catch {
+    $script:canSetCursor = $false
+}
+
+function Write-FixedLine([string]$text, [System.ConsoleColor]$color = [System.ConsoleColor]::White) {
+    $padded = if ($text.Length -lt 100) { $text.PadRight(100) } else { $text.Substring(0, 100) }
+    Write-Host $padded -ForegroundColor $color
+}
+
+function Render-LiveDashboard([bool]$force = $false, [bool]$isCompleted = $false) {
+    $nowTick = $stopwatch.ElapsedMilliseconds
+    if ((-not $force) -and (($nowTick - $script:lastUiTick) -lt 100)) { return }
+    $script:lastUiTick = $nowTick
+
+    if ((-not $script:canSetCursor) -and (-not $isCompleted)) { return }
+    if ($script:canSetCursor) {
+        try { [Console]::SetCursorPosition(0, $script:dashboardTop) } catch { $script:canSetCursor = $false; return }
+    }
+
+    $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
+    $totalFolders = [Math]::Max([int]$sharedState.TotalTargetFolders, [int]$script:folderIdx)
+
+    $pctDone = 0.0
+    if ($isCompleted) {
+        $pctDone = 100.0
+        $totalTarget = $script:totalScanned
+    } elseif ($totalTarget -gt 0) {
+        $rawPct = ($script:totalScanned / [double]$totalTarget) * 100.0
+        if ((-not $sharedState.CountDone) -and ($rawPct -ge 99.0)) {
+            $pctDone = 99.0
+        } else {
+            $pctDone = [Math]::Min(99.9, [Math]::Round($rawPct, 1))
+        }
+    }
+    $pctRem  = [Math]::Max(0.0, [Math]::Round(100.0 - $pctDone, 1))
+    $remFiles = [Math]::Max(0, $totalTarget - $script:totalScanned)
+
+    $elapsedSec = [Math]::Max(0.1, $stopwatch.Elapsed.TotalSeconds)
+    $speed = [Math]::Round($script:totalScanned / $elapsedSec, 1)
+
+    $etaStr = "--p--s"
+    if ($isCompleted) {
+        $etaStr = "00p00s"
+    } elseif ($speed -gt 0 -and $remFiles -gt 0) {
+        $etaSec = [int][Math]::Ceiling($remFiles / $speed)
+        if ($etaSec -ge 3600) {
+            $etaStr = "{0:D2}h{1:D2}p" -f [int][Math]::Floor($etaSec / 3600), [int][Math]::Floor(($etaSec % 3600) / 60)
+        } else {
+            $etaStr = "{0:D2}p{1:D2}s" -f [int][Math]::Floor($etaSec / 60), ($etaSec % 60)
+        }
+    } elseif ($remFiles -eq 0 -and $sharedState.CountDone) {
+        $etaStr = "00p00s"
+    }
+
+    $barWidth = 24
+    $filled = [Math]::Min($barWidth, [Math]::Max(0, [int][Math]::Round(($pctDone / 100.0) * $barWidth)))
+    $empty  = $barWidth - $filled
+    $progressBar = "[" + ("#" * $filled) + ("." * $empty) + "]"
+
+    $activeFileDisplay = if ($isCompleted) {
+        "HOAN TAT QUET TOAN BO THU MUC!"
+    } elseif ((-not $comWorkQueue.IsEmpty) -and $sharedState.CurrentWorkerFile) {
+        Format-EndTruncate $sharedState.CurrentWorkerFile 72
+    } else {
+        Format-EndTruncate $script:currentFile 72
+    }
+
+    $folderTag = if ($totalFolders -gt 0) { "[#$($script:folderIdx)/$totalFolders]" } else { "[#$($script:folderIdx)]" }
+    $activeFolderDisplay = Format-MiddleTruncate $script:currentFolder (71 - $folderTag.Length)
+
+    $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion | Tien do: $($pctDone.ToString('0.0'))% (Con lai: $($pctRem.ToString('0.0'))%) | Da quet: $($script:totalScanned)/$totalTarget | Da diet: $($script:totalCleaned)"
+
+    # DONG 1: Ten tep dang xu ly & Duong dan thu muc dang thuc hien
+    Write-FixedLine (" [1] TEP DANG XU LY    : $activeFileDisplay") ([System.ConsoleColor]::White)
+    Write-FixedLine ("     THU MUC DANG QUET : $folderTag $activeFolderDisplay") ([System.ConsoleColor]::Cyan)
+    Write-FixedLine ("----------------------------------------------------------------------------------------------------") ([System.ConsoleColor]::DarkGray)
+
+    # DONG 2: Process Status, % Hoan thanh & % Con lai
+    $statusColor = if ($isCompleted) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::Yellow }
+    $pctDoneStr = ("{0,5:0.0}%" -f $pctDone)
+    $pctRemStr  = ("{0,5:0.0}%" -f $pctRem)
+    Write-FixedLine (" [2] PROCESS STATUS    : $progressBar $pctDoneStr | Con lai: $pctRemStr ($remFiles tep) | ETA: $etaStr") $statusColor
+    Write-FixedLine ("====================================================================================================") ([System.ConsoleColor]::Cyan)
+
+    # DONG 3+: Bang ket qua thong ke truc tuyen (Live Summary Table - Chuan 100 ky tu)
+    $countStateStr = if ($sharedState.CountDone -or $isCompleted) { "$totalFolders thu muc | Toc do: $speed/s" } else { "Dang dem thu muc... | $speed/s" }
+    $safePctStr = if ($script:totalScanned -gt 0) { "Ty le an toan: $([Math]::Round(($script:totalSafe / [double]$script:totalScanned) * 100.0, 1))%" } else { "Dang kiem tra..." }
+    $deepQueueWait = $comWorkQueue.Count
+
+    Write-FixedLine (" | [3] BANG KET QUA QUET TRUC TUYEN (LIVE TABLE) |       SO LUONG | CHI TIET / TRANG THAI          |") ([System.ConsoleColor]::Cyan)
+    Write-FixedLine (" +-----------------------------------------------+----------------+--------------------------------+") ([System.ConsoleColor]::DarkCyan)
+    Write-FixedLine (" | 1. Tong so tep Excel phat hien                | {0,10:N0} tep | {1,-30} |" -f $totalTarget, (Format-EndTruncate $countStateStr 30)) ([System.ConsoleColor]::White)
+    Write-FixedLine (" | 2. Tong so tep da quet xong                   | {0,10:N0} tep | {1,-30} |" -f $script:totalScanned, ("Xong: {0:0.0}% | Con lai: {1:0.0}%" -f $pctDone, $pctRem)) ([System.ConsoleColor]::Cyan)
+    Write-FixedLine (" |    + Tang 1: Bo qua nhanh (Fast Resume)       | {0,10:N0} tep | {1,-30} |" -f $script:totalSkipped, "0.01 ms/tep (Da sach tu truoc)") ([System.ConsoleColor]::Gray)
+    Write-FixedLine (" |    + Tang 2: Loc tinh Zero-COM (.xlsx)        | {0,10:N0} tep | {1,-30} |" -f $script:totalZeroCom, "1.50 ms/tep (Khong mo Excel)") ([System.ConsoleColor]::Gray)
+    Write-FixedLine (" |    + Tang 3: Quet sau Excel COM (.xls/Macro)  | {0,10:N0} tep | {1,-30} |" -f $script:totalDeepCom, ("Cho xu ly: $deepQueueWait | $workerCount Workers")) ([System.ConsoleColor]::Gray)
+    Write-FixedLine (" +-----------------------------------------------+----------------+--------------------------------+") ([System.ConsoleColor]::DarkCyan)
+    Write-FixedLine (" | 3. Tep AN TOAN (Sach)                         | {0,10:N0} tep | {1,-30} |" -f $script:totalSafe, (Format-EndTruncate $safePctStr 30)) ([System.ConsoleColor]::Green)
+    $infColor = if ($script:totalInfected -gt 0) { [System.ConsoleColor]::Yellow } else { [System.ConsoleColor]::White }
+    Write-FixedLine (" | 4. Tep PHAT HIEN NHIEM VIRUS                  | {0,10:N0} tep | {1,-30} |" -f $script:totalInfected, $(if ($script:totalInfected -gt 0) { "Phat hien ma doc Kangatang!" } else { "Khong phat hien ma doc" })) $infColor
+    $clnColor = if ($script:totalCleaned -gt 0) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::White }
+    Write-FixedLine (" | 5. Tep DA XU LY & SAO LUU (ve may 223.176)    | {0,10:N0} tep | {1,-30} |" -f $script:totalCleaned, $(if ($script:totalCleaned -gt 0) { "Da diet sach & sao luu an toan" } else { "Chua co tep can xu ly" })) $clnColor
+    $errColor = if ($script:totalErrors -gt 0) { [System.ConsoleColor]::Red } else { [System.ConsoleColor]::Gray }
+    Write-FixedLine (" | 6. Tep BO QUA / LOI (Khoa Password/ReadOnly)  | {0,10:N0} tep | {1,-30} |" -f $script:totalErrors, "Tep dat mat khau hoac dang mo") $errColor
+    Write-FixedLine (" +-----------------------------------------------+----------------+--------------------------------+") ([System.ConsoleColor]::DarkCyan)
+
+    # KHOI 4: Nhat ky 5 tep nhiem virus vua xu ly gan nhat (Co dinh 5 dong de khong cuon man hinh)
+    Write-FixedLine (" [4] NHAT KY TEP NHIEM VIRUS VUA XU LY (5 TEP GAN NHAT):") ([System.ConsoleColor]::Yellow)
+    for ($i = 0; $i -lt 5; $i++) {
+        if ($i -lt $script:recentThreats.Count) {
+            $tLine = Format-EndTruncate $script:recentThreats[$i] 96
+            Write-FixedLine ("   $tLine") ([System.ConsoleColor]::Yellow)
+        } elseif ($i -eq 0 -and $script:recentThreats.Count -eq 0) {
+            Write-FixedLine ("   - (Chua phat hien tep nhiem virus nao trong phien quet nay)") ([System.ConsoleColor]::DarkGray)
+        } else {
+            Write-FixedLine ("") ([System.ConsoleColor]::DarkGray)
+        }
+    }
+    Write-FixedLine ("====================================================================================================") ([System.ConsoleColor]::Cyan)
+}
+
+function Add-RecentThreatLog([string]$entryText) {
+    $cleanEntry = ConvertTo-DisplayAscii $entryText
+    $script:recentThreats.Insert(0, $cleanEntry)
+    while ($script:recentThreats.Count -gt 5) {
+        $script:recentThreats.RemoveAt($script:recentThreats.Count - 1)
+    }
+}
+
+function Drain-WorkerResults {
     $resItem = $null
+    $updated = $false
     while ($comResultQueue.TryDequeue([ref]$resItem)) {
+        $updated = $true
         $r = [string]$resItem.Result
-        $fName = $resItem.FileName
+        $fName = [string]$resItem.FileName
         $wId   = $resItem.WorkerId
         $script:totalDeepCom++
+        $script:currentFile = $fName
 
         if ($r -eq "SAFE") {
             $script:totalScanned++
+            $script:totalSafe++
             $script:logBuffer.Add("$($resItem.LowPath)|$($resItem.FileSig)")
         } elseif ($r.StartsWith("CLEANED|") -or $r.StartsWith("CLEANED_PURGE|")) {
-            if ($clearLineBeforePrint) { Write-Host "`r$(' ' * 110)`r" -NoNewline }
             $script:totalScanned++
             $script:totalInfected++
             $script:totalCleaned++
             $detail = if ($r.StartsWith("CLEANED_PURGE|")) { "Module-Sheet Excel 5.0: " + $r.Substring(14) } else { $r.Substring(8) }
-            Write-Host "   [DIET VIRUS] [Worker #$wId] Da lam sach & sao luu: $fName ($detail)" -ForegroundColor Yellow
+            $ts = Get-Date -Format "HH:mm:ss"
+            Add-RecentThreatLog "> [$ts] [DA DIET] $fName ($detail)"
             try {
                 $fAfter = New-Object System.IO.FileInfo($resItem.FilePath)
                 $newSig = "$($fAfter.Length)|$($fAfter.LastWriteTime.ToString('yyyyMMddHHmmss'))"
                 $script:logBuffer.Add("$($resItem.LowPath)|$newSig")
             } catch {}
         } elseif ($r.StartsWith("INFECTED_")) {
-            if ($clearLineBeforePrint) { Write-Host "`r$(' ' * 110)`r" -NoNewline }
             $script:totalScanned++
             $script:totalInfected++
             $script:totalErrors++
-            Write-Host "   [CANH BAO] [Worker #$wId] Phat hien virus nhung tep dang khoa/ReadOnly: $fName ($r)" -ForegroundColor Red
+            $ts = Get-Date -Format "HH:mm:ss"
+            Add-RecentThreatLog "! [$ts] [KHOA/READONLY] $fName ($r)"
         } else {
+            $script:totalScanned++
             $script:totalErrors++
         }
 
         if ($script:logBuffer.Count -ge 40) {
-            Flush-ScanLogs "IN_PROGRESS" $script:totalDiscovered $script:totalScanned $script:totalCleaned $startTimeStr
+            $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
+            Flush-ScanLogs "IN_PROGRESS" $totalTarget $script:totalScanned $script:totalCleaned $startTimeStr
         }
+    }
+    if ($updated) {
+        Render-LiveDashboard $true $false
     }
 }
 
-Write-Host "`n[2/2] Bat dau duyet cuon chieu & quet sieu toc 4 tang (Streaming Turbo)..." -ForegroundColor Yellow
-Flush-ScanLogs "IN_PROGRESS" 0 0 0 $startTimeStr
+Flush-ScanLogs "IN_PROGRESS" $prevSessionTotal 0 0 $startTimeStr
+Render-LiveDashboard $true $false
 
 $dirQueue  = New-Object System.Collections.Generic.Queue[string]
 $dirQueue.Enqueue($TargetFolder)
-$folderIdx = 0
 $validExts = @(".xls", ".xlsx", ".xlsm", ".xlsb")
 
 try {
@@ -455,20 +694,14 @@ try {
         }
 
         if ($excelFiles.Count -eq 0) { continue }
-        $folderIdx++
+        $script:folderIdx++
+        $script:currentFolder = $folder
         $script:totalDiscovered += $excelFiles.Count
 
-        Write-Host "`nFolder [$folderIdx]: $folder ($($excelFiles.Count) files)" -ForegroundColor Cyan
-
-        $fFastSkip  = 0
-        $fZeroCom   = 0
-        $fDeepQueued = 0
-        $fIdx       = 0
-
         foreach ($filePath in $excelFiles) {
-            $fIdx++
             $fileName = [System.IO.Path]::GetFileName($filePath)
             $ext      = [System.IO.Path]::GetExtension($fileName).ToLowerInvariant()
+            $script:currentFile = $fileName
 
             $fInfo = $null
             try { $fInfo = New-Object System.IO.FileInfo($filePath) } catch { continue }
@@ -479,21 +712,20 @@ try {
 
             # TANG 1: Fast Resume trong RAM (0.01ms)
             if ($isResume -and $resumeMap.ContainsKey($lowPath) -and ($resumeMap[$lowPath] -eq $fileSig)) {
-                $fFastSkip++
                 $script:totalSkipped++
                 $script:totalScanned++
+                $script:totalSafe++
             }
             # TANG 2: Zero-COM OpenXML Pre-Filter cho .xlsx/.xlsm/.xlsb (1.5 - 3ms)
             elseif (Test-OpenXmlSafeZeroCom $filePath $ext $iocRegex) {
-                $fZeroCom++
                 $script:totalZeroCom++
                 $script:totalScanned++
+                $script:totalSafe++
                 $script:logBuffer.Add("$lowPath|$fileSig")
             }
             # TANG 3: Day vao hang doi Multi-Worker Parallel Excel COM Pool (.xls hoac tep co vbaProject.bin)
             else {
                 Ensure-WorkerPoolStarted
-                $fDeepQueued++
                 $comWorkQueue.Enqueue([pscustomobject]@{
                     FilePath = $filePath
                     FileName = $fileName
@@ -502,70 +734,57 @@ try {
                 })
             }
 
-            # Cap nhat tien do truc quan va hut ket qua tu Worker Pool
-            if (($fIdx % 10) -eq 0 -or ($fIdx -eq $excelFiles.Count)) {
-                Drain-WorkerResults $true
-                $elapsedSec = [Math]::Max(1, [int]$stopwatch.Elapsed.TotalSeconds)
-                $rate = [Math]::Round($script:totalScanned / $elapsedSec, 1)
-                $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion | Da quet: $($script:totalScanned) ($rate tep/s) | Zero-COM: $($script:totalZeroCom) | Da diet: $($script:totalCleaned)"
-                Write-Host "`r   -> [TURBO] Tien do: $fIdx/$($excelFiles.Count) | Zero-COM sach: $fZeroCom | Fast Resume: $fFastSkip | Deep COM (.xls/Macro): $fDeepQueued   " -NoNewline -ForegroundColor Gray
-            }
+            Drain-WorkerResults
+            Render-LiveDashboard $false $false
 
             # Dieu tiet hang doi (Backpressure): neu hang doi Deep COM > 60 tep thi cho Worker Pool xu ly bot
             while ($comWorkQueue.Count -gt 60) {
-                Drain-WorkerResults $true
+                Drain-WorkerResults
+                Render-LiveDashboard $false $false
                 Start-Sleep -Milliseconds 40
             }
         }
 
-        Write-Host ""
-        Drain-WorkerResults $false
-        Flush-ScanLogs "IN_PROGRESS" $script:totalDiscovered $script:totalScanned $script:totalCleaned $startTimeStr
+        Drain-WorkerResults
+        $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
+        Flush-ScanLogs "IN_PROGRESS" $totalTarget $script:totalScanned $script:totalCleaned $startTimeStr
     }
+
+    $sharedState.TotalTargetFiles   = $script:totalDiscovered
+    $sharedState.TotalTargetFolders = $script:folderIdx
+    $sharedState.CountDone          = $true
 
     # Cho tat ca cac tep .xls/.xlsm con lai trong hang doi Multi-Worker Pool hoan tat
     $sharedState.ProducerDone = $true
     if ($script:poolStarted) {
         while ((-not $comWorkQueue.IsEmpty) -or (-not $comResultQueue.IsEmpty)) {
-            Drain-WorkerResults $true
-            $rem = $comWorkQueue.Count
-            if ($rem -gt 0) {
-                Write-Host "`r   -> [MULTI-WORKER POOL] Dang hoan tat $rem tep .xls/Macro cuoi cung tren $workerCount Excel Workers...   " -NoNewline -ForegroundColor Yellow
-                Start-Sleep -Milliseconds 80
+            Drain-WorkerResults
+            Render-LiveDashboard $false $false
+            if (-not $comWorkQueue.IsEmpty) {
+                Start-Sleep -Milliseconds 60
             }
         }
 
-        # Doi cac Worker ket thuc vong lap va drain lan cuoi
         foreach ($job in $script:workerJobs) {
             try { [void]$job.PowerShell.EndInvoke($job.Handle) } catch {}
         }
-        Drain-WorkerResults $false
+        Drain-WorkerResults
     }
-    Write-Host ""
 
     $stopwatch.Stop()
     $totalSec = [Math]::Round($stopwatch.Elapsed.TotalSeconds, 1)
-    $avgSpeed = if ($totalSec -gt 0) { [Math]::Round($script:totalScanned / $totalSec, 1) } else { $script:totalScanned }
+    Render-LiveDashboard $true $true
 
     Flush-ScanLogs "COMPLETED" $script:totalDiscovered $script:totalScanned $script:totalCleaned $startTimeStr
     $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion - HOAN TAT ($totalSec giay) | Da quet: $($script:totalScanned) | Da diet: $($script:totalCleaned)"
-
-    Write-Host "`n======================================================================" -ForegroundColor Green
-    Write-Host "   HOAN TAT QUET THU MUC SIEU TOC (KANGATANG GUARD v$AppVersion)      " -ForegroundColor Green
-    Write-Host "======================================================================" -ForegroundColor Green
-    Write-Host "   Thu muc da quet          : $TargetFolder" -ForegroundColor White
-    Write-Host "   Thoi gian thuc thi       : $totalSec giay (Toc do TB: $avgSpeed tep/giay)" -ForegroundColor Cyan
-    Write-Host "   Tong so tep da kiem tra  : $($script:totalScanned) / $($script:totalDiscovered)" -ForegroundColor Cyan
-    Write-Host "     + Tang 1 (Fast Resume) : $($script:totalSkipped) tep (0.01 ms/tep)" -ForegroundColor Gray
-    Write-Host "     + Tang 2 (Zero-COM ZIP): $($script:totalZeroCom) tep (1.5 ms/tep - Khong can mo Excel)" -ForegroundColor Green
-    Write-Host "     + Tang 3 ($workerCount COM Workers): $($script:totalDeepCom) tep (.xls & Macro .xlsm)" -ForegroundColor White
-    Write-Host "   Phat hien nhiem virus    : $($script:totalInfected)" -ForegroundColor $(if ($script:totalInfected -gt 0) { "Yellow" } else { "Green" })
-    Write-Host "   Da diet & sao luu (223.176): $($script:totalCleaned)" -ForegroundColor Green
-    Write-Host "   Tep bo qua (Password)    : $($script:totalErrors)" -ForegroundColor Gray
-    Write-Host "======================================================================" -ForegroundColor Green
+    Write-Host "`n   [HOAN TAT] Qua trinh quet thu muc da ket thuc trong $totalSec giay!" -ForegroundColor Green
 } finally {
+    try { [Console]::CursorVisible = $true } catch {}
     $sharedState.CancelWorkers = $true
     $sharedState.ProducerDone  = $true
+    if ($null -ne $script:counterPs) {
+        try { $script:counterPs.Dispose() } catch {}
+    }
     foreach ($job in $script:workerJobs) {
         try { $job.PowerShell.Dispose() } catch {}
     }
@@ -573,3 +792,4 @@ try {
         try { $script:runspacePool.Close(); $script:runspacePool.Dispose() } catch {}
     }
 }
+
