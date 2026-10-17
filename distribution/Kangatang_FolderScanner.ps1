@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.20.0 (Detailed Project Audit Logging & Periodic Report Engine)
+# Phien ban: v3.20.1 (Detailed Project Audit Logging & Periodic Report Engine)
 # ==============================================================================
 
 param (
@@ -45,11 +45,6 @@ if (Test-Path -LiteralPath $lastSessionFile) {
                 if ($pObj -and ($pObj.ProcessName -match "powershell|pwsh")) {
                     $activeOther = $true
                 }
-            } elseif ($sessItem -and (((Get-Date) - $sessItem.LastWriteTime).TotalSeconds -lt 25)) {
-                $otherPsList = @(Get-Process -Name powershell -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID })
-                if ($otherPsList.Count -gt 0) {
-                    $activeOther = $true
-                }
             }
             if ($activeOther) {
                 if ($script:hasMutex -and ($null -ne $script:scannerMutex)) {
@@ -74,7 +69,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.20.0"
+$AppVersion = "3.20.1"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -178,7 +173,9 @@ if ((-not $TargetFolder) -and (Test-Path $scanReqFile)) {
     Remove-Item -Path $scanReqFile -Force -ErrorAction SilentlyContinue
 }
 
-$prevSessionTotal = 0
+$prevSessionTotal   = 0
+$prevSessionCleaned = 0
+$prevSessionStart   = ""
 if (Test-Path $lastSessionFile) {
     try {
         $meta = Get-Content -Path $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -187,6 +184,10 @@ if (Test-Path $lastSessionFile) {
         }
         if ($meta.TargetFolder -and ($meta.TargetFolder -eq $TargetFolder) -and ($meta.TotalFiles -gt 0)) {
             $prevSessionTotal = [int]$meta.TotalFiles
+        }
+        if ($isResume -and $meta.TargetFolder -and ($meta.TargetFolder -eq $TargetFolder)) {
+            if ($meta.TotalCleaned -gt 0) { $prevSessionCleaned = [int]$meta.TotalCleaned }
+            if ($meta.StartTime) { $prevSessionStart = [string]$meta.StartTime }
         }
     } catch {}
 }
@@ -256,7 +257,7 @@ if ($isResume -and (Test-Path -LiteralPath $scannedLogFile)) {
     try { [System.IO.File]::WriteAllText($scannedLogFile, "", [System.Text.Encoding]::Unicode) } catch {}
 }
 
-# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.20.0)
+# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.20.1)
 # Luu truc tiep vao thu muc du an D:\7. AI tools\kangatang\Scan_Reports (hoac \\192.168.223.176\test\Scan_Reports tu may tram LAN)
 $script:projectReportDir = if (Test-Path "D:\7. AI tools\kangatang") {
     "D:\7. AI tools\kangatang\Scan_Reports"
@@ -690,7 +691,22 @@ $workerScript = {
     try { Copy-Item -LiteralPath $xlamPath -Destination $workerXlam -Force -ErrorAction SilentlyContinue } catch {}
     if (-not (Test-Path -LiteralPath $workerXlam)) { $workerXlam = $xlamPath }
 
+    function Clear-WorkerDdeRegistryBit {
+        foreach ($ver in @("16.0", "15.0", "14.0", "12.0")) {
+            $optKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Options"
+            if (Test-Path $optKey) {
+                try {
+                    $curOpt = (Get-ItemProperty -Path $optKey -Name "Options" -ErrorAction SilentlyContinue).Options
+                    if ($null -ne $curOpt -and (($curOpt -band 0x40) -ne 0)) {
+                        Set-ItemProperty -Path $optKey -Name "Options" -Value ($curOpt -band (-bnot 0x40)) -Type DWord -Force -ErrorAction SilentlyContinue
+                    }
+                } catch {}
+            }
+        }
+    }
+
     function Clear-WorkerCrashRecovery {
+        Clear-WorkerDdeRegistryBit
         foreach ($ver in @("16.0", "15.0", "14.0", "12.0")) {
             foreach ($sub in @("DocumentRecovery", "StartupItems")) {
                 $resKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Resiliency\$sub"
@@ -708,6 +724,13 @@ $workerScript = {
             $script:wbAddin = $null
         }
         if ($null -ne $script:excel) {
+            try {
+                $script:excel.DisplayAlerts = $false
+                foreach ($w in @($script:excel.Workbooks)) {
+                    try { $w.Close($false) } catch {}
+                }
+            } catch {}
+            try { $script:excel.IgnoreRemoteRequests = $false } catch {}
             try { $script:excel.Quit() } catch {}
             try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:excel) } catch {}
             $script:excel = $null
@@ -723,8 +746,11 @@ $workerScript = {
         try { $script:excel.AutoRecover.Enabled = $false } catch {}
         $script:excel.DisplayAlerts = $false
         $script:excel.EnableEvents = $false
+        try { $script:excel.IgnoreRemoteRequests = $true } catch {}
+        Clear-WorkerDdeRegistryBit
         $script:wbAddin = $script:excel.Workbooks.Open($workerXlam)
         $script:excel.Run("'$($script:wbAddin.Name)'!InitWorkerMode") | Out-Null
+        Clear-WorkerDdeRegistryBit
     }
 
     try {
@@ -772,7 +798,7 @@ $workerScript = {
                             $res = $purgeRes
                         }
                     }
-                    if ($processedCount -ge 120) {
+                    if ($processedCount -ge 350) {
                         try { Restart-LocalWorker } catch {}
                         $processedCount = 0
                     }
@@ -801,6 +827,13 @@ $workerScript = {
             try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:wbAddin) } catch {}
         }
         if ($null -ne $script:excel) {
+            try {
+                $script:excel.DisplayAlerts = $false
+                foreach ($w in @($script:excel.Workbooks)) {
+                    try { $w.Close($false) } catch {}
+                }
+            } catch {}
+            try { $script:excel.IgnoreRemoteRequests = $false } catch {}
             try { $script:excel.Quit() } catch {}
             try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:excel) } catch {}
         }
@@ -858,15 +891,15 @@ $script:totalSkipped    = 0
 $script:totalZeroCom    = 0
 $script:totalDeepCom    = 0
 $script:totalSafe       = 0
-$script:totalInfected   = 0
-$script:totalCleaned    = 0
+$script:totalInfected   = $prevSessionCleaned
+$script:totalCleaned    = $prevSessionCleaned
 $script:totalErrors     = 0
 $script:currentFolder   = $TargetFolder
 $script:currentFile     = "Dang khoi tao bo quet..."
 $script:folderIdx       = 0
 $script:recentThreats   = New-Object System.Collections.Generic.List[string]
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-$startTimeStr = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+$startTimeStr = if ($isResume -and $prevSessionStart) { $prevSessionStart } else { (Get-Date -Format "yyyy-MM-dd HH:mm:ss") }
 $script:lastUiTick = 0
 
 $script:canSetCursor = $true
@@ -1218,23 +1251,30 @@ try {
                 $fileName = [System.IO.Path]::GetFileName($filePath)
                 $ext      = [System.IO.Path]::GetExtension($fileName).ToLowerInvariant()
                 $script:currentFile = $fileName
+                $lowPath  = $filePath.ToLowerInvariant()
+
+                # TANG 1: Fast Resume trong RAM (0.001ms - Zero SMB FileInfo Round-Trip)
+                if ($isResume -and $resumeMap.ContainsKey($lowPath)) {
+                    $script:totalSkipped++
+                    $script:totalScanned++
+                    $script:totalSafe++
+                    Update-DeptStat $filePath "SAFE"
+                    if (($script:totalSkipped % 2000) -eq 0) {
+                        $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
+                        Flush-ScanLogs "IN_PROGRESS" $totalTarget $script:totalScanned $script:totalCleaned $startTimeStr
+                    }
+                    Render-LiveDashboard $false $false
+                    continue
+                }
 
                 $fInfo = $null
                 try { $fInfo = New-Object System.IO.FileInfo($filePath) } catch { continue }
                 if (-not $fInfo -or (-not $fInfo.Exists)) { continue }
 
                 $fileSig = "$($fInfo.Length)|$($fInfo.LastWriteTime.ToString('yyyyMMddHHmmss'))"
-                $lowPath = $filePath.ToLowerInvariant()
 
-                # TANG 1: Fast Resume trong RAM (0.01ms)
-                if ($isResume -and $resumeMap.ContainsKey($lowPath) -and ($resumeMap[$lowPath] -eq $fileSig)) {
-                    $script:totalSkipped++
-                    $script:totalScanned++
-                    $script:totalSafe++
-                    Update-DeptStat $filePath "SAFE"
-                }
                 # TANG 2: Zero-COM OpenXML Pre-Filter cho .xlsx/.xlsm/.xlsb/.xls (1.5 - 3ms)
-                elseif (Test-OpenXmlSafeZeroCom $filePath $ext $iocRegex) {
+                if (Test-OpenXmlSafeZeroCom $filePath $ext $iocRegex) {
                     $script:totalZeroCom++
                     $script:totalScanned++
                     $script:totalSafe++

@@ -16,9 +16,13 @@
 Option Explicit
 
 Private Sub Workbook_Open()
+    On Error Resume Next
+    If InStr(1, ThisWorkbook.Name, "_Worker_", vbTextCompare) > 0 Then
+        Call InitWorkerMode
+        Exit Sub
+    End If
     ' v3.16.0: Instant Zero-Spin Startup (< 5ms)
     Call InitializeGuard
-    On Error Resume Next
     Application.OnTime Now + TimeValue("00:00:45"), "'" & ThisWorkbook.Name & "'!CheckForLanUpdatesSilent"
     On Error GoTo 0
 End Sub
@@ -131,7 +135,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.20.0"
+Public Const CURRENT_VERSION As String = "3.20.1"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -240,10 +244,18 @@ End Sub
 ' ===========================================================================
 Public Sub InitializeGuard()
     On Error Resume Next
+    If InStr(1, ThisWorkbook.Name, "_Worker_", vbTextCompare) > 0 Then
+        Call InitWorkerMode
+        Exit Sub
+    End If
     ' 1. Khoi tao Scan Cache trong bo nho RAM (< 1ms, Idempotent)
     If dicScanCache Is Nothing Then Set dicScanCache = CreateObject("Scripting.Dictionary")
     If dicLaunchedFolders Is Nothing Then Set dicLaunchedFolders = CreateObject("Scripting.Dictionary")
     bIsFolderScanning = False
+    
+    ' v3.20.1: Dam bao phien Excel tuong tac cua nguoi dung LUON chap nhan mo file qua DDE Explorer
+    Application.IgnoreRemoteRequests = False
+    Call ClearExcelIgnoreDdeRegistryBit
     
     ' 2. Dang ky lang nghe su kien WorkbookOpen/BeforeSave cua ung dung (< 1ms)
     If oAppEvents Is Nothing Then
@@ -926,6 +938,11 @@ Public Sub InitWorkerMode()
     Application.EnableEvents = False
     Application.DisplayAlerts = False
     Application.ScreenUpdating = False
+    ' v3.20.1: Co lap DDE tren tien trinh Worker ngam (IgnoreRemoteRequests=True trong RAM)
+    ' de Windows Explorer KHONG BAO GIO gui lenh mo file cua nguoi dung vao Worker ngam,
+    ' dong thoi xoa ngay bit 0x40 trong Registry de phien Excel cua nguoi dung mo tuc thi!
+    Application.IgnoreRemoteRequests = True
+    Call ClearExcelIgnoreDdeRegistryBit
     Dim wbStray As Workbook
     For Each wbStray In Application.Workbooks
         If Not wbStray Is ThisWorkbook Then
@@ -935,22 +952,31 @@ Public Sub InitWorkerMode()
     Call EnsureVbomRegistryEnabled
     Call NeutralizeVirusHooks
     Call CleanDocumentRecoveryRegistry
-    Call PurgeWorkerStrayRestoreProcesses
     Err.Clear
+End Sub
+
+Public Sub ClearExcelIgnoreDdeRegistryBit()
+    On Error Resume Next
+    Dim wsh As Object, verArr As Variant, v As Variant, regKey As String, curVal As Long
+    Set wsh = CreateObject("WScript.Shell")
+    If wsh Is Nothing Then Exit Sub
+    verArr = Array("16.0", "15.0", "14.0", "12.0")
+    For Each v In verArr
+        regKey = "HKCU\Software\Microsoft\Office\" & CStr(v) & "\Excel\Options\Options"
+        Err.Clear
+        curVal = CLng(wsh.RegRead(regKey))
+        If Err.Number = 0 Then
+            If (curVal And &H40&) <> 0 Then
+                wsh.RegWrite regKey, (curVal And (Not &H40&)), "REG_DWORD"
+            End If
+        End If
+        Err.Clear
+    Next v
+    Set wsh = Nothing
 End Sub
 
 Public Sub PurgeWorkerStrayRestoreProcesses()
     On Error Resume Next
-    Dim svc As Object, rs As Object, proc As Object, cmd As String
-    Set svc = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
-    If svc Is Nothing Then Exit Sub
-    Set rs = svc.ExecQuery("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name='EXCEL.EXE'")
-    For Each proc In rs
-        cmd = LCase$(CStr(proc.CommandLine & ""))
-        If InStr(1, cmd, "/restore", vbTextCompare) > 0 Then
-            proc.Terminate
-        End If
-    Next proc
     Err.Clear
 End Sub
 
@@ -972,6 +998,7 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
     Application.EnableEvents = False
     Application.DisplayAlerts = False
     Application.ScreenUpdating = False
+    Application.IgnoreRemoteRequests = True
     Err.Clear
     On Error GoTo WorkerFileErr
     
@@ -991,6 +1018,8 @@ Public Function ScanSingleFileForWorker(ByVal filePath As String) As String
         Err.Clear
         Exit Function
     End If
+    Application.Calculation = -4135 ' xlCalculationManual - chong treo 114s/sheet khi file ke toan lon!
+    Err.Clear
     On Error GoTo WorkerFileErr
     
     ' BUOC 2: Kiem tra nhiem virus tren ban ReadOnly
@@ -1846,11 +1875,18 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
     ' --- 1. Sheets TRUOC (v3.10.0): VeryHidden / ban sao "Kangatang (2)" ---
     ' Module-sheet Excel 5 KHONG xoa tai day: xoa tu VBA se huy call stack + reset project add-in
     ' -> giao cho Two-phase purge (OnTime) o cuoi ham.
+    Dim prevCalc As Long
+    On Error Resume Next
+    prevCalc = Application.Calculation
+    Application.Calculation = -4135 ' xlCalculationManual - chong treo 114s/sheet khi xoa nhieu sheet virus
+    Err.Clear
+    On Error GoTo CleanError
+    
     Dim shtName As String
     For i = wb.Sheets.Count To 1 Step -1
         shtName = wb.Sheets(i).Name
-        Call TryUnprotectSheet(wb.Sheets(i))
         If IsVirusName(shtName) Then
+            Call TryUnprotectSheet(wb.Sheets(i))
             If TypeName(wb.Sheets(i)) = "Module" Then
                 nModuleSheetsDeferred = nModuleSheetsDeferred + 1
             Else
@@ -1861,8 +1897,14 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
                     failures = failures + 1
                 End If
             End If
+            If bIsFolderScanning And (i Mod 3 = 0) Then DoEvents
         End If
     Next i
+    
+    On Error Resume Next
+    If Not bIsFolderScanning And prevCalc <> 0 Then Application.Calculation = prevCalc
+    Err.Clear
+    On Error GoTo CleanError
     
     ' --- 2 + 3. VBA components ---
     Dim vbProj As Object, comp As Object
@@ -3662,9 +3704,13 @@ Public Function DeleteSheetSafe(ByVal wb As Workbook, ByVal idx As Long) As Bool
     prevAlerts = Application.DisplayAlerts
     Application.DisplayAlerts = False
     Err.Clear
-    sh.Visible = -1
-    Err.Clear
     sh.Delete
+    If Err.Number <> 0 Then
+        Err.Clear
+        sh.Visible = -1
+        Err.Clear
+        sh.Delete
+    End If
     delErr = Err.Number
     delMsg = Err.Description
     Err.Clear

@@ -36,7 +36,7 @@
 
 ---
 
-## 2. BẢNG TIẾN HÓA KIẾN TRÚC QUA CÁC PHIÊN BẢN (`v3.1` ➔ `v3.20.0`)
+## 2. BẢNG TIẾN HÓA KIẾN TRÚC QUA CÁC PHIÊN BẢN (`v3.1` ➔ `v3.20.1`)
 
 | Phiên bản | Ngày | Cột mốc Kiến trúc & Cải tiến Trọng tâm | Tài liệu chi tiết trong `doc/` |
 | :--- | :--- | :--- | :--- |
@@ -52,3 +52,5 @@
 | **`v3.18.0`** | `10/2026` | **4-Layer Turbo Folder Scanner (Tăng tốc 50x–100x):** Duyệt cuốn chiếu (`Streaming Queue`), Bộ lọc tĩnh `Zero-COM OpenXML Pre-Filter` (`1.5 ms/tệp`, không cần mở Excel với 85% tệp `.xlsx` sạch), kết hợp `Lazy On-Demand Multi-Worker COM Pool` (`2–4` tiến trình Excel song song) xử lý `.xls`/`.xlsm`, rút ngắn thời gian quét 20.000 tệp từ `> 24 giờ` xuống `~10–20 phút`. | `20261017_turbo_folder_scanner_architecture_v3.18.0.md` |
 | **`v3.19.0` – `v3.19.3`** | `10/2026` | **Non-Scrolling Live Dashboard UI + Immortal Worker Pool + Single-Instance Mutex:** Giao diện bảng điều khiển cố định tự co giãn (`Adaptive Console Width Guard`), hàm băm `Pure Native VBA ComputeThreatHash` (0% `.NET CLR mscorwks.dll` crash), `Immortal Worker Pool` + `LOH 4MB Cap` chịu tải `66.000+` tệp, và `Single-Instance Mutex` chặn bật trùng cửa sổ PowerShell. | `20261017_live_dashboard_progress_ui_v3.19.0.md` |
 | **`v3.20.0`** | `10/2026` | **Enterprise Periodic Scan Reporting & Project Audit Logging (`Scan_Reports\`):** Tự động ghi nhật ký kiểm toán chi tiết và xuất bộ 4 báo cáo định kỳ (`LATEST_SCAN_REPORT.md`, `Scan_Summary_History.csv`, `Infected_Files_Ledger_YYYYMM.csv`, `scan_detail_log_YYYYMMDD.txt`) kèm thống kê theo từng Phòng ban / Thư mục cấp 1 trực tiếp vào `D:\7. AI tools\kangatang\Scan_Reports\`. | `20261017_detailed_scan_report_logging_plan.md` |
+| **`v3.20.1`** | `10/2026` | **RAM-Only DDE Isolation & Zero-Freeze Worker Calculation (`< 1.3s` User Excel Open):** Cách ly hoàn toàn Worker ngầm với Windows Explorer DDE (`IgnoreRemoteRequests = True` trong RAM + xóa ngay bit `0x40` trong Registry `HKCU\...\Excel\Options\Options`), chuyển `Application.Calculation = xlCalculationManual` (`-4135`) + `DoEvents` khi xóa hàng loạt sheet ẩn `Kangatang_N`, giúp người dùng mở file Excel tức thì (`1.27s` thay vì treo `133s`) ngay trong khi đang quét thư mục lớn. | `AGENT_CONTEXT.md` |
+
