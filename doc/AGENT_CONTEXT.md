@@ -6,7 +6,7 @@
 
 ## 1. THÔNG TIN PHIÊN BẢN & HẠ TẦNG MẠNG LAN (CRITICAL TOPOLOGY)
 
-- **Phiên bản hiện tại:** `v3.19.1` (`Crash-Proof Headless Worker + Zero-COM OLE2/OpenXML Pre-Filter + Non-Scrolling Live Dashboard UI`)
+- **Phiên bản hiện tại:** `v3.19.2` (`Immortal Worker Pool + Anti-Freeze Watchdog + LOH Memory Guard + Non-Scrolling Live Dashboard UI`)
 - **Phân tách vai trò 2 máy chủ LAN (BẤT BIẾN):**
   | Máy chủ | Đường dẫn UNC / Local | Vai trò duy nhất | Quy tắc CẤM (Hard Constraint) |
   | :--- | :--- | :--- | :--- |
@@ -35,7 +35,7 @@
 | `modThreatCollector` | Standard Module | `L3852` – `L4080` | Băm Pure Native VBA Dual-Seed 32-bit (`ComputeThreatHash`) & thu thập mẫu mã độc JSON (`CollectThreatSample`) về máy `223.176` |
 
 ### B. Tọa độ các hàm trọng yếu trong `modKangatangScanner` (`L112` – `L2528`)
-- **Hằng số phiên bản & cấu hình (`CURRENT_VERSION = "3.19.1"`, `CENTRAL_BACKUP_HUB`):** `L115` – `L155`
+- **Hằng số phiên bản & cấu hình (`CURRENT_VERSION = "3.19.2"`, `CENTRAL_BACKUP_HUB`):** `L115` – `L155`
 - **Unicode & Headless-safe Dialog (`Uni`, `MsgBoxW`):** `L156` – `L203`
 - **ScanCache chống lag khi Save (`IsScanCacheExpired`, `UpdateScanCache`):** `L204` – `L240`
 - **Khởi tạo & Ribbon Callbacks (`InitializeGuard`, `EnsureGuardAlive`, `Ribbon_*`):** `L241` – `L356`
