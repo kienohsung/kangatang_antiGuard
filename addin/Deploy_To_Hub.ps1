@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.15.0"
+$ReleaseVersion = "3.16.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -28,7 +28,7 @@ Write-Host "`n[1/6] Dang bien dich KangatangGuard.xlam v$ReleaseVersion tu ma ng
 $installerScript = Join-Path $AddinDir "Install_KangatangGuard.ps1"
 & powershell -NoProfile -ExecutionPolicy Bypass -File $installerScript
 
-$compiledXlam = Join-Path $env:APPDATA "Microsoft\Excel\XLSTART\KangatangGuard.xlam"
+$compiledXlam = Join-Path $env:APPDATA "Microsoft\AddIns\KangatangGuard.xlam"
 if (-not (Test-Path $compiledXlam)) {
     Write-Host "`n[LOI] Khong tim thay KangatangGuard.xlam da bien dich tai $compiledXlam!" -ForegroundColor Red
     exit 1
@@ -51,9 +51,9 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    # v3.15.0: AccessVBOM Self-Healing & Zero-Popup Architecture
+    # v3.16.0: Instant Add-In Manager Integration & Zero-Spin Architecture
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - AccessVBOM Self-Healing & Zero-Popup Architecture: Khac phuc triet de hop thoai canh bao bao mat AccessVBOM khi mo Excel hoac file .xlsx/Book1; bo sungwb.HasVBProject pre-check, IsVbomAccessible() xac thuc chinh xac, tu dong phuc hoi AccessVBOM = 1 da tang (HKCU/Policies/HKLM & Post-Exit Persistence) va Out-of-Process Background Scanner Fallback khong lam gian doan nguoi dung."
+    changelog         = "v${ReleaseVersion} - Instant Add-In Manager Integration & Zero-Spin Architecture: Khac phuc triet de loi quay tron va khong add duoc Add-in trong hop thoai File -> Options -> Add-ins -> Go; loai bo co che tu go cai dat Add-in (oAi.Installed = False) trong CleanAddInCollisions, chuan hoa cai dat vao %APPDATA%\Microsoft\AddIns\KangatangGuard.xlam, dang ky OPEN* bao toan Add-in ben thu 3 (MyExcel.xlam), va toi uu InitializeGuard() < 5ms."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
@@ -113,28 +113,27 @@ if (-not (Test-Path $PrimaryRemoteHub)) {
     Write-Host "   -> [CANH BAO] Khong the ket noi den $PrimaryRemoteHub!" -ForegroundColor Red
     Write-Host "   -> Vui long kiem tra may 192.168.223.7 co dang ket noi mang khong." -ForegroundColor Red
 } else {
-    # Luon chep ban danh so phien ban va ban _latest (KHONG BAO GIO bi SMB lock boi Excel client)
+    # Luon chep ban danh so phien ban (KHONG BAO GIO bi SMB lock boi Excel client)
     $remoteXlamVer    = Join-Path $PrimaryRemoteHub "KangatangGuard_v${ReleaseVersion}.xlam"
     $remoteXlamLatest = Join-Path $PrimaryRemoteHub "KangatangGuard_latest.xlam"
     Copy-Item -Path $compiledXlam -Destination $remoteXlamVer -Force
-    Copy-Item -Path $compiledXlam -Destination $remoteXlamLatest -Force
-    Write-Host "   -> [OK] Da chep KangatangGuard_v${ReleaseVersion}.xlam & KangatangGuard_latest.xlam len May chu 223.7" -ForegroundColor Green
+    Write-Host "   -> [OK] Da chep KangatangGuard_v${ReleaseVersion}.xlam len May chu 223.7" -ForegroundColor Green
 
-    $remoteXlam = Join-Path $PrimaryRemoteHub "KangatangGuard.xlam"
-    try {
-        if (Test-Path $remoteXlam) {
-            Set-ItemProperty -Path $remoteXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+    foreach ($remoteTarget in @($remoteXlamLatest, (Join-Path $PrimaryRemoteHub "KangatangGuard.xlam"))) {
+        $targetName = [System.IO.Path]::GetFileName($remoteTarget)
+        try {
+            if (Test-Path $remoteTarget) {
+                Set-ItemProperty -Path $remoteTarget -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+            }
+            Copy-Item -Path $compiledXlam -Destination $remoteTarget -Force -ErrorAction Stop
+            Set-ItemProperty -Path $remoteTarget -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+            Write-Host "   -> [OK] Da chep $targetName len May chu 223.7" -ForegroundColor Green
+        } catch {
+            Write-Host "   -> [LUU Y] $targetName tren 223.7 dang duoc mo boi 1 may tram LAN (SMB lock)." -ForegroundColor Yellow
+            $bgSyncCmd = "for (`$i=0; `$i -lt 720; `$i++) { try { Copy-Item -LiteralPath '$targetLocalXlam' -Destination '$remoteTarget' -Force -ErrorAction Stop; break } catch { Start-Sleep -Seconds 30 } }"
+            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$bgSyncCmd`""
+            Write-Host "   -> [OK] Da kich hoat Background Sync Watcher cho $targetName." -ForegroundColor Green
         }
-        Copy-Item -Path $compiledXlam -Destination $remoteXlam -Force -ErrorAction Stop
-        Set-ItemProperty -Path $remoteXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
-        Write-Host "   -> [OK] Da chep KangatangGuard.xlam len May chu 223.7" -ForegroundColor Green
-    } catch {
-        Write-Host "   -> [LUU Y] KangatangGuard.xlam tren 223.7 dang duoc mo truc tiep boi 1 may trạm LAN (SMB lock)." -ForegroundColor Yellow
-        Write-Host "   -> [OK] Cac may cai moi / cap nhat se tu dong lay tu KangatangGuard_v${ReleaseVersion}.xlam & KangatangGuard_latest.xlam!" -ForegroundColor Green
-        # Khoi chay tien trinh ngam tu dong ghi de KangatangGuard.xlam ngay khi may tram dong Excel
-        $bgSyncCmd = "for (`$i=0; `$i -lt 720; `$i++) { try { Copy-Item -LiteralPath '$targetLocalXlam' -Destination '$remoteXlam' -Force -ErrorAction Stop; break } catch { Start-Sleep -Seconds 30 } }"
-        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$bgSyncCmd`""
-        Write-Host "   -> [OK] Da kich hoat Background Sync Watcher (tu dong cap nhat KangatangGuard.xlam khi may tram dong Excel)." -ForegroundColor Green
     }
 
     # Chep cac tep ho tro

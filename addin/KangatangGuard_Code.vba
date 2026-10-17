@@ -16,12 +16,17 @@
 Option Explicit
 
 Private Sub Workbook_Open()
-    ' v3.8.6: Core-Only Startup - Chi nap code cot loi, loai bo moi tac vu WMI/Network chan UI
+    ' v3.16.0: Instant Zero-Spin Startup (< 5ms)
     Call InitializeGuard
-    ' Tri hoan kiem tra cap nhat LAN 45 giay de Excel nhan roi hoan toan va rate-limit 24h
     On Error Resume Next
     Application.OnTime Now + TimeValue("00:00:45"), "'" & ThisWorkbook.Name & "'!CheckForLanUpdatesSilent"
     On Error GoTo 0
+End Sub
+
+Private Sub Workbook_AddinInstall()
+    ' v3.16.0: Dam bao khi nguoi dung tick chon hoac Browse -> OK trong Excel Options -> Add-ins
+    ' thi Add-in duoc kich hoat tuc thi (< 5ms) khong quay tron va khong tu huy.
+    Call InitializeGuard
 End Sub
 
 Private Sub Workbook_BeforeClose(Cancel As Boolean)
@@ -41,6 +46,17 @@ Public WithEvents xlApp As Excel.Application
 Private Sub xlApp_WorkbookOpen(ByVal Wb As Workbook)
     On Error Resume Next
     If bIsFolderScanning Then Exit Sub
+    If IsWhitelisted(Wb) Then Exit Sub
+    ' v3.16.0: Neu tep mo la mot Add-in (.xlam/.xla) cua ben thu 3 (vd MyExcel.xlam),
+    ' chi kiem tra nhanh theo ten (< 2ms) de khong lam treo hop thoai Excel Add-ins khi nguoi dung bam OK.
+    If Wb.IsAddin Then
+        Dim reason As String
+        If QuickCheckWorkbook(Wb, reason) Then
+            WriteLog "[ADDIN_OPEN_HIT] " & Wb.FullName & " | " & reason
+            Call ScanWorkbook(Wb)
+        End If
+        Exit Sub
+    End If
     Call ScanWorkbook(Wb)
     ' v3.10.0: Virus co the chen sheet ngay sau khi mo -> kiem tra lai tre 1 giay
     Call ScheduleShieldCheck
@@ -52,6 +68,7 @@ Private Sub xlApp_WorkbookBeforeSave(ByVal Wb As Workbook, ByVal SaveAsUI As Boo
     ' Neu nhiem: lam sach trong bo nho, KHONG goi wb.Save (tranh de quy) - lan luu hien tai se ghi ban sach.
     On Error Resume Next
     If bIsFolderScanning Then Exit Sub
+    If Wb.IsAddin Then Exit Sub
     Dim reason As String
     If QuickCheckWorkbook(Wb, reason) Then
         WriteLog "[BEFORESAVE_HIT] " & Wb.FullName & " | " & reason
@@ -85,7 +102,7 @@ Private Sub xlApp_WorkbookActivate(ByVal Wb As Workbook)
     ' v3.13.0: Bao toan clipboard khi chuyen doi qua lai giua cac file Excel (Cross-Workbook Copy/Paste)
     If Application.CutCopyMode <> 0 Then Exit Sub
     Call ScheduleShieldCheck
-    Call RestoreExcelClipboardAndUI(Wb)
+    Call EnsureClipboardShortcutsAndMenus(Wb)
     On Error GoTo 0
 End Sub
 
@@ -107,13 +124,14 @@ Option Explicit
 ' --- Bien toan cuc ---
 Private oAppEvents As clsAppEvents
 Public bIsFolderScanning As Boolean
+Private bStartupSweepScheduled As Boolean
 
 ' Scan Cache chong lag: key=UCase(FullName), value=Date
 Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu cua so quet ngam cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.15.0"
+Public Const CURRENT_VERSION As String = "3.16.0"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -207,29 +225,30 @@ Private Sub UpdateScanCache(ByVal wb As Workbook)
 End Sub
 
 ' ===========================================================================
-'' Ham khoi tao va huy event handler (v3.8.6: Core-Only Zero-Delay Startup)
+'' Ham khoi tao va huy event handler (v3.16.0: Instant Zero-Spin Add-In Load)
 ' ===========================================================================
 Public Sub InitializeGuard()
     On Error Resume Next
-    ' 0. Khoi phuc clipboard, phim tat, menu chuot phai va dam bao AccessVBOM = 1 (v3.15.0)
-    Call EnsureVbomRegistryEnabled
-    Call RestoreExcelClipboardAndUI
-    
-    ' 1. Khoi tao Scan Cache trong bo nho RAM (< 1ms)
-    Set dicScanCache = CreateObject("Scripting.Dictionary")
-    Set dicLaunchedFolders = CreateObject("Scripting.Dictionary")
+    ' 1. Khoi tao Scan Cache trong bo nho RAM (< 1ms, Idempotent)
+    If dicScanCache Is Nothing Then Set dicScanCache = CreateObject("Scripting.Dictionary")
+    If dicLaunchedFolders Is Nothing Then Set dicLaunchedFolders = CreateObject("Scripting.Dictionary")
     bIsFolderScanning = False
     
     ' 2. Dang ky lang nghe su kien WorkbookOpen/BeforeSave cua ung dung (< 1ms)
-    Set oAppEvents = New clsAppEvents
-    Set oAppEvents.xlApp = Application
+    If oAppEvents Is Nothing Then
+        Set oAppEvents = New clsAppEvents
+        Set oAppEvents.xlApp = Application
+    End If
     
-    ' 2b. v3.10.0: Quet quet toan bo workbook DA MO san (ke ca an: mypersonnel1.xls, PERSONAL.XLSB, add-in)
-    ' Tri hoan 3 giay de khong lam cham khoi dong Excel (khong I/O mang)
-    Application.OnTime Now + TimeSerial(0, 0, 3), "'" & ThisWorkbook.Name & "'!ShieldStartupSweep"
+    ' 3. Khoi phuc nhanh phim tat Ctrl+C/V/X va menu chuot phai (< 3ms, khong Reset CommandBars)
+    Call EnsureClipboardShortcutsAndMenus
     
-    ' 3. Don sach moi thanh cong cu CommandBars cu trong cache (< 1ms)
-    Call RemoveMenu
+    ' 4. Tri hoan 1 giay cho ShieldStartupSweep (chi dat lich 1 lan duy nhat trong phien)
+    '    Giup hop thoai File -> Options -> Add-ins -> Go -> OK dong tuc thi khong xoay tron!
+    If Not bStartupSweepScheduled Then
+        bStartupSweepScheduled = True
+        Application.OnTime Now + TimeSerial(0, 0, 1), "'" & ThisWorkbook.Name & "'!ShieldStartupSweep"
+    End If
     On Error GoTo 0
 End Sub
 
@@ -242,6 +261,7 @@ Public Sub TerminateGuard()
     Set oAppEvents = Nothing
     Set dicScanCache = Nothing
     bIsFolderScanning = False
+    bStartupSweepScheduled = False
     On Error GoTo 0
 End Sub
 
@@ -320,10 +340,10 @@ Public Sub Ribbon_RestoreClipboardAndUI(control As IRibbonControl)
 End Sub
 
 ' ===========================================================================
-' Ham kiem tra whitelist (v3.10.0: CHI bo qua chinh add-in KangatangGuard)
+' Ham kiem tra whitelist (v3.16.0: CHI bo qua chinh add-in KangatangGuard)
 ' Truoc day bo qua MOI .xlam va PERSONAL.XLSB -> diem mu dung noi virus tru an.
 ' ===========================================================================
-Private Function IsWhitelisted(ByVal wb As Workbook) As Boolean
+Public Function IsWhitelisted(ByVal wb As Workbook) As Boolean
     IsWhitelisted = False
     On Error Resume Next
     
@@ -332,7 +352,7 @@ Private Function IsWhitelisted(ByVal wb As Workbook) As Boolean
         Exit Function
     End If
     
-    If UCase(wb.Name) = UCase(ADDIN_NAME) Then
+    If UCase(wb.Name) = UCase(ADDIN_NAME) Or Left$(LCase$(wb.Name), 14) = "kangatangguard" Then
         IsWhitelisted = True
         Exit Function
     End If
@@ -504,7 +524,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
     
     If Not virusFound Then
         WriteLog "[SAFE] " & wb.FullName
-        Call RestoreExcelClipboardAndUI(wb)
+        Call EnsureClipboardShortcutsAndMenus(wb)
         Exit Sub
     End If
     
@@ -905,44 +925,28 @@ Public Sub Kangatang_ShortcutCut()
 End Sub
 
 ' ===========================================================================
-' KHOI PHUC CLIPBOARD, PHIM TAT VA GIAO DIEN EXCEL (v3.13.0)
-' Khac phuc triet de loi khong the Copy/Paste hoac mat chuot phai do tan du virus
+' KHOI PHUC NHANH PHIM TAT VA MENU CHUOT PHAI (< 3ms, KHONG RESET COMMANDBARS)
+' v3.16.0: Dung khi khoi dong Add-in, chuyen cua so hoac mo file sach
+' Khong goi CommandBars.Reset de tranh xoay tron (spinning cursor) va khong
+' xoa thanh cong cu cua cac Add-in ben thu 3 (nhu MyExcel.xlam).
 ' ===========================================================================
-Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Nothing)
+Public Sub EnsureClipboardShortcutsAndMenus(Optional ByVal targetWb As Workbook = Nothing)
     On Error Resume Next
     
     ' v3.13.0: Neu dang co du lieu Copy/Cut (CutCopyMode <> 0), tuyet doi khong thuc hien
-    ' cac lenh lam huy buffer nhu CellDragAndDrop hoac CommandBars.Reset.
+    ' cac lenh lam huy buffer nhu CellDragAndDrop.
     If Application.CutCopyMode <> 0 Then Exit Sub
     
     Dim sAddinPrefix As String
     sAddinPrefix = "'" & ThisWorkbook.Name & "'!"
     
     ' 1. Go bo toan bo cac phim tat bi virus chiem dung hoac vo hieu hoa
-    Application.OnKey "^c"
-    Application.OnKey "^C"
-    Application.OnKey "^{c}"
-    Application.OnKey "^{C}"
     Application.OnKey "^+{c}"
     Application.OnKey "^+{C}"
-    Application.OnKey "^{INSERT}"
-    
-    Application.OnKey "^v"
-    Application.OnKey "^V"
-    Application.OnKey "^{v}"
-    Application.OnKey "^{V}"
     Application.OnKey "^+{v}"
     Application.OnKey "^+{V}"
-    Application.OnKey "+{INSERT}"
-    
-    Application.OnKey "^x"
-    Application.OnKey "^X"
-    Application.OnKey "^{x}"
-    Application.OnKey "^{X}"
     Application.OnKey "^+{x}"
     Application.OnKey "^+{X}"
-    Application.OnKey "+{DELETE}"
-    
     Application.OnKey "^z"
     Application.OnKey "^Z"
     Application.OnKey "^y"
@@ -956,7 +960,6 @@ Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Noth
     
     ' 2. Enforced Shortcut Routing (v3.12.1):
     ' Dinh tuyen truc tiep Ctrl+C, Ctrl+V, Ctrl+X vao quy trinh sao chep cua Add-in
-    ' Khac phuc triet de tinh trang liet phim tat do hong ban accelerator cua Office
     Application.OnKey "^c", sAddinPrefix & "Kangatang_ShortcutCopy"
     Application.OnKey "^C", sAddinPrefix & "Kangatang_ShortcutCopy"
     Application.OnKey "^{c}", sAddinPrefix & "Kangatang_ShortcutCopy"
@@ -978,31 +981,19 @@ Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Noth
     ' 3. Khoi phuc tinh nang keo tha o tinh
     Application.CellDragAndDrop = True
     
-    ' 4. Bat lai va Reset TOAN BO cac CommandBars (Cell, Row, Column, etc.)
-    Dim iCb As Long, cbItem As Object, ctrlItem As Object
-    For iCb = 1 To Application.CommandBars.Count
-        Set cbItem = Nothing
-        Set cbItem = Application.CommandBars(iCb)
-        If Not cbItem Is Nothing Then
-            Select Case cbItem.Name
-                Case "Cell", "Row", "Column", "XLM Cell", "Standard", "Worksheet Menu Bar"
-                    cbItem.Enabled = True
-                    cbItem.Reset
-                    For Each ctrlItem In cbItem.Controls
-                        ctrlItem.Enabled = True
-                    Next ctrlItem
-            End Select
+    ' 4. Bat lai cac menu chuot phai truc tiep theo ten (< 1ms, khong duyet 150 CommandBars, khong Reset)
+    Dim ctxNames As Variant, cName As Variant, cbCtx As Object, ctrlItem As Object
+    ctxNames = Array("Cell", "Row", "Column", "XLM Cell")
+    For Each cName In ctxNames
+        Set cbCtx = Nothing
+        Set cbCtx = Application.CommandBars(CStr(cName))
+        If Not cbCtx Is Nothing Then
+            cbCtx.Enabled = True
+            For Each ctrlItem In cbCtx.Controls
+                ctrlItem.Enabled = True
+            Next ctrlItem
         End If
-    Next iCb
-    
-    ' Bat cac nut Copy, Cut, Paste tren he thong theo Office Control ID
-    Dim sysIds As Variant, vId As Variant, fCtrl As Object
-    sysIds = Array(19, 21, 22, 21437, 3624, 755, 369)
-    For Each vId In sysIds
-        Set fCtrl = Nothing
-        Set fCtrl = Application.CommandBars.FindControl(Id:=CLng(vId))
-        If Not fCtrl Is Nothing Then fCtrl.Enabled = True
-    Next vId
+    Next cName
     
     ' 5. Xoa triet de cac hook su kien mo coi cua Excel Application
     Application.OnSheetActivate = ""
@@ -1012,17 +1003,58 @@ Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Noth
     Application.OnDoubleClick = ""
     Application.OnEntry = ""
     
-    ' 6. Khoi phuc quyen chon o tinh va bo khoa tren cac sheet (xlNoRestrictions = -4142)
+    ' 6. Khoi phuc quyen chon o tinh va bo khoa tren cac sheet cua workbook thuong (bo qua Add-in)
     Dim wbToFix As Workbook, sItem As Object
     Set wbToFix = targetWb
     If wbToFix Is Nothing Then Set wbToFix = ActiveWorkbook
     If Not wbToFix Is Nothing Then
-        For Each sItem In wbToFix.Sheets
-            On Error Resume Next
-            Call TryUnprotectSheet(sItem)
-            sItem.EnableSelection = -4142
-        Next sItem
+        If Not wbToFix.IsAddin Then
+            For Each sItem In wbToFix.Sheets
+                On Error Resume Next
+                Call TryUnprotectSheet(sItem)
+                sItem.EnableSelection = -4142
+            Next sItem
+        End If
     End If
+    
+    On Error GoTo 0
+End Sub
+
+' ===========================================================================
+' KHOI PHUC TOAN DIEN CLIPBOARD, PHIM TAT VA GIAO DIEN EXCEL (v3.16.0)
+' Dung khi vua diet xong virus hoac khi nguoi dung bam nut "Khoi phuc Copy/Paste"
+' ===========================================================================
+Public Sub RestoreExcelClipboardAndUI(Optional ByVal targetWb As Workbook = Nothing)
+    On Error Resume Next
+    
+    If Application.CutCopyMode <> 0 Then Exit Sub
+    
+    Call EnsureClipboardShortcutsAndMenus(targetWb)
+    
+    ' Reset rieng cac menu chuot phai (Cell, Row, Column, XLM Cell)
+    ' TUYET DOI KHONG Reset "Worksheet Menu Bar" hay "Standard" de bao toan menu cua cac Add-in khac (vd: MyExcel)
+    Dim ctxNames As Variant, cName As Variant, cbCtx As Object, ctrlItem As Object
+    ctxNames = Array("Cell", "Row", "Column", "XLM Cell")
+    For Each cName In ctxNames
+        Set cbCtx = Nothing
+        Set cbCtx = Application.CommandBars(CStr(cName))
+        If Not cbCtx Is Nothing Then
+            cbCtx.Enabled = True
+            cbCtx.Reset
+            For Each ctrlItem In cbCtx.Controls
+                ctrlItem.Enabled = True
+            Next ctrlItem
+        End If
+    Next cName
+    
+    ' Bat cac nut Copy, Cut, Paste tren he thong theo Office Control ID
+    Dim sysIds As Variant, vId As Variant, fCtrl As Object
+    sysIds = Array(19, 21, 22, 21437, 3624, 755, 369)
+    For Each vId In sysIds
+        Set fCtrl = Nothing
+        Set fCtrl = Application.CommandBars.FindControl(Id:=CLng(vId))
+        If Not fCtrl Is Nothing Then fCtrl.Enabled = True
+    Next vId
     
     WriteLog "[UI_RESTORE] Excel clipboard, shortcuts, context menus, and event hooks restored (v" & CURRENT_VERSION & ")."
     On Error GoTo 0
@@ -1806,15 +1838,21 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     ts.WriteLine "ping -n 3 127.0.0.1 >nul"
     ts.WriteLine ":APPLY"
     ts.WriteLine "ping -n 2 127.0.0.1 >nul"
+    ts.WriteLine "if not exist """ & addInsDir & """ mkdir """ & addInsDir & """ >nul 2>&1"
     ts.WriteLine "attrib -r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "attrib -r """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "attrib -r """ & stagedDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "attrib -r """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1"
+    ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
+    ts.WriteLine "if errorlevel 1 goto FALLBACK_XLSTART"
+    ts.WriteLine "fc /b """ & stagedDir & "\KangatangGuard.xlam"" """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
+    ts.WriteLine "if errorlevel 1 goto FALLBACK_XLSTART"
+    ts.WriteLine "if exist """ & xlStartDir & "\KangatangGuard.xlam"" del /f /q """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
+    ts.WriteLine "goto COPY_PS1"
+    ts.WriteLine ":FALLBACK_XLSTART"
     ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "if errorlevel 1 goto FAIL"
-    ts.WriteLine "fc /b """ & stagedDir & "\KangatangGuard.xlam"" """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
-    ts.WriteLine "if errorlevel 1 goto FAIL"
-    ts.WriteLine "if exist """ & addInsDir & "\KangatangGuard.xlam"" copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
+    ts.WriteLine ":COPY_PS1"
     ts.WriteLine "if exist """ & stagedDir & "\Kangatang_FolderScanner.ps1"" copy /y """ & stagedDir & "\Kangatang_FolderScanner.ps1"" """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1"
     ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""InstalledVersion"" /t REG_SZ /d """ & serverVer & """ /f >nul 2>&1"
     ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""ScannerScript"" /t REG_SZ /d """ & guardDir & "\Kangatang_FolderScanner.ps1"" /f >nul 2>&1"
@@ -1826,9 +1864,6 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     ts.WriteLine "reg delete ""HKCU\Software\Policies\Microsoft\Office\15.0\Excel\Security"" /v ""AccessVBOM"" /f >nul 2>&1"
     ts.WriteLine "reg delete ""HKCU\Software\Policies\Microsoft\Office\14.0\Excel\Security"" /v ""AccessVBOM"" /f >nul 2>&1"
     ts.WriteLine "reg delete ""HKCU\Software\KangatangGuard"" /v ""LastVbomWarn"" /f >nul 2>&1"
-    ts.WriteLine "reg delete ""HKCU\Software\Microsoft\Office\16.0\Excel\Add-in Manager"" /v ""KangatangGuard.xlam"" /f >nul 2>&1"
-    ts.WriteLine "reg delete ""HKCU\Software\Microsoft\Office\15.0\Excel\Add-in Manager"" /v ""KangatangGuard.xlam"" /f >nul 2>&1"
-    ts.WriteLine "reg delete ""HKCU\Software\Microsoft\Office\14.0\Excel\Add-in Manager"" /v ""KangatangGuard.xlam"" /f >nul 2>&1"
     ts.WriteLine "echo [%date% %time%] SUCCESS: applied v" & serverVer & " >> ""%LOG%"""
     ts.WriteLine "exit /b 0"
     ts.WriteLine ":FAIL"
@@ -2146,7 +2181,9 @@ Public Sub ShieldStartupSweep()
     On Error GoTo SweepErr
     WriteLog "[SHIELD_STARTUP] Sweep started (v" & CURRENT_VERSION & ")"
     
+    Call EnsureVbomRegistryEnabled
     Call NeutralizeVirusHooks
+    Call RemoveMenu
     
     ' Dong va cach ly ngay cac workbook mang ten virus dang mo (mypersonnel*, kangatang*)
     Dim curWb As Workbook
@@ -2203,13 +2240,13 @@ Public Sub ShieldStartupSweep()
     Call ApplyStartupVaccine
     Call CleanDocumentRecoveryRegistry
     Call CleanAddInCollisions
-    Call RestoreExcelClipboardAndUI
+    Call EnsureClipboardShortcutsAndMenus
     WriteLog "[SHIELD_STARTUP] Sweep finished: " & wbs.Count & " workbook(s), " & addinWbs.Count & " add-in(s)"
     Exit Sub
     
 SweepErr:
     bShieldContext = False
-    Call RestoreExcelClipboardAndUI
+    Call EnsureClipboardShortcutsAndMenus
     WriteLog "[SHIELD_ERROR] ShieldStartupSweep: " & Err.Description
 End Sub
 
@@ -2428,28 +2465,79 @@ Public Sub ApplyStartupVaccine()
 End Sub
 
 ' ===========================================================================
-' VACCINE v3.10.0: Xoa bo trung lap Add-in va khoa OPEN gay xung dot khoi dong
+' VACCINE v3.16.0: Dong bo Add-in cuc bo (%APPDATA%\Microsoft\AddIns) & chong xung dot XLSTART
+' 1. TUYET DOI KHONG go cai dat Add-in (khong dat oAi.Installed = False, khong xoa AddIns\KangatangGuard.xlam)
+'    giup hop thoai File -> Options -> Add-ins -> Go... -> OK luon tich chon [x] Kangatangguard!
+' 2. Neu Add-in duoc nap tu XLSTART hoac UNC (\\192.168.223.7\...), tu dong sao chep ve
+'    %APPDATA%\Microsoft\AddIns\KangatangGuard.xlam va dang ky OPEN* de Excel nap cuc nhanh.
+' 3. Neu Add-in dang nap tu %APPDATA%\Microsoft\AddIns, xoa ban trung lap trong XLSTART (neu co).
 ' ===========================================================================
 Public Sub CleanAddInCollisions()
     On Error Resume Next
-    Dim reg As Object, fso As Object
+    Dim reg As Object, fso As Object, wsh As Object
     Set reg = GetObject("winmgmts:\\.\root\default:StdRegProv")
     Set fso = CreateObject("Scripting.FileSystemObject")
+    Set wsh = CreateObject("WScript.Shell")
     
     Const HKEY_CURRENT_USER = &H80000001
+    Dim curVer As String
+    curVer = Replace(Trim$(Application.Version), ",", ".")
+    If Len(curVer) = 0 Then curVer = "16.0"
+    
     Dim officeVers As Variant, ver As Variant
     officeVers = Array("16.0", "15.0", "14.0")
     
-    ' 1. Xoa tep trung lap trong %APPDATA%\Microsoft\AddIns de khong bi nap 2 lan
-    Dim addInsPath As String, dupFile As String
+    ' 1. Dam bao ban cuc bo %APPDATA%\Microsoft\AddIns\KangatangGuard.xlam luon ton tai va cap nhat
+    Dim addInsPath As String, localAddInFile As String, xlStartFile As String
     addInsPath = Environ("APPDATA") & "\Microsoft\AddIns"
-    If fso.FolderExists(addInsPath) Then
-        dupFile = addInsPath & "\" & ADDIN_NAME
-        If fso.FileExists(dupFile) Then
-            fso.GetFile(dupFile).Attributes = 0
-            fso.DeleteFile dupFile, True
-            WriteLog "[COLLISION_FIX] Removed duplicate in AddIns folder: " & dupFile
+    If Not fso.FolderExists(addInsPath) Then fso.CreateFolder addInsPath
+    localAddInFile = addInsPath & "\" & ADDIN_NAME
+    xlStartFile = Environ("APPDATA") & "\Microsoft\Excel\XLSTART\" & ADDIN_NAME
+    
+    If LCase$(ThisWorkbook.FullName) <> LCase$(localAddInFile) Then
+        If fso.FileExists(ThisWorkbook.FullName) Then
+            If fso.FileExists(localAddInFile) Then fso.GetFile(localAddInFile).Attributes = 0
+            fso.CopyFile ThisWorkbook.FullName, localAddInFile, True
+            If Err.Number = 0 Then
+                WriteLog "[ADDIN_SYNC] Synced local AddIns copy: " & localAddInFile
+            End If
+            Err.Clear
         End If
+    End If
+    
+    ' 2. Neu ThisWorkbook KHONG nam trong XLSTART, xoa ban trung lap trong XLSTART (tranh xung dot ten file)
+    If InStr(1, ThisWorkbook.FullName, "XLSTART", vbTextCompare) = 0 Then
+        If fso.FileExists(xlStartFile) Then
+            fso.GetFile(xlStartFile).Attributes = 0
+            fso.DeleteFile xlStartFile, True
+            If Not fso.FileExists(xlStartFile) Then
+                WriteLog "[COLLISION_FIX] Removed duplicate in XLSTART folder: " & xlStartFile
+            End If
+            Err.Clear
+        End If
+    End If
+    
+    ' 3. Tu dong provision Kangatang_FolderScanner.ps1 va Registry HKCU\Software\KangatangGuard
+    '    khi nguoi dung add truc tiep file .xlam qua Options -> Add-ins -> Go -> Browse
+    Dim guardDir As String, localPs1 As String, siblingPs1 As String
+    guardDir = Environ("APPDATA") & "\KangatangGuard"
+    If Not fso.FolderExists(guardDir) Then fso.CreateFolder guardDir
+    localPs1 = guardDir & "\Kangatang_FolderScanner.ps1"
+    If Len(ThisWorkbook.Path) > 0 Then
+        siblingPs1 = ThisWorkbook.Path & "\Kangatang_FolderScanner.ps1"
+        If Not fso.FileExists(localPs1) Then
+            If fso.FileExists(siblingPs1) Then
+                fso.CopyFile siblingPs1, localPs1, True
+                WriteLog "[ADDIN_SYNC] Provisioned scanner script from " & siblingPs1
+            End If
+        End If
+    End If
+    If Not wsh Is Nothing Then
+        wsh.RegWrite "HKCU\Software\KangatangGuard\InstalledVersion", CURRENT_VERSION, "REG_SZ"
+        If fso.FileExists(localPs1) Then
+            wsh.RegWrite "HKCU\Software\KangatangGuard\ScannerScript", localPs1, "REG_SZ"
+        End If
+        Err.Clear
     End If
     
     If reg Is Nothing Then Exit Sub
@@ -2458,35 +2546,71 @@ Public Sub CleanAddInCollisions()
         Dim optPath As String, valNames As Variant, valTypes As Variant, vn As Variant
         optPath = "Software\Microsoft\Office\" & ver & "\Excel\Options"
         
-        ' 2. Xoa cac khoa OPEN* tro toi KangatangGuard.xlam
+        ' 4. Chuan hoa khoa OPEN* tro toi "KangatangGuard.xlam" cuc bo (giu nguyen cac Add-in khac nhu MyExcel.xlam)
+        Dim foundKangatangOpen As Boolean, usedOpenSlots As Object
+        foundKangatangOpen = False
+        Set usedOpenSlots = CreateObject("Scripting.Dictionary")
+        valNames = Empty
+        valTypes = Empty
         reg.EnumValues HKEY_CURRENT_USER, optPath, valNames, valTypes
         If IsArray(valNames) Then
             For Each vn In valNames
                 If UCase$(Left$(CStr(vn), 4)) = "OPEN" Then
+                    usedOpenSlots(UCase$(CStr(vn))) = True
                     Dim strVal As String
                     strVal = ""
                     reg.GetStringValue HKEY_CURRENT_USER, optPath, CStr(vn), strVal
-                    If InStr(1, strVal, "KangatangGuard.xlam", vbTextCompare) > 0 Then
-                        reg.DeleteValue HKEY_CURRENT_USER, optPath, CStr(vn)
-                        WriteLog "[COLLISION_FIX] Removed registry entry " & optPath & "\" & CStr(vn) & " (" & strVal & ")"
+                    If InStr(1, strVal, "KangatangGuard", vbTextCompare) > 0 Then
+                        If Not foundKangatangOpen Then
+                            foundKangatangOpen = True
+                            ' Neu OPEN* dang tro toi UNC hoac XLSTART va ban cuc bo AddIns da co -> chuyen ve "KangatangGuard.xlam"
+                            If fso.FileExists(localAddInFile) And strVal <> """" & ADDIN_NAME & """" And strVal <> ADDIN_NAME Then
+                                reg.SetStringValue HKEY_CURRENT_USER, optPath, CStr(vn), """" & ADDIN_NAME & """"
+                                WriteLog "[ADDIN_SYNC] Normalized " & optPath & "\" & CStr(vn) & " -> """ & ADDIN_NAME & """"
+                            End If
+                        Else
+                            ' Xoa cac khoa OPEN* bi trung lap thu 2 tro đi cua KangatangGuard
+                            reg.DeleteValue HKEY_CURRENT_USER, optPath, CStr(vn)
+                            WriteLog "[COLLISION_FIX] Removed duplicate OPEN entry " & optPath & "\" & CStr(vn)
+                        End If
                     End If
                 End If
             Next vn
         End If
         
-        ' 3. Xoa AddInLoadTimes neu co
+        ' Neu phien ban Office hien tai chua co khoa OPEN* cho KangatangGuard.xlam -> dang ky vao slot OPEN trong dau tien
+        If CStr(ver) = curVer And Not foundKangatangOpen And fso.FileExists(localAddInFile) Then
+            Dim slotIdx As Long, slotName As String
+            For slotIdx = 0 To 20
+                If slotIdx = 0 Then
+                    slotName = "OPEN"
+                Else
+                    slotName = "OPEN" & CStr(slotIdx)
+                End If
+                If Not usedOpenSlots.Exists(slotName) Then
+                    reg.CreateKey HKEY_CURRENT_USER, optPath
+                    reg.SetStringValue HKEY_CURRENT_USER, optPath, slotName, """" & ADDIN_NAME & """"
+                    WriteLog "[ADDIN_SYNC] Registered " & optPath & "\" & slotName & " = """ & ADDIN_NAME & """"
+                    Exit For
+                End If
+            Next slotIdx
+        End If
+        
+        ' 5. Xoa AddInLoadTimes neu co
         Dim loadTimesPath As String
         loadTimesPath = "Software\Microsoft\Office\" & ver & "\Excel\AddInLoadTimes"
         reg.DeleteValue HKEY_CURRENT_USER, loadTimesPath, ADDIN_NAME
         reg.DeleteValue HKEY_CURRENT_USER, loadTimesPath, "KangatangGuard"
         
-        ' 4. Xoa khoi Resiliency\DisabledItems neu Office vo tinh danh dau vo hieu hoa
+        ' 6. Xoa khoi Resiliency\DisabledItems neu Office vo tinh danh dau vo hieu hoa
         Dim disPath As String, disVals As Variant, dv As Variant
         disPath = "Software\Microsoft\Office\" & ver & "\Excel\Resiliency\DisabledItems"
+        disVals = Empty
         reg.EnumValues HKEY_CURRENT_USER, disPath, disVals
         If IsArray(disVals) Then
             For Each dv In disVals
                 Dim binVal As Variant
+                binVal = Empty
                 reg.GetBinaryValue HKEY_CURRENT_USER, disPath, CStr(dv), binVal
                 If IsArray(binVal) Then
                     Dim textRepr As String, i As Long
@@ -2504,39 +2628,30 @@ Public Sub CleanAddInCollisions()
             Next dv
         End If
         
-        ' 5. (v3.11.0) Xoa khoi Add-in Manager neu tro toi KangatangGuard hoac UNC path cu
+        ' 7. Chi xoa cac duong dan UNC mang cu trong Add-in Manager (khong xoa muc cuc bo)
         Dim aimPath As String, aimVals As Variant, av As Variant, avTypes As Variant
         aimPath = "Software\Microsoft\Office\" & ver & "\Excel\Add-in Manager"
+        aimVals = Empty
+        avTypes = Empty
         reg.EnumValues HKEY_CURRENT_USER, aimPath, aimVals, avTypes
         If IsArray(aimVals) Then
             For Each av In aimVals
                 Dim aimStr As String
                 aimStr = CStr(av)
-                If InStr(1, aimStr, "KangatangGuard", vbTextCompare) > 0 Or InStr(1, aimStr, "addin_kangatang", vbTextCompare) > 0 Then
+                If Left$(aimStr, 2) = "\\" And (InStr(1, aimStr, "KangatangGuard", vbTextCompare) > 0 Or InStr(1, aimStr, "addin_kangatang", vbTextCompare) > 0) Then
                     reg.DeleteValue HKEY_CURRENT_USER, aimPath, aimStr
-                    WriteLog "[COLLISION_FIX] Removed from Add-in Manager: " & aimStr
+                    WriteLog "[COLLISION_FIX] Removed UNC path from Add-in Manager: " & aimStr
                 End If
             Next av
         End If
         
-        ' 6. (v3.11.0) Dam bao AccessVBOM = 1 va AllowNetworkLocations = 1 trong HKCU Security
+        ' 8. Dam bao AccessVBOM = 1 va AllowNetworkLocations = 1 trong HKCU Security
         Dim secPath As String
         secPath = "Software\Microsoft\Office\" & ver & "\Excel\Security"
         reg.SetDWORDValue HKEY_CURRENT_USER, secPath, "AccessVBOM", 1
         reg.SetDWORDValue HKEY_CURRENT_USER, secPath, "AllowNetworkLocations", 1
     Next ver
     
-    ' 7. (v3.11.0) Go bo cac Add-in trung lap trong Application.AddIns (chi cho phep duy nhat XLSTART)
-    Dim oAi As Object
-    On Error Resume Next
-    For Each oAi In Application.AddIns
-        If InStr(1, oAi.Name, "KangatangGuard", vbTextCompare) > 0 Or InStr(1, oAi.FullName, "KangatangGuard", vbTextCompare) > 0 Then
-            If InStr(1, oAi.FullName, "XLSTART", vbTextCompare) = 0 Then
-                oAi.Installed = False
-                WriteLog "[COLLISION_FIX] Uninstalled duplicate Add-in from Application.AddIns: " & oAi.FullName
-            End If
-        End If
-    Next oAi
     Err.Clear
 End Sub
 
@@ -2680,27 +2795,35 @@ Public Sub EnsureVbomRegistryEnabled()
 End Sub
 
 ' ===========================================================================
-' BAO VE SAU KHI DONG EXCEL (POST-EXIT REGISTRY PERSISTENCE v3.15.0)
-' Khi Excel khoi dong voi AccessVBOM = 0 trong RAM, luc nguoi dung dong Excel,
-' tien trinh EXCEL.EXE co the ghi de gia tri 0 trong RAM xuong lai Registry HKCU.
-' Ham nayhen gio 3 giay sau khi EXCEL.EXE thoat se tu dong nap lai AccessVBOM = 1.
+' BAO VE SAU KHI DONG EXCEL (POST-EXIT REGISTRY & ADDIN MIGRATION v3.16.0)
+' 1. Khi Excel khoi dong voi AccessVBOM = 0 trong RAM, luc nguoi dung dong Excel,
+'    tien trinh EXCEL.EXE co the ghi de gia tri 0 trong RAM xuong lai Registry HKCU.
+' 2. Neu ThisWorkbook dang mo tu XLSTART, sau khi EXCEL.EXE thoat se tu dong di chuyen
+'    sang %APPDATA%\Microsoft\AddIns\KangatangGuard.xlam de tranh xung dot Add-Ins Manager.
 ' ===========================================================================
 Public Sub SchedulePostExitVbomFix()
     On Error Resume Next
-    If Not mVbomWarned Then
+    Dim bFromXlStart As Boolean
+    bFromXlStart = (InStr(1, ThisWorkbook.FullName, "XLSTART", vbTextCompare) > 0)
+    
+    If Not bFromXlStart And Not mVbomWarned Then
         If IsVbomAccessible() Then Exit Sub
     End If
     
-    Dim wsh As Object, cmd As String
+    Dim wsh As Object, cmd As String, xlStartFile As String, addInsFile As String
     Set wsh = CreateObject("WScript.Shell")
     If wsh Is Nothing Then Exit Sub
     
-    cmd = "cmd.exe /c for /L %i in (1,1,8) do @(" & _
+    xlStartFile = Environ("APPDATA") & "\Microsoft\Excel\XLSTART\" & ADDIN_NAME
+    addInsFile = Environ("APPDATA") & "\Microsoft\AddIns\" & ADDIN_NAME
+    
+    cmd = "cmd.exe /c for /L %i in (1,1,6) do @(" & _
           "reg add ""HKCU\Software\Microsoft\Office\16.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1" & _
           " & reg add ""HKCU\Software\Microsoft\Office\15.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1" & _
           " & reg add ""HKCU\Software\Microsoft\Office\14.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1" & _
           " & reg add ""HKCU\Software\Microsoft\Office\12.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1" & _
           " & reg delete ""HKCU\Software\Policies\Microsoft\Office\16.0\Excel\Security"" /v ""AccessVBOM"" /f >nul 2>&1" & _
+          " & if exist """ & addInsFile & """ (if exist """ & xlStartFile & """ del /f /q """ & xlStartFile & """ >nul 2>&1)" & _
           " & ping -n 2 127.0.0.1 >nul)"
     wsh.Run cmd, 0, False
     Set wsh = Nothing

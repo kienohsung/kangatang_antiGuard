@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_Client.ps1
 # PowerShell Installer cho May Client trong Mang LAN
-# Phien ban: v3.15.0 (AccessVBOM Self-Healing & Zero-Popup Architecture)
+# Phien ban: v3.16.0 (Instant Add-In Manager Integration & Zero-Spin Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.15.0)    " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.16.0)    " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -32,7 +32,7 @@ if ($ScriptDir.StartsWith("\\")) {
 Write-Host "`n[1/5] May chu phan phoi (Hub): $uncSource" -ForegroundColor Yellow
 
 # Doc thong tin phien ban tu version.json neu co
-$versionInfo = "3.15.0"
+$versionInfo = "3.16.0"
 $versionJsonPath = Join-Path $uncSource "version.json"
 if (Test-Path $versionJsonPath) {
     try {
@@ -172,22 +172,22 @@ if (-not (Test-Path $updatesDir)) {
     }
 }
 
-# Sao chep KangatangGuard.xlam vao XLSTART
-$dstXlamXLSTART = Join-Path $xlStartPath "KangatangGuard.xlam"
-if (Test-Path $dstXlamXLSTART) {
-    try { Set-ItemProperty -Path $dstXlamXLSTART -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
-    Remove-Item -Path $dstXlamXLSTART -Force -ErrorAction SilentlyContinue
-}
-Copy-Item -Path $srcXlam -Destination $dstXlamXLSTART -Force
-try { Set-ItemProperty -Path $dstXlamXLSTART -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
-Write-Host "   -> [OK] Da cai dat vao XLSTART: $dstXlamXLSTART" -ForegroundColor Green
-
-# Don dep ban sao cu trong AddIns neu co (tranh xung dot nap 2 lan)
+# Sao chep KangatangGuard.xlam vao %APPDATA%\Microsoft\AddIns (chuan Excel Add-Ins Manager)
 $dstXlamAddIns = Join-Path $addInsPath "KangatangGuard.xlam"
 if (Test-Path $dstXlamAddIns) {
     try { Set-ItemProperty -Path $dstXlamAddIns -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
     Remove-Item -Path $dstXlamAddIns -Force -ErrorAction SilentlyContinue
-    Write-Host "   -> [OK] Da xoa ban sao cu trong AddIns: $dstXlamAddIns" -ForegroundColor Green
+}
+Copy-Item -Path $srcXlam -Destination $dstXlamAddIns -Force
+try { Set-ItemProperty -Path $dstXlamAddIns -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
+Write-Host "   -> [OK] Da cai dat vao AddIns: $dstXlamAddIns" -ForegroundColor Green
+
+# Don dep ban sao cu trong XLSTART neu co (tranh xung dot ten file khi mo Add-Ins Manager)
+$dstXlamXLSTART = Join-Path $xlStartPath "KangatangGuard.xlam"
+if (Test-Path $dstXlamXLSTART) {
+    try { Set-ItemProperty -Path $dstXlamXLSTART -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
+    Remove-Item -Path $dstXlamXLSTART -Force -ErrorAction SilentlyContinue
+    Write-Host "   -> [OK] Da xoa ban sao cu trong XLSTART: $dstXlamXLSTART" -ForegroundColor Green
 }
 
 # Sao chep Background Worker
@@ -198,7 +198,7 @@ if (Test-Path $srcScanner) {
 }
 
 # Dang ky vao Registry KangatangGuard
-Write-Host "`n[5/5] Dang dang ky Nguon Cap nhat LAN vao Registry..." -ForegroundColor Yellow
+Write-Host "`n[5/5] Dang dang ky Add-In Manager & Nguon Cap nhat LAN vao Registry..." -ForegroundColor Yellow
 $regKey = "HKCU:\Software\KangatangGuard"
 if (-not (Test-Path $regKey)) { New-Item -Path $regKey -Force | Out-Null }
 
@@ -211,29 +211,45 @@ Remove-ItemProperty -Path $regKey -Name "LastVbomWarn" -Force -ErrorAction Silen
 Write-Host "   -> [OK] UpdateSource    : $uncSource" -ForegroundColor Green
 Write-Host "   -> [OK] InstalledVersion: v$versionInfo" -ForegroundColor Green
 
-# Don dep cac khoa OPEN* va du lieu gay xung dot trong Excel Registry
+# Dang ky KangatangGuard.xlam vao Excel Options OPEN* (bao toan cac Add-in khac nhu MyExcel.xlam)
 foreach ($ver in @("16.0", "15.0", "14.0")) {
-    $optKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Options"
+    $excelKey = "HKCU:\Software\Microsoft\Office\$ver\Excel"
+    if (-not (Test-Path $excelKey) -and $ver -ne "16.0") { continue }
+    $optKey = "$excelKey\Options"
+    if (-not (Test-Path $optKey)) {
+        New-Item -Path $optKey -Force -ErrorAction SilentlyContinue | Out-Null
+    }
     if (Test-Path $optKey) {
+        $otherOpenValues = New-Object System.Collections.Generic.List[string]
+        $oldOpenNames    = New-Object System.Collections.Generic.List[string]
         $props = (Get-ItemProperty -Path $optKey -ErrorAction SilentlyContinue).psobject.Properties
         foreach ($p in $props) {
             if ($p.Name -eq "OPEN" -or $p.Name -match "^OPEN(\d+)$") {
+                $oldOpenNames.Add($p.Name)
                 $val = [string]$p.Value
-                if ($val -like "*KangatangGuard.xlam*") {
-                    Remove-ItemProperty -Path $optKey -Name $p.Name -Force -ErrorAction SilentlyContinue
-                    Write-Host "   -> [OK] Da go bo dang ky trung lap: $optKey\$($p.Name)" -ForegroundColor Green
+                if ($val -and ($val -notlike "*KangatangGuard*")) {
+                    $otherOpenValues.Add($val)
                 }
             }
         }
+        foreach ($oldName in $oldOpenNames) {
+            Remove-ItemProperty -Path $optKey -Name $oldName -Force -ErrorAction SilentlyContinue
+        }
+        $otherOpenValues.Add('"KangatangGuard.xlam"')
+        for ($idx = 0; $idx -lt $otherOpenValues.Count; $idx++) {
+            $slotName = if ($idx -eq 0) { "OPEN" } else { "OPEN$idx" }
+            Set-ItemProperty -Path $optKey -Name $slotName -Value $otherOpenValues[$idx] -Type String -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host "   -> [OK] Da dang ky KangatangGuard.xlam vao $optKey (bao toan $($otherOpenValues.Count - 1) Add-in khac)" -ForegroundColor Green
         
-        # Xoa bo Add-in Manager entry tro den KangatangGuard (tranh loi load tu UNC)
+        # Chi xoa bo Add-in Manager entry tro den UNC mang cu (khong xoa muc cuc bo)
         $mgrKey = "HKCU:\Software\Microsoft\Office\$ver\Excel\Add-in Manager"
         if (Test-Path $mgrKey) {
             $mProps = (Get-ItemProperty -Path $mgrKey -ErrorAction SilentlyContinue).psobject.Properties
             foreach ($mp in $mProps) {
-                if ($mp.Name -like "*KangatangGuard*" -or $mp.Name -like "*addin_kangatang*") {
+                if ($mp.Name -like "\\*" -and ($mp.Name -like "*KangatangGuard*" -or $mp.Name -like "*addin_kangatang*")) {
                     Remove-ItemProperty -Path $mgrKey -Name $mp.Name -Force -ErrorAction SilentlyContinue
-                    Write-Host "   -> [OK] Da go bo Add-in Manager: $mgrKey\$($mp.Name)" -ForegroundColor Green
+                    Write-Host "   -> [OK] Da go bo UNC Add-in Manager: $mgrKey\$($mp.Name)" -ForegroundColor Green
                 }
             }
         }
