@@ -23,9 +23,10 @@ __pycache__/
 .vscode/
 .idea/
 
-# Threat telemetry & malware samples (Do not push to GitHub)
+# Threat telemetry & malware samples & internal scan reports (Do not push to GitHub)
 Threat_Samples/
 *.sample.json
 *.sample.txt
 Quarantine_Backup/
 *.quarantine
+Scan_Reports/

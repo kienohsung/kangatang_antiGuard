@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.19.3 (Single-Instance Mutex + Adaptive Console UI + Immortal Workers)
+# Phien ban: v3.20.0 (Detailed Project Audit Logging & Periodic Report Engine)
 # ==============================================================================
 
 param (
@@ -71,9 +71,10 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyCon
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.19.3"
+$AppVersion = "3.20.0"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -255,8 +256,215 @@ if ($isResume -and (Test-Path -LiteralPath $scannedLogFile)) {
     try { [System.IO.File]::WriteAllText($scannedLogFile, "", [System.Text.Encoding]::Unicode) } catch {}
 }
 
-# Bo dem ghi log theo lo (Tang 4: Buffered Batch I/O)
-$script:logBuffer = New-Object System.Collections.Generic.List[string]
+# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.20.0)
+# Luu truc tiep vao thu muc du an D:\7. AI tools\kangatang\Scan_Reports (hoac \\192.168.223.176\test\Scan_Reports tu may tram LAN)
+$script:projectReportDir = if (Test-Path "D:\7. AI tools\kangatang") {
+    "D:\7. AI tools\kangatang\Scan_Reports"
+} elseif (Test-Path "\\192.168.223.176\test") {
+    "\\192.168.223.176\test\Scan_Reports"
+} else {
+    Join-Path $logDir "Scan_Reports"
+}
+$script:localReportDir = Join-Path $logDir "Scan_Reports"
+foreach ($rDir in @($script:projectReportDir, (Join-Path $script:projectReportDir "Sessions"), $script:localReportDir)) {
+    if ($rDir -and (-not (Test-Path -LiteralPath $rDir))) {
+        try { New-Item -ItemType Directory -Path $rDir -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
+    }
+}
+
+$script:sessionId        = "SCAN_" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_" + $env:COMPUTERNAME
+$safeLeafName            = ([System.IO.Path]::GetFileName($TargetFolder) -replace '[^a-zA-Z0-9_\-]', '_')
+if ([string]::IsNullOrWhiteSpace($safeLeafName)) { $safeLeafName = "RootShare" }
+$script:sessionMdName    = "Report_$($script:sessionId)_$safeLeafName.md"
+$script:sessionMdPath    = Join-Path (Join-Path $script:projectReportDir "Sessions") $script:sessionMdName
+$script:latestMdPath     = Join-Path $script:projectReportDir "LATEST_SCAN_REPORT.md"
+$script:summaryCsvPath   = Join-Path $script:projectReportDir "Scan_Summary_History.csv"
+$script:ledgerCsvPath    = Join-Path $script:projectReportDir ("Infected_Files_Ledger_" + (Get-Date -Format "yyyyMM") + ".csv")
+$script:detailLogPath    = Join-Path $script:projectReportDir ("scan_detail_log_" + (Get-Date -Format "yyyyMMdd") + ".txt")
+
+$script:logBuffer        = New-Object System.Collections.Generic.List[string]
+$script:detailLogBuffer  = New-Object System.Collections.Generic.List[string]
+$script:ledgerBuffer     = New-Object System.Collections.Generic.List[string]
+$script:infectedRecords  = New-Object System.Collections.Generic.List[pscustomobject]
+$script:deptStats        = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::OrdinalIgnoreCase)
+$script:lastReportSyncMs = -30000
+
+function Format-CsvField([string]$val) {
+    if ($null -eq $val) { return '""' }
+    return '"' + $val.Replace('"', '""').Replace("`r", " ").Replace("`n", " ") + '"'
+}
+
+function Get-TopDepartmentName([string]$filePath, [string]$rootFolder = $TargetFolder) {
+    if ([string]::IsNullOrWhiteSpace($filePath)) { return "(Khong xac dinh)" }
+    if ((-not [string]::IsNullOrWhiteSpace($rootFolder)) -and ($filePath.Length -gt ($rootFolder.Length + 1)) -and $filePath.StartsWith($rootFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $rel = $filePath.Substring($rootFolder.Length).TrimStart('\')
+        $slashIdx = $rel.IndexOf('\')
+        if ($slashIdx -gt 0) {
+            return $rel.Substring(0, $slashIdx)
+        }
+        return "(Thu muc goc)"
+    }
+    try {
+        $parentDir = [System.IO.Path]::GetDirectoryName($filePath)
+        $leaf = [System.IO.Path]::GetFileName($parentDir)
+        if ($leaf) { return $leaf }
+    } catch {}
+    return "(Thu muc goc)"
+}
+
+function Update-DeptStat([string]$filePath, [string]$outcome) {
+    $dept = Get-TopDepartmentName $filePath $TargetFolder
+    if (-not $script:deptStats.ContainsKey($dept)) {
+        $script:deptStats[$dept] = [pscustomobject]@{
+            Dept     = $dept
+            Scanned  = 0
+            Safe     = 0
+            Infected = 0
+            Cleaned  = 0
+            Errors   = 0
+        }
+    }
+    $st = $script:deptStats[$dept]
+    $st.Scanned++
+    switch ($outcome) {
+        "SAFE" { $st.Safe++ }
+        "CLEANED" { $st.Infected++; $st.Cleaned++ }
+        "INFECTED_LOCKED" { $st.Infected++; $st.Errors++ }
+        default { $st.Errors++ }
+    }
+}
+
+function Add-DetailAuditEvent([string]$eventType, [string]$filePath, [int]$workerId, [string]$threatFamily, [string]$detail) {
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $dept = Get-TopDepartmentName $filePath $TargetFolder
+    $line = "$ts | Host=$env:COMPUTERNAME | User=$env:USERNAME | Ver=v$AppVersion | Session=$($script:sessionId) | Worker=W$workerId | Event=$eventType | Dept=$dept | Family=$threatFamily | Path=$filePath | Detail=$detail"
+    $script:detailLogBuffer.Add($line)
+}
+
+function Write-PeriodicReportFiles([string]$status, [int]$totalTarget, [string]$startTime) {
+    try {
+        $nowStr = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $elapsedMin = if ($null -ne $stopwatch) { [Math]::Round($stopwatch.Elapsed.TotalMinutes, 2) } else { 0.0 }
+        $elapsedSec = if ($null -ne $stopwatch) { [Math]::Max(0.1, $stopwatch.Elapsed.TotalSeconds) } else { 1.0 }
+        $avgSpeed   = [Math]::Round($script:totalScanned / $elapsedSec, 1)
+        $totalFolders = if ($null -ne $sharedState) { [Math]::Max([int]$sharedState.TotalTargetFolders, [int]$script:folderIdx) } else { [int]$script:folderIdx }
+
+        # 1. Cap nhat Scan_Summary_History.csv (Upsert theo SessionID)
+        $summaryHeader = "SessionID,StartTime,LastUpdate,DurationMinutes,Status,ComputerName,UserName,ScannerVersion,TargetFolder,TotalFolders,TotalDiscovered,TotalScanned,SkippedResume,SafeZeroCom,DeepComScanned,TotalSafe,TotalInfected,TotalCleaned,TotalLockedOrError,AvgSpeedFilesPerSec,SessionReportFile"
+        $summaryRow = (@(
+            (Format-CsvField $script:sessionId),
+            (Format-CsvField $startTime),
+            (Format-CsvField $nowStr),
+            $elapsedMin,
+            (Format-CsvField $status),
+            (Format-CsvField $env:COMPUTERNAME),
+            (Format-CsvField $env:USERNAME),
+            (Format-CsvField "v$AppVersion"),
+            (Format-CsvField $TargetFolder),
+            $totalFolders,
+            $totalTarget,
+            $script:totalScanned,
+            $script:totalSkipped,
+            $script:totalZeroCom,
+            $script:totalDeepCom,
+            $script:totalSafe,
+            $script:totalInfected,
+            $script:totalCleaned,
+            $script:totalErrors,
+            $avgSpeed,
+            (Format-CsvField ("Sessions\" + $script:sessionMdName))
+        ) -join ",")
+
+        $csvLines = New-Object System.Collections.Generic.List[string]
+        $replaced = $false
+        $sessionPrefix = '"' + $script:sessionId + '",'
+        if (Test-Path -LiteralPath $script:summaryCsvPath) {
+            try {
+                foreach ($ln in [System.IO.File]::ReadAllLines($script:summaryCsvPath, [System.Text.Encoding]::UTF8)) {
+                    if ([string]::IsNullOrWhiteSpace($ln)) { continue }
+                    if ($ln.StartsWith($sessionPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $csvLines.Add($summaryRow)
+                        $replaced = $true
+                    } else {
+                        $csvLines.Add($ln)
+                    }
+                }
+            } catch {}
+        }
+        if ($csvLines.Count -eq 0) {
+            $csvLines.Add($summaryHeader)
+        }
+        if (-not $replaced) {
+            $csvLines.Add($summaryRow)
+        }
+        [System.IO.File]::WriteAllLines($script:summaryCsvPath, $csvLines, $utf8Bom)
+
+        # 2. Xuat Bao cao Phien quet Chi tiet Markdown (Report_<SessionID>.md & LATEST_SCAN_REPORT.md)
+        $pctDone = if ($status -eq "COMPLETED") { 100.0 } elseif ($totalTarget -gt 0) { [Math]::Min(99.9, [Math]::Round(($script:totalScanned / [double]$totalTarget) * 100.0, 1)) } else { 0.0 }
+        $safeRate = if ($script:totalScanned -gt 0) { [Math]::Round(($script:totalSafe / [double]$script:totalScanned) * 100.0, 2) } else { 100.0 }
+
+        $md = New-Object System.Text.StringBuilder
+        [void]$md.AppendLine("# BAO CAO KET QUA QUET & DIET VIRUS KANGATANG DINH KY")
+        [void]$md.AppendLine("> **He thong:** KangatangGuard ``v$AppVersion`` - Phat trien boi **OhsungIT Team**")
+        [void]$md.AppendLine("")
+        [void]$md.AppendLine("## 1. Thong tin chung ve phien quet")
+        [void]$md.AppendLine("| Hang muc | Gia tri chi tiet |")
+        [void]$md.AppendLine("| :--- | :--- |")
+        [void]$md.AppendLine("| **Ma phien quet (SessionID)** | ``$($script:sessionId)`` |")
+        [void]$md.AppendLine("| **Trang thai phien quet** | **$status** ($pctDone% hoan thanh) |")
+        [void]$md.AppendLine("| **Thu muc muc tieu** | ``$TargetFolder`` |")
+        [void]$md.AppendLine("| **Thoi gian bat dau** | ``$startTime`` |")
+        [void]$md.AppendLine("| **Cap nhat lan cuoi** | ``$nowStr`` (Thoi luong: **$elapsedMin phut**) |")
+        [void]$md.AppendLine("| **May thuc hien / Tai khoan** | ``$env:COMPUTERNAME`` / ``$env:USERNAME`` |")
+        [void]$md.AppendLine("| **Toc do xu ly trung binh** | **$avgSpeed tep/giay** ($totalFolders thu muc da duyet) |")
+        [void]$md.AppendLine("")
+        [void]$md.AppendLine("## 2. Bang tong hop ket qua quet & xu ly ma doc")
+        [void]$md.AppendLine("| STT | Chi so thong ke | So luong (Tep) | Ty le / Ghi chu ky thuat |")
+        [void]$md.AppendLine("| :---: | :--- | ---: | :--- |")
+        [void]$md.AppendLine("| 1 | **Tong so tep Excel phat hien** | **$($totalTarget.ToString('N0'))** | ``.xls``, ``.xlsx``, ``.xlsm``, ``.xlsb`` |")
+        [void]$md.AppendLine("| 2 | **Tong so tep da kiem tra xong** | **$($script:totalScanned.ToString('N0'))** | Hoan thanh **$pctDone%** |")
+        [void]$md.AppendLine("| 2.1 | +-- *Tang 1: Bo qua nhanh (Fast Resume)* | $($script:totalSkipped.ToString('N0')) | Da kiem tra an toan tu phien truoc (0.01 ms/tep) |")
+        [void]$md.AppendLine("| 2.2 | +-- *Tang 2: Loc tinh Zero-COM (.xlsx/.xls)* | $($script:totalZeroCom.ToString('N0')) | Kiem tra cau truc nhi phan khong mo Excel (1.5 ms/tep) |")
+        [void]$md.AppendLine("| 2.3 | +-- *Tang 3: Quet sau Excel COM (.xls/Macro)* | $($script:totalDeepCom.ToString('N0')) | Kiem tra chuyen sau VBProject & Module-Sheet |")
+        [void]$md.AppendLine("| 3 | **Tep AN TOAN (Sach)** | **$($script:totalSafe.ToString('N0'))** | Ty le an toan: **$safeRate%** |")
+        [void]$md.AppendLine("| 4 | **Tep PHAT HIEN NHIEM VIRUS** | **$($script:totalInfected.ToString('N0'))** | Phat hien mau virus Kangatang / Laroux / Hidden Sheet |")
+        [void]$md.AppendLine("| 5 | **Tep DA DIET SACH & SAO LUU** | **$($script:totalCleaned.ToString('N0'))** | Da cach ly ban goc ve may chu ``192.168.223.176\Quarantine_Backup`` |")
+        [void]$md.AppendLine("| 6 | **Tep BO QUA / DANG KHOA (Password/ReadOnly)** | **$($script:totalErrors.ToString('N0'))** | Tep dat mat khau hoac dang mo boi nguoi dung khac tren mang |")
+        [void]$md.AppendLine("")
+        [void]$md.AppendLine("## 3. Thong ke chi tiet theo Phong ban / Thu muc cap 1")
+        [void]$md.AppendLine("| Phong ban / Thu muc cap 1 | Da quet | Tep Sach | Phat hien nhiem | Da diet sach | Dang khoa / Loi | Ty le nhiem |")
+        [void]$md.AppendLine("| :--- | ---: | ---: | ---: | ---: | ---: | ---: |")
+        if ($script:deptStats.Count -gt 0) {
+            $sortedDepts = $script:deptStats.Values | Sort-Object -Property @{Expression="Infected";Descending=$true}, @{Expression="Scanned";Descending=$true}
+            foreach ($d in $sortedDepts) {
+                $infRate = if ($d.Scanned -gt 0) { ("{0:0.00}%" -f (($d.Infected / [double]$d.Scanned) * 100.0)) } else { "0.00%" }
+                [void]$md.AppendLine("| **$($d.Dept)** | $($d.Scanned.ToString('N0')) | $($d.Safe.ToString('N0')) | **$($d.Infected.ToString('N0'))** | **$($d.Cleaned.ToString('N0'))** | $($d.Errors.ToString('N0')) | $infRate |")
+            }
+        } else {
+            [void]$md.AppendLine("| *(Dang thu thap du lieu...)* | 0 | 0 | 0 | 0 | 0 | 0.00% |")
+        }
+        [void]$md.AppendLine("")
+        [void]$md.AppendLine("## 4. Danh sach chi tiet cac tep phat hien nhiem virus trong phien quet ($($script:infectedRecords.Count) tep)")
+        if ($script:infectedRecords.Count -gt 0) {
+            [void]$md.AppendLine("| STT | Thoi gian | Phong ban | Ten tep | Kich thuoc | Ho ma doc | Chi tiet mau nhiem | Trang thai xu ly | Duong dan day du |")
+            [void]$md.AppendLine("| :---: | :---: | :--- | :--- | ---: | :--- | :--- | :--- | :--- |")
+            $idx = 0
+            foreach ($rec in $script:infectedRecords) {
+                $idx++
+                [void]$md.AppendLine("| $idx | ``$($rec.Time)`` | **$($rec.Department)** | ``$($rec.FileName)`` | $($rec.SizeKB) KB | ``$($rec.ThreatFamily)`` | $($rec.ThreatDetail) | **$($rec.Action)** | ``$($rec.FullPath)`` |")
+            }
+        } else {
+            [void]$md.AppendLine("> Hien chua phat hien tep nhiem virus nao trong phien quet nay.")
+        }
+
+        $mdContent = $md.ToString()
+        [System.IO.File]::WriteAllText($script:sessionMdPath, $mdContent, $utf8Bom)
+        [System.IO.File]::WriteAllText($script:latestMdPath, $mdContent, $utf8Bom)
+        if ($script:localReportDir -ne $script:projectReportDir) {
+            try { [System.IO.File]::WriteAllText((Join-Path $script:localReportDir "LATEST_SCAN_REPORT.md"), $mdContent, $utf8Bom) } catch {}
+        }
+    } catch {}
+}
 
 function Flush-ScanLogs([string]$status, [int]$totalDiscovered, [int]$scanned, [int]$cleaned, [string]$startTime) {
     if ($script:logBuffer.Count -gt 0) {
@@ -268,18 +476,54 @@ function Flush-ScanLogs([string]$status, [int]$totalDiscovered, [int]$scanned, [
     }
     try {
         $obj = [ordered]@{
-            TargetFolder = $TargetFolder
-            StartTime    = $startTime
-            LastUpdate   = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-            Status       = $status
-            ScannerPid   = $PID
-            TotalFiles   = $totalDiscovered
-            TotalScanned = $scanned
-            TotalCleaned = $cleaned
+            TargetFolder      = $TargetFolder
+            SessionId         = $script:sessionId
+            StartTime         = $startTime
+            LastUpdate        = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+            Status            = $status
+            ScannerPid        = $PID
+            TotalFiles        = $totalDiscovered
+            TotalScanned      = $scanned
+            TotalSafe         = [int]$script:totalSafe
+            TotalInfected     = [int]$script:totalInfected
+            TotalCleaned      = $cleaned
+            TotalErrors       = [int]$script:totalErrors
+            ReportDir         = $script:projectReportDir
+            SessionReportFile = $script:sessionMdPath
         }
         $json = $obj | ConvertTo-Json -Depth 3
         [System.IO.File]::WriteAllText($lastSessionFile, $json, $utf8NoBom)
     } catch {}
+
+    # Ghi lo su kien chi tiet ra Scan_Reports\scan_detail_log_YYYYMMDD.txt
+    if ($script:detailLogBuffer.Count -gt 0) {
+        try {
+            $dChunk = ($script:detailLogBuffer -join "`r`n") + "`r`n"
+            [System.IO.File]::AppendAllText($script:detailLogPath, $dChunk, $utf8Bom)
+            $script:detailLogBuffer.Clear()
+        } catch {}
+    }
+
+    # Ghi lo so cai tep nhiem ra Scan_Reports\Infected_Files_Ledger_YYYYMM.csv
+    $hadNewInfected = ($script:ledgerBuffer.Count -gt 0)
+    if ($hadNewInfected) {
+        try {
+            if (-not (Test-Path -LiteralPath $script:ledgerCsvPath)) {
+                $ledgerHeader = "Timestamp,SessionID,ComputerName,UserName,TopDepartmentFolder,FileName,FullPath,FileSizeKB,LastModified,VirusDetail,ActionStatus,BackupNote`r`n"
+                [System.IO.File]::WriteAllText($script:ledgerCsvPath, $ledgerHeader, $utf8Bom)
+            }
+            $lChunk = ($script:ledgerBuffer -join "`r`n") + "`r`n"
+            [System.IO.File]::AppendAllText($script:ledgerCsvPath, $lChunk, $utf8Bom)
+            $script:ledgerBuffer.Clear()
+        } catch {}
+    }
+
+    # Cap nhat Scan_Summary_History.csv va Bao cao Markdown moi 20 giay, hoac khi co tep nhiem moi, hoac khi COMPLETED
+    $nowMs = if ($null -ne $stopwatch) { $stopwatch.ElapsedMilliseconds } else { 0 }
+    if ($hadNewInfected -or ($status -eq "COMPLETED") -or (($nowMs - $script:lastReportSyncMs) -ge 20000)) {
+        $script:lastReportSyncMs = $nowMs
+        Write-PeriodicReportFiles $status $totalDiscovered $startTime
+    }
 }
 
 function Test-SkippedFolderName([string]$name) {
@@ -786,6 +1030,7 @@ function Drain-WorkerResults {
         $updated = $true
         $r = [string]$resItem.Result
         $fName = [string]$resItem.FileName
+        $fPath = [string]$resItem.FilePath
         $wId   = $resItem.WorkerId
         $script:totalDeepCom++
         $script:currentFile = $fName
@@ -793,16 +1038,65 @@ function Drain-WorkerResults {
         if ($r -eq "SAFE") {
             $script:totalScanned++
             $script:totalSafe++
+            Update-DeptStat $fPath "SAFE"
             $script:logBuffer.Add("$($resItem.LowPath)|$($resItem.FileSig)")
         } elseif ($r.StartsWith("CLEANED|") -or $r.StartsWith("CLEANED_PURGE|")) {
             $script:totalScanned++
             $script:totalInfected++
             $script:totalCleaned++
-            $detail = if ($r.StartsWith("CLEANED_PURGE|")) { "Module-Sheet Excel 5.0: " + $r.Substring(14) } else { $r.Substring(8) }
-            $ts = Get-Date -Format "HH:mm:ss"
+            Update-DeptStat $fPath "CLEANED"
+            $isPurge = $r.StartsWith("CLEANED_PURGE|")
+            $threatFamily = if ($isPurge) { "Excel5_ModuleSheet_Hidden" } else { "VBA_Macro_Kangatang" }
+            $detail = if ($isPurge) { "Module-Sheet Excel 5.0: " + $r.Substring(14) } else { $r.Substring(8) }
+            $nowDt = Get-Date
+            $ts = $nowDt.ToString("HH:mm:ss")
+            $tsFull = $nowDt.ToString("yyyy-MM-dd HH:mm:ss")
             Add-RecentThreatLog "> [$ts] [DA DIET] $fName ($detail)"
+            $deptName = Get-TopDepartmentName $fPath
+            $folderDir = ""
+            try { $folderDir = [System.IO.Path]::GetDirectoryName($fPath) } catch {}
+            $extStr = ""
+            try { $extStr = [System.IO.Path]::GetExtension($fName).ToLowerInvariant() } catch {}
+            $sizeKb = 0
             try {
-                $fAfter = New-Object System.IO.FileInfo($resItem.FilePath)
+                $partsSig = ([string]$resItem.FileSig).Split('|')
+                if ($partsSig.Count -ge 1) { $sizeKb = [Math]::Round(([long]$partsSig[0]) / 1024.0, 1) }
+            } catch {}
+
+            [void]$script:infectedRecords.Add([pscustomobject]@{
+                Time         = $tsFull
+                TimeShort    = $ts
+                Department   = $deptName
+                FileName     = $fName
+                FolderPath   = $folderDir
+                FullPath     = $fPath
+                Extension    = $extStr
+                SizeKB       = $sizeKb
+                ThreatFamily = $threatFamily
+                ThreatDetail = $detail
+                Action       = "CLEANED_AND_QUARANTINED"
+                WorkerId     = $wId
+            })
+
+            $csvRow = "{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}" -f `
+                (Format-CsvField $script:sessionId),
+                (Format-CsvField $tsFull),
+                (Format-CsvField $env:COMPUTERNAME),
+                (Format-CsvField $deptName),
+                (Format-CsvField $fName),
+                (Format-CsvField $folderDir),
+                (Format-CsvField $fPath),
+                (Format-CsvField $extStr),
+                $sizeKb,
+                (Format-CsvField $threatFamily),
+                (Format-CsvField $detail),
+                (Format-CsvField "CLEANED_AND_QUARANTINED"),
+                $wId
+            $script:ledgerBuffer.Add($csvRow)
+            Add-DetailAuditEvent "DETECTED_CLEANED" $fPath $wId $threatFamily "Da diet & cach ly thanh cong ($detail)"
+
+            try {
+                $fAfter = New-Object System.IO.FileInfo($fPath)
                 $newSig = "$($fAfter.Length)|$($fAfter.LastWriteTime.ToString('yyyyMMddHHmmss'))"
                 $script:logBuffer.Add("$($resItem.LowPath)|$newSig")
             } catch {}
@@ -810,15 +1104,61 @@ function Drain-WorkerResults {
             $script:totalScanned++
             $script:totalInfected++
             $script:totalErrors++
-            $ts = Get-Date -Format "HH:mm:ss"
+            Update-DeptStat $fPath "INFECTED_LOCKED"
+            $nowDt = Get-Date
+            $ts = $nowDt.ToString("HH:mm:ss")
+            $tsFull = $nowDt.ToString("yyyy-MM-dd HH:mm:ss")
             Add-RecentThreatLog "! [$ts] [KHOA/READONLY] $fName ($r)"
+            $deptName = Get-TopDepartmentName $fPath
+            $folderDir = ""
+            try { $folderDir = [System.IO.Path]::GetDirectoryName($fPath) } catch {}
+            $extStr = ""
+            try { $extStr = [System.IO.Path]::GetExtension($fName).ToLowerInvariant() } catch {}
+            $sizeKb = 0
+            try {
+                $partsSig = ([string]$resItem.FileSig).Split('|')
+                if ($partsSig.Count -ge 1) { $sizeKb = [Math]::Round(([long]$partsSig[0]) / 1024.0, 1) }
+            } catch {}
+
+            [void]$script:infectedRecords.Add([pscustomobject]@{
+                Time         = $tsFull
+                TimeShort    = $ts
+                Department   = $deptName
+                FileName     = $fName
+                FolderPath   = $folderDir
+                FullPath     = $fPath
+                Extension    = $extStr
+                SizeKB       = $sizeKb
+                ThreatFamily = "Locked_Infected_Workbook"
+                ThreatDetail = $r
+                Action       = "INFECTED_LOCKED_NEED_UNLOCK"
+                WorkerId     = $wId
+            })
+
+            $csvRow = "{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}" -f `
+                (Format-CsvField $script:sessionId),
+                (Format-CsvField $tsFull),
+                (Format-CsvField $env:COMPUTERNAME),
+                (Format-CsvField $deptName),
+                (Format-CsvField $fName),
+                (Format-CsvField $folderDir),
+                (Format-CsvField $fPath),
+                (Format-CsvField $extStr),
+                $sizeKb,
+                (Format-CsvField "Locked_Infected_Workbook"),
+                (Format-CsvField $r),
+                (Format-CsvField "INFECTED_LOCKED_NEED_UNLOCK"),
+                $wId
+            $script:ledgerBuffer.Add($csvRow)
+            Add-DetailAuditEvent "DETECTED_LOCKED" $fPath $wId "Locked_Infected_Workbook" "Phat hien nhiem nhung tep dang bi khoa/ReadOnly ($r)"
         } else {
             $script:totalScanned++
             $script:totalErrors++
+            Update-DeptStat $fPath "ERROR"
             $script:logBuffer.Add("$($resItem.LowPath)|$($resItem.FileSig)")
         }
 
-        if ($r.StartsWith("CLEANED") -or ($script:logBuffer.Count -ge 20)) {
+        if ($r.StartsWith("CLEANED") -or $r.StartsWith("INFECTED_") -or ($script:logBuffer.Count -ge 20)) {
             $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
             Flush-ScanLogs "IN_PROGRESS" $totalTarget $script:totalScanned $script:totalCleaned $startTimeStr
         }
@@ -828,6 +1168,7 @@ function Drain-WorkerResults {
     }
 }
 
+Add-DetailAuditEvent "SESSION_START" $TargetFolder 0 "(ALL)" "Bat dau phien quet thu muc v$AppVersion (Resume=$isResume, Workers=$maxWorkers)"
 Flush-ScanLogs "IN_PROGRESS" $prevSessionTotal 0 0 $startTimeStr
 Render-LiveDashboard $true $false
 
@@ -890,12 +1231,14 @@ try {
                     $script:totalSkipped++
                     $script:totalScanned++
                     $script:totalSafe++
+                    Update-DeptStat $filePath "SAFE"
                 }
                 # TANG 2: Zero-COM OpenXML Pre-Filter cho .xlsx/.xlsm/.xlsb/.xls (1.5 - 3ms)
                 elseif (Test-OpenXmlSafeZeroCom $filePath $ext $iocRegex) {
                     $script:totalZeroCom++
                     $script:totalScanned++
                     $script:totalSafe++
+                    Update-DeptStat $filePath "SAFE"
                     $script:logBuffer.Add("$lowPath|$fileSig")
                 }
                 # TANG 3: Day vao hang doi Multi-Worker Parallel Excel COM Pool (.xls hoac tep co vbaProject.bin)
@@ -911,6 +1254,7 @@ try {
             } catch {
                 $script:totalScanned++
                 $script:totalErrors++
+                Update-DeptStat $filePath "ERROR"
             }
 
             Drain-WorkerResults
@@ -935,6 +1279,8 @@ try {
                         if ($comWorkQueue.TryDequeue([ref]$stuckItem)) {
                             $script:totalScanned++
                             $script:totalErrors++
+                            Update-DeptStat $stuckItem.FilePath "ERROR"
+                            Add-DetailAuditEvent "WORKER_TIMEOUT_SKIP" $stuckItem.FilePath 0 "(TIMEOUT)" "Bo qua tep bi treo qua 60s trong hang doi Deep COM"
                         }
                         $bpTicks = 0
                     }
@@ -972,6 +1318,8 @@ try {
                         if ($comWorkQueue.TryDequeue([ref]$stuckItem)) {
                             $script:totalScanned++
                             $script:totalErrors++
+                            Update-DeptStat $stuckItem.FilePath "ERROR"
+                            Add-DetailAuditEvent "WORKER_TIMEOUT_SKIP" $stuckItem.FilePath 0 "(TIMEOUT)" "Bo qua tep cuoi hang doi bi treo qua 60s"
                         }
                         $drainTicks = 0
                     }
@@ -989,13 +1337,16 @@ try {
     $totalSec = [Math]::Round($stopwatch.Elapsed.TotalSeconds, 1)
     Render-LiveDashboard $true $true
 
+    Add-DetailAuditEvent "SESSION_COMPLETED" $TargetFolder 0 "(ALL)" "Hoan tat trong ${totalSec}s: Scanned=$($script:totalScanned), Infected=$($script:totalInfected), Cleaned=$($script:totalCleaned), Errors=$($script:totalErrors)"
     Flush-ScanLogs "COMPLETED" $script:totalDiscovered $script:totalScanned $script:totalCleaned $startTimeStr
     $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion - HOAN TAT ($totalSec giay) | Da quet: $($script:totalScanned) | Da diet: $($script:totalCleaned)"
     Write-Host "`n   [HOAN TAT] Qua trinh quet thu muc da ket thuc trong $totalSec giay!" -ForegroundColor Green
+    Write-Host "   [BAO CAO]  $($script:latestMdPath)" -ForegroundColor Cyan
 } catch {
     try {
         $errMsg = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Top-level error: $($_.Exception.Message)`r`n$($_.ScriptStackTrace)`r`n"
         [System.IO.File]::AppendAllText((Join-Path $logDir "scanner_error.log"), $errMsg, $utf8NoBom)
+        Add-DetailAuditEvent "SESSION_INTERRUPTED" $TargetFolder 0 "(ERROR)" "Ngoai le: $($_.Exception.Message)"
     } catch {}
     $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
     Flush-ScanLogs "IN_PROGRESS" $totalTarget $script:totalScanned $script:totalCleaned $startTimeStr

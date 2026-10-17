@@ -131,7 +131,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.19.3"
+Public Const CURRENT_VERSION As String = "3.20.0"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -2226,9 +2226,10 @@ Public Sub CleanDocumentRecoveryRegistry()
 End Sub
 
 ' ===========================================================================
-' HAM MENU: Mo thu muc Log
+' HAM MENU: Mo thu muc Log & Bao cao dinh ky (v3.20.0)
 ' ===========================================================================
 Public Sub OpenLogFolder()
+    On Error Resume Next
     Dim logDir As String
     logDir = Environ("APPDATA") & "\" & LOG_SUBFOLDER
     
@@ -2237,9 +2238,21 @@ Public Sub OpenLogFolder()
     If Not fso.FolderExists(logDir) Then
         fso.CreateFolder logDir
     End If
+    
+    Dim projReportDir As String
+    projReportDir = "D:\7. AI tools\kangatang\Scan_Reports"
+    If fso.FolderExists("D:\7. AI tools\kangatang") Then
+        If Not fso.FolderExists(projReportDir) Then
+            fso.CreateFolder projReportDir
+        End If
+        If fso.FolderExists(projReportDir) Then
+            logDir = projReportDir
+        End If
+    End If
     Set fso = Nothing
     
     Shell "explorer.exe " & Chr(34) & logDir & Chr(34), vbNormalFocus
+    On Error GoTo 0
 End Sub
 
 ' ===========================================================================
@@ -3899,14 +3912,36 @@ Public Sub WriteLog(ByVal msg As String)
         fso.CreateFolder logDir
     End If
     
+    Dim dateTag As String
+    dateTag = Format(Now, "yyyyMMdd")
+    Dim tsLine As String
+    tsLine = Format(Now, "yyyy-MM-dd HH:mm:ss") & " | " & msg
+    
     Dim logFile As String
-    logFile = logDir & "\scan_log_" & Format(Now, "yyyyMMdd") & ".txt"
+    logFile = logDir & "\scan_log_" & dateTag & ".txt"
     
     Dim fNum As Integer
     fNum = FreeFile
     Open logFile For Append As #fNum
-    Print #fNum, Format(Now, "yyyy-MM-dd HH:mm:ss") & " | " & msg
+    Print #fNum, tsLine
     Close #fNum
+    
+    ' v3.20.0: Dong bo log chi tiet ve thu muc du an D:\7. AI tools\kangatang\Scan_Reports
+    Dim projBase As String, projReportDir As String, projLogFile As String
+    projBase = "D:\7. AI tools\kangatang"
+    projReportDir = projBase & "\Scan_Reports"
+    If fso.FolderExists(projBase) Then
+        If Not fso.FolderExists(projReportDir) Then
+            fso.CreateFolder projReportDir
+        End If
+        If fso.FolderExists(projReportDir) Then
+            projLogFile = projReportDir & "\scan_detail_log_" & dateTag & ".txt"
+            fNum = FreeFile
+            Open projLogFile For Append As #fNum
+            Print #fNum, tsLine
+            Close #fNum
+        End If
+    End If
     
     Set fso = Nothing
     On Error GoTo 0

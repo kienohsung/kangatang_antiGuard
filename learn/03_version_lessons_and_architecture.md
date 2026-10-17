@@ -36,7 +36,7 @@
 
 ---
 
-## 2. BẢNG TIẾN HÓA KIẾN TRÚC QUA CÁC PHIÊN BẢN (`v3.1` ➔ `v3.18.0`)
+## 2. BẢNG TIẾN HÓA KIẾN TRÚC QUA CÁC PHIÊN BẢN (`v3.1` ➔ `v3.20.0`)
 
 | Phiên bản | Ngày | Cột mốc Kiến trúc & Cải tiến Trọng tâm | Tài liệu chi tiết trong `doc/` |
 | :--- | :--- | :--- | :--- |
@@ -50,7 +50,5 @@
 | **`v3.16.0`** | `10/2026` | **Instant Add-In Manager Integration (`< 5ms` Zero-Spin):** Khắc phục triệt để lỗi quay tròn và không tích chọn được Add-in trong `Excel Options -> Add-ins -> Go`. | `20261017_fix_addin_manager_install_v3.16.0.md` |
 | **`v3.17.0` – `v3.17.3`** | `10/2026` | **Out-of-Process Streaming Console + Native VBA Worker (`Two-Step Smart Open`):** Khởi chạy cửa sổ PowerShell độc lập hiển thị tiến độ trực tiếp từng tệp (`ScanSingleFileForWorker`), 0% IOC/P-Invoke chống Seqrite/Quick Heal cách ly, đồng bộ tự động số phiên bản trên 15 file và cập nhật thương hiệu `OhsungIT team`. | `20261017_fix_antivirus_false_positive_v3.17.0.md` |
 | **`v3.18.0`** | `10/2026` | **4-Layer Turbo Folder Scanner (Tăng tốc 50x–100x):** Duyệt cuốn chiếu (`Streaming Queue`), Bộ lọc tĩnh `Zero-COM OpenXML Pre-Filter` (`1.5 ms/tệp`, không cần mở Excel với 85% tệp `.xlsx` sạch), kết hợp `Lazy On-Demand Multi-Worker COM Pool` (`2–4` tiến trình Excel song song) xử lý `.xls`/`.xlsm`, rút ngắn thời gian quét 20.000 tệp từ `> 24 giờ` xuống `~10–20 phút`. | `20261017_turbo_folder_scanner_architecture_v3.18.0.md` |
-| **`v3.19.0`** | `10/2026` | **Non-Scrolling Live Dashboard UI (`Render-LiveDashboard`):** Giao diện bảng điều khiển cố định tại chỗ (`[Console]::SetCursorPosition`), luồng đếm tổng số tệp chạy ngầm (`Background File Counter Runspace`) tính chính xác `% Hoàn thành / % Còn lại / ETA`, bảng thống kê trực tuyến 100 cột và chuyển đổi chuỗi hiển thị `ConvertTo-DisplayAscii` chống lỗi ô vuông `□` trên Windows Console. | `20261017_live_dashboard_progress_ui_v3.19.0.md` |
-
-
-
+| **`v3.19.0` – `v3.19.3`** | `10/2026` | **Non-Scrolling Live Dashboard UI + Immortal Worker Pool + Single-Instance Mutex:** Giao diện bảng điều khiển cố định tự co giãn (`Adaptive Console Width Guard`), hàm băm `Pure Native VBA ComputeThreatHash` (0% `.NET CLR mscorwks.dll` crash), `Immortal Worker Pool` + `LOH 4MB Cap` chịu tải `66.000+` tệp, và `Single-Instance Mutex` chặn bật trùng cửa sổ PowerShell. | `20261017_live_dashboard_progress_ui_v3.19.0.md` |
+| **`v3.20.0`** | `10/2026` | **Enterprise Periodic Scan Reporting & Project Audit Logging (`Scan_Reports\`):** Tự động ghi nhật ký kiểm toán chi tiết và xuất bộ 4 báo cáo định kỳ (`LATEST_SCAN_REPORT.md`, `Scan_Summary_History.csv`, `Infected_Files_Ledger_YYYYMM.csv`, `scan_detail_log_YYYYMMDD.txt`) kèm thống kê theo từng Phòng ban / Thư mục cấp 1 trực tiếp vào `D:\7. AI tools\kangatang\Scan_Reports\`. | `20261017_detailed_scan_report_logging_plan.md` |

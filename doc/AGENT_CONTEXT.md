@@ -6,21 +6,22 @@
 
 ## 1. THÔNG TIN PHIÊN BẢN & HẠ TẦNG MẠNG LAN (CRITICAL TOPOLOGY)
 
-- **Phiên bản hiện tại:** `v3.19.3` (`Single-Instance Mutex + Adaptive Console UI + Immortal Worker Pool + LOH Memory Guard`)
+- **Phiên bản hiện tại:** `v3.20.0` (`Enterprise Periodic Scan Reporting + Single-Instance Mutex + Adaptive Console UI + Immortal Worker Pool`)
 - **Phân tách vai trò 2 máy chủ LAN (BẤT BIẾN):**
   | Máy chủ | Đường dẫn UNC / Local | Vai trò duy nhất | Quy tắc CẤM (Hard Constraint) |
   | :--- | :--- | :--- | :--- |
-  | **`192.168.223.7`** *(Distribution Hub)* | `\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang` | Phân phối gói cài đặt & tự động cập nhật (`KangatangGuard.xlam`, `version.json`, `Install_Client.ps1`, `Kangatang_FolderScanner.ps1`) | 🛑 **TUYỆT ĐỐI KHÔNG** lưu `Quarantine_Backup` hoặc `Threat_Samples` trên `223.7`! |
-  | **`192.168.223.176`** *(Master & Threat Vault)* | Local: `D:\7. AI tools\kangatang\`<br>LAN Share: `\\192.168.223.176\test\Quarantine_Backup` & `\Threat_Samples` | Lưu trữ tập trung mẫu mã độc (`Threat_Samples/*.sample.json`) và bản sao lưu file nhiễm (`Quarantine_Backup/`) từ mọi máy LAN | Không dùng làm Hub cập nhật chính cho Client (chỉ lưu bản Clone tại `distribution/`) |
+  | **`192.168.223.7`** *(Distribution Hub)* | `\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang` | Phân phối gói cài đặt & tự động cập nhật (`KangatangGuard.xlam`, `version.json`, `Install_Client.ps1`, `Kangatang_FolderScanner.ps1`) | 🛑 **TUYỆT ĐỐI KHÔNG** lưu `Quarantine_Backup`, `Threat_Samples` hoặc `Scan_Reports` trên `223.7`! |
+  | **`192.168.223.176`** *(Master & Threat Vault)* | Local: `D:\7. AI tools\kangatang\`<br>LAN Share: `\\192.168.223.176\test\Quarantine_Backup`, `\Threat_Samples` & `\Scan_Reports` | Lưu trữ tập trung mẫu mã độc (`Threat_Samples/`), bản sao lưu file nhiễm (`Quarantine_Backup/`) và Báo cáo định kỳ / Nhật ký chi tiết (`Scan_Reports/`) | Không dùng làm Hub cập nhật chính cho Client (chỉ lưu bản Clone tại `distribution/`) |
 
 - **Vị trí cài đặt chuẩn trên máy Client/Master:**
   - Add-in & Trình quét ngoài tiến trình: `%APPDATA%\Microsoft\AddIns\KangatangGuard.xlam` và `%APPDATA%\Microsoft\AddIns\Kangatang_FolderScanner.ps1` (**KHÔNG** chép `.xlam` vào `XLSTART`).
   - Tự động nạp qua Registry: `HKCU\Software\Microsoft\Office\<16.0|15.0|14.0>\Excel\Options\OPEN* = "KangatangGuard.xlam"` (bảo toàn các Add-in khác như `MyExcel.xlam`).
-  - Thư mục Log & Session: `%APPDATA%\KangatangGuard\` (`scan_log_YYYYMMDD.txt`, `last_session.json`, `scanned_files.log`, `scan_request.json`). **TUYỆT ĐỐI KHÔNG lưu file `.ps1` trong `%APPDATA%\KangatangGuard\`.**
+  - Thư mục Log & Session cục bộ: `%APPDATA%\KangatangGuard\` (`scan_log_YYYYMMDD.txt`, `last_session.json`, `scanned_files.log`, `scan_request.json`). **TUYỆT ĐỐI KHÔNG lưu file `.ps1` trong `%APPDATA%\KangatangGuard\`.**
+  - Thư mục Báo cáo định kỳ & Log chi tiết trong dự án (`v3.20.0`): `D:\7. AI tools\kangatang\Scan_Reports\` (`LATEST_SCAN_REPORT.md`, `Scan_Summary_History.csv`, `Infected_Files_Ledger_YYYYMM.csv`, `scan_detail_log_YYYYMMDD.txt`, `Sessions\Report_<SessionID>.md`).
 
 ---
 
-## 2. BẢN ĐỒ TỌA ĐỘ DÒNG CODE (`addin/KangatangGuard_Code.vba` — 4.137 DÒNG)
+## 2. BẢN ĐỒ TỌA ĐỘ DÒNG CODE (`addin/KangatangGuard_Code.vba` — 4.165 DÒNG)
 
 > 💡 **Mẹo tiết kiệm Token:** Khi dùng `view_file` trên `addin/KangatangGuard_Code.vba`, hãy chỉ định đúng `StartLine` và `EndLine` theo bảng dưới đây:
 
@@ -29,13 +30,13 @@
 | :--- | :--- | :--- | :--- |
 | `ThisWorkbook` | Document Module | `L13` – `L36` | Hook `Workbook_Open`, `Workbook_AddinInstall`, `Workbook_BeforeClose` |
 | `clsAppEvents` | Class Module | `L39` – `L109` | Bắt sự kiện toàn cục `xlApp_WorkbookOpen`, `BeforeSave`, `NewWorkbook`, `SheetActivate`, `WorkbookActivate` |
-| `modKangatangScanner` | Standard Module | `L112` – `L2585` | Engine quét/diệt virus, Out-of-Process Launcher (`IsScannerCurrentlyRunning`), Worker Macros (`ScanSingleFileForWorker`, `PurgeWorkerStrayRestoreProcesses`), Copy/Paste Shortcuts, Ribbon Callbacks, LAN Auto-Update |
-| `modKangatangShield` | Standard Module | `L2588` – `L3871` | Nhận diện chữ ký/IOC virus, Startup Sweep, Quarantine, CleanAddInCollisions, Two-Phase Module-Sheet Purge |
-| `modLogger` | Standard Module | `L3874` – `L3906` | Ghi nhật ký kiểm toán `WriteLog` ra `%APPDATA%\KangatangGuard\scan_log_YYYYMMDD.txt` |
-| `modThreatCollector` | Standard Module | `L3909` – `L4137` | Băm Pure Native VBA Dual-Seed 32-bit (`ComputeThreatHash`) & thu thập mẫu mã độc JSON (`CollectThreatSample`) về máy `223.176` |
+| `modKangatangScanner` | Standard Module | `L112` – `L2595` | Engine quét/diệt virus, Out-of-Process Launcher (`IsScannerCurrentlyRunning`), Worker Macros (`ScanSingleFileForWorker`, `PurgeWorkerStrayRestoreProcesses`), Copy/Paste Shortcuts, Ribbon Callbacks, LAN Auto-Update |
+| `modKangatangShield` | Standard Module | `L2598` – `L3893` | Nhận diện chữ ký/IOC virus, Startup Sweep, Quarantine, CleanAddInCollisions, Two-Phase Module-Sheet Purge |
+| `modLogger` | Standard Module | `L3896` – `L3947` | Ghi nhật ký kiểm toán `WriteLog` ra `%APPDATA%\KangatangGuard\scan_log_YYYYMMDD.txt` và đồng bộ về `D:\7. AI tools\kangatang\Scan_Reports\scan_detail_log_YYYYMMDD.txt` |
+| `modThreatCollector` | Standard Module | `L3950` – `L4165` | Băm Pure Native VBA Dual-Seed 32-bit (`ComputeThreatHash`) & thu thập mẫu mã độc JSON (`CollectThreatSample`) về máy `223.176` |
 
-### B. Tọa độ các hàm trọng yếu trong `modKangatangScanner` (`L112` – `L2585`)
-- **Hằng số phiên bản & cấu hình (`CURRENT_VERSION = "3.19.3"`, `CENTRAL_BACKUP_HUB`):** `L115` – `L155`
+### B. Tọa độ các hàm trọng yếu trong `modKangatangScanner` (`L112` – `L2595`)
+- **Hằng số phiên bản & cấu hình (`CURRENT_VERSION = "3.20.0"`, `CENTRAL_BACKUP_HUB`):** `L115` – `L155`
 - **Unicode & Headless-safe Dialog (`Uni`, `MsgBoxW`):** `L156` – `L203`
 - **ScanCache chống lag khi Save (`IsScanCacheExpired`, `UpdateScanCache`):** `L204` – `L240`
 - **Khởi tạo & Ribbon Callbacks (`InitializeGuard`, `EnsureGuardAlive`, `Ribbon_*`):** `L241` – `L356`
