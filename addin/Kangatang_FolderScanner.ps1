@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.19.2 (Immortal Worker Pool + Anti-Freeze Watchdog + LOH Memory Guard)
+# Phien ban: v3.19.3 (Single-Instance Mutex + Adaptive Console UI + Immortal Workers)
 # ==============================================================================
 
 param (
@@ -12,6 +12,54 @@ param (
     [Parameter(Mandatory=$false)]
     [int]$MaxWorkers = 0
 )
+
+# 0. Chot chan Don Tien Trinh Tuyet Doi (Single-Instance Mutex + Active Session Heartbeat)
+# Ngam chan 100% hien tuong tu bat cua so PowerShell thu 2 khi dang quet thu muc
+$logDir = Join-Path $env:APPDATA "KangatangGuard"
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+$scanReqFile     = Join-Path $logDir "scan_request.json"
+$lastSessionFile = Join-Path $logDir "last_session.json"
+$scannedLogFile  = Join-Path $logDir "scanned_files.log"
+
+$script:scannerMutex = $null
+$script:hasMutex     = $false
+try {
+    $script:scannerMutex = New-Object System.Threading.Mutex($false, "Local\KangatangGuard_FolderScanner_Mutex")
+    $script:hasMutex = $script:scannerMutex.WaitOne(0, $false)
+} catch {
+    $script:hasMutex = $true
+}
+if (-not $script:hasMutex) {
+    [System.Environment]::Exit(0)
+}
+
+# Kiem tra nhip tim (Heartbeat) trong last_session.json de bao ve ca phien quet cu dang chay
+if (Test-Path -LiteralPath $lastSessionFile) {
+    try {
+        $sessItem = Get-Item -LiteralPath $lastSessionFile -ErrorAction SilentlyContinue
+        $sessMeta = Get-Content -LiteralPath $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($sessMeta -and ($sessMeta.Status -eq "IN_PROGRESS")) {
+            $activeOther = $false
+            if ($sessMeta.ScannerPid -and ([int]$sessMeta.ScannerPid -ne $PID)) {
+                $pObj = Get-Process -Id ([int]$sessMeta.ScannerPid) -ErrorAction SilentlyContinue
+                if ($pObj -and ($pObj.ProcessName -match "powershell|pwsh")) {
+                    $activeOther = $true
+                }
+            } elseif ($sessItem -and (((Get-Date) - $sessItem.LastWriteTime).TotalSeconds -lt 25)) {
+                $otherPsList = @(Get-Process -Name powershell -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID })
+                if ($otherPsList.Count -gt 0) {
+                    $activeOther = $true
+                }
+            }
+            if ($activeOther) {
+                if ($script:hasMutex -and ($null -ne $script:scannerMutex)) {
+                    try { $script:scannerMutex.ReleaseMutex(); $script:scannerMutex.Dispose() } catch {}
+                }
+                [System.Environment]::Exit(0)
+            }
+        }
+    } catch {}
+}
 
 try { $null = & cmd.exe /c "chcp 65001 >nul 2>&1" } catch {}
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -25,7 +73,7 @@ $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyI
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.19.2"
+$AppVersion = "3.19.3"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -224,6 +272,7 @@ function Flush-ScanLogs([string]$status, [int]$totalDiscovered, [int]$scanned, [
             StartTime    = $startTime
             LastUpdate   = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
             Status       = $status
+            ScannerPid   = $PID
             TotalFiles   = $totalDiscovered
             TotalScanned = $scanned
             TotalCleaned = $cleaned
@@ -578,15 +627,20 @@ $script:lastUiTick = 0
 
 $script:canSetCursor = $true
 $script:dashboardTop = 0
+$script:lastWinWidth = 100
 try {
     $script:dashboardTop = [Console]::CursorTop
+    $script:lastWinWidth = [Console]::WindowWidth
     [Console]::CursorVisible = $false
 } catch {
     $script:canSetCursor = $false
 }
 
 function Write-FixedLine([string]$text, [System.ConsoleColor]$color = [System.ConsoleColor]::White) {
-    $padded = if ($text.Length -lt 100) { $text.PadRight(100) } else { $text.Substring(0, 100) }
+    $winW = 101
+    try { $winW = [Console]::WindowWidth } catch {}
+    $lineLen = [Math]::Max(40, [Math]::Min(100, $winW - 1))
+    $padded = if ($text.Length -lt $lineLen) { $text.PadRight($lineLen) } else { $text.Substring(0, $lineLen) }
     Write-Host $padded -ForegroundColor $color
 }
 
@@ -597,7 +651,22 @@ function Render-LiveDashboard([bool]$force = $false, [bool]$isCompleted = $false
 
     if ((-not $script:canSetCursor) -and (-not $isCompleted)) { return }
     if ($script:canSetCursor) {
-        try { [Console]::SetCursorPosition(0, $script:dashboardTop) } catch { $script:canSetCursor = $false; return }
+        try {
+            $curW = [Console]::WindowWidth
+            if ($curW -ne $script:lastWinWidth) {
+                $script:lastWinWidth = $curW
+                [Console]::Clear()
+                Write-FixedLine "====================================================================================================" ([System.ConsoleColor]::Cyan)
+                Write-FixedLine "   KANGATANG GUARD v$AppVersion - BANG DIEU KHIEN QUET THU MUC (4-LAYER TURBO LIVE DASHBOARD)       " ([System.ConsoleColor]::Cyan)
+                Write-FixedLine "   Day la addin phong chong virus kangatang - Phat trien boi OhsungIT team !                        " ([System.ConsoleColor]::White)
+                Write-FixedLine "====================================================================================================" ([System.ConsoleColor]::Cyan)
+                $script:dashboardTop = [Console]::CursorTop
+            }
+            [Console]::SetCursorPosition(0, $script:dashboardTop)
+        } catch {
+            $script:canSetCursor = $false
+            return
+        }
     }
 
     $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
@@ -943,6 +1012,9 @@ try {
     }
     if ($null -ne $script:runspacePool) {
         try { $script:runspacePool.Close(); $script:runspacePool.Dispose() } catch {}
+    }
+    if ($script:hasMutex -and ($null -ne $script:scannerMutex)) {
+        try { $script:scannerMutex.ReleaseMutex(); $script:scannerMutex.Dispose() } catch {}
     }
 }
 

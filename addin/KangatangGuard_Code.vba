@@ -131,7 +131,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.19.2"
+Public Const CURRENT_VERSION As String = "3.19.3"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -584,7 +584,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
             WriteLog "[CLEANED] " & wb.FullName
             
             Dim bLaunch As Boolean
-            bLaunch = (Not bFromBeforeSave) And (Len(wb.Path) > 0) And (Not IsInStartupFolder(wb.FullName))
+            bLaunch = (Not bFromBeforeSave) And (Len(wb.Path) > 0) And (Not IsInStartupFolder(wb.FullName)) And (Not IsScannerCurrentlyRunning())
             
             Dim okMsg As String
             okMsg = Uni("C\u1ea2NH B\u00c1O: PH\u00c1T HI\u1ec6N VIRUS KANGATANG!" & vbCrLf & vbCrLf & _
@@ -626,7 +626,51 @@ ScanError:
 End Sub
 
 ' ===========================================================================
-' TRINH QUET THU MUC NGOAI TIEN TRINH POWERSHELL + NATIVE VBA WORKER (v3.17.3)
+' CHOT CHAN KIEM TRA TIEN TRINH QUET THU MUC DANG CHAY (v3.19.3)
+' Ngam chan tuyet doi hien tuong tu bat cua so PowerShell thu 2 khi dang quet!
+' ===========================================================================
+Public Function IsScannerCurrentlyRunning() As Boolean
+    On Error Resume Next
+    If bIsFolderScanning Then
+        IsScannerCurrentlyRunning = True
+        Exit Function
+    End If
+    
+    Dim svc As Object, rs As Object, proc As Object, cmd As String
+    Set svc = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
+    If Not svc Is Nothing Then
+        Set rs = svc.ExecQuery("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name='powershell.exe'")
+        If Not rs Is Nothing Then
+            For Each proc In rs
+                cmd = LCase$(CStr(proc.CommandLine & ""))
+                If InStr(1, cmd, "kangatang_folderscanner.ps1", vbTextCompare) > 0 Then
+                    IsScannerCurrentlyRunning = True
+                    Err.Clear
+                    Exit Function
+                End If
+            Next proc
+        End If
+    End If
+    
+    Dim fso As Object, sessPath As String, fObj As Object, rawJson As String
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    sessPath = Environ("APPDATA") & "\" & LOG_SUBFOLDER & "\last_session.json"
+    If fso.FileExists(sessPath) Then
+        Set fObj = fso.GetFile(sessPath)
+        If Not fObj Is Nothing Then
+            If Abs(DateDiff("s", fObj.DateLastModified, Now)) < 35 Then
+                rawJson = ReadUtf8FileText(fso, sessPath)
+                If InStr(1, rawJson, "IN_PROGRESS", vbTextCompare) > 0 Then
+                    IsScannerCurrentlyRunning = True
+                End If
+            End If
+        End If
+    End If
+    Err.Clear
+End Function
+
+' ===========================================================================
+' TRINH QUET THU MUC NGOAI TIEN TRINH POWERSHELL + NATIVE VBA WORKER (v3.19.3)
 ' - Mo cua so PowerShell doc lap (Out-of-Process) hien thi tien do theo thoi gian thuc,
 '   giup Excel chinh cua nguoi dung 100% muot ma (Zero-Hang) khi quet hang nghin tep SMB!
 ' - File .ps1 nam tai %APPDATA%\Microsoft\AddIns (khong luu o %APPDATA%\KangatangGuard)
@@ -635,6 +679,19 @@ End Sub
 ' ===========================================================================
 Public Sub LaunchBackgroundScanner(ByVal folderPath As String, Optional ByVal bResume As Boolean = False, Optional ByVal bForce As Boolean = False)
     On Error GoTo LaunchErr
+    
+    If IsScannerCurrentlyRunning() Then
+        On Error Resume Next
+        AppActivate "KangatangGuard"
+        On Error GoTo LaunchErr
+        WriteLog "[SCANNER_ALREADY_ACTIVE] Skipped duplicate PowerShell launch for: " & folderPath
+        If bForce Then
+            MsgBoxW Uni("Tr\u00ecnh qu\u00e9t th\u01b0 m\u1ee5c KangatangGuard hi\u1ec7n \u0111ang ch\u1ea1y!" & vbCrLf & vbCrLf & _
+                        "\u0110\u1ec3 tr\u00e1nh xung \u0111\u1ed9t, h\u1ec7 th\u1ed1ng gi\u1eef nguy\u00ean c\u1eeda s\u1ed5 PowerShell \u0111ang ho\u1ea1t \u0111\u1ed9ng."), _
+                    vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION
+        End If
+        Exit Sub
+    End If
     
     Dim cleanFolder As String
     cleanFolder = Trim$(folderPath)
@@ -3796,7 +3853,7 @@ Public Sub ShieldAfterPurge()
                     Uni("(D\u1ea1ng virus: Module-sheet Excel 5 \u1ea9n - \u0111\u00e3 g\u1ee1 an to\u00e0n ngo\u00e0i lu\u1ed3ng s\u1ef1 ki\u1ec7n)" & vbCrLf & _
                         "Tr\u1ea1ng th\u00e1i: \u0110\u00c3 TI\u00caU DI\u1ec6T TH\u00c0NH C\u00d4NG!" & vbCrLf & _
                         "B\u1ea3n sao l\u01b0u g\u1ed1c \u0111\u00e3 \u0111\u01b0\u1ee3c c\u00e1ch ly an to\u00e0n v\u1ec1 Kho M\u00e1y ch\u1ee7 LAN.")
-            If bSave And Len(wb.Path) > 0 And (Not IsInStartupFolder(fn)) Then
+            If bSave And Len(wb.Path) > 0 And (Not IsInStartupFolder(fn)) And (Not IsScannerCurrentlyRunning()) Then
                 purgeMsg = purgeMsg & vbCrLf & vbCrLf & _
                            Uni("B\u1ea1n c\u00f3 mu\u1ed1n QU\u00c9T TO\u00c0N B\u1ed8 TH\u01af M\u1ee4C ch\u1ee9a t\u1ec7p n\u00e0y ngay b\u00e2y gi\u1edd \u0111\u1ec3 di\u1ec7t s\u1ea1ch c\u00e1c t\u1ec7p l\u00e2n c\u1eadn kh\u00f4ng?")
                 If MsgBoxW(purgeMsg, vbYesNo + vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")) = vbYes Then

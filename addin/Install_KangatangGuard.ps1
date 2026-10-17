@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao %APPDATA%\Microsoft\AddIns
-# Phien ban: v3.19.2 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
+# Phien ban: v3.19.3 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.19.2"
+$InstallerVersion = "3.19.3"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
@@ -145,12 +145,27 @@ if (-not (Test-Path $xlStartPath)) {
 
 $xlamPath = Join-Path $addInsDir "KangatangGuard.xlam"
 
-# Dong tat ca tien trinh Excel dang chay
-Write-Host "   Dang dong cac tien trinh Excel..." -ForegroundColor Gray
-$excelProcs = Get-Process -Name excel -ErrorAction SilentlyContinue
-if ($excelProcs) {
-    $excelProcs | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
+# Chi dong Excel neu KHONG co tien trinh quet thu muc dang chay
+$scanActive = $false
+$sessCheckFile = Join-Path $env:APPDATA "KangatangGuard\last_session.json"
+if (Test-Path $sessCheckFile) {
+    try {
+        $sItem = Get-Item $sessCheckFile -ErrorAction SilentlyContinue
+        $sMeta = Get-Content $sessCheckFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($sMeta.Status -eq "IN_PROGRESS" -and $sItem -and (((Get-Date) - $sItem.LastWriteTime).TotalSeconds -lt 60)) {
+            $scanActive = $true
+        }
+    } catch {}
+}
+if (-not $scanActive) {
+    Write-Host "   Dang dong cac tien trinh Excel..." -ForegroundColor Gray
+    $excelProcs = Get-Process -Name excel -ErrorAction SilentlyContinue
+    if ($excelProcs) {
+        $excelProcs | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+} else {
+    Write-Host "   -> Phat hien phien quet thu muc dang chay, giu nguyen cac Worker Excel hien tai..." -ForegroundColor Cyan
 }
 
 # Khoi tao Excel COM
@@ -313,28 +328,11 @@ try {
     # Xoa Sheet1 mac dinh (add-in khong can sheet)
     # Giu lai 1 sheet vi Excel bat buoc phai co it nhat 1
     
-    # Luu file dang .xlam (55 = xlAddIn format)
+    # Luu file dang .xlam qua tep trung gian de khong bao gio xung dot voi Excel dang chay
     Write-Host "   -> Luu file .xlam..." -ForegroundColor Gray
-    
-    # Xoa file cu neu ton tai (thu toi da 5 lan neu dang bi giu handle)
-    if (Test-Path $xlamPath) {
-        $deleteSuccess = $false
-        for ($i = 1; $i -le 5; $i++) {
-            try {
-                Set-ItemProperty -Path $xlamPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
-                Remove-Item -Path $xlamPath -Force -ErrorAction Stop
-                $deleteSuccess = $true
-                break
-            } catch {
-                Start-Sleep -Milliseconds 600
-            }
-        }
-        if (-not $deleteSuccess -and (Test-Path $xlamPath)) {
-            Write-Host "   [CANH BAO] File $xlamPath dang bi tien trinh khac giu khoa. Dang thu dong tat ca Excel..." -ForegroundColor Yellow
-            Get-Process -Name excel -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 1
-            Remove-Item -Path $xlamPath -Force -ErrorAction SilentlyContinue
-        }
+    $tempBuildXlam = Join-Path $ScriptDir "KangatangGuard_build_tmp.xlam"
+    if (Test-Path $tempBuildXlam) {
+        Remove-Item -Path $tempBuildXlam -Force -ErrorAction SilentlyContinue
     }
     
     # Cau hinh thuoc tinh Add-in chuan
@@ -343,26 +341,30 @@ try {
         $wb.BuiltinDocumentProperties("Comments").Value = "Đây là addin phòng chống virus kangatang - Phát triển bởi OhsungIT team !"
     } catch {}
     $wb.IsAddin = $true
-    $wb.SaveAs($xlamPath, 55)  # 55 = xlOpenXMLAddIn (.xlam)
+    $wb.SaveAs($tempBuildXlam, 55)  # 55 = xlOpenXMLAddIn (.xlam)
     $wb.Close($false)
     
-    # Dam bao file trong AddIns khong bi danh dau Read-Only
-    try {
-        Set-ItemProperty -Path $xlamPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
-    } catch {}
-    
-    Write-Host "   -> [OK] Da luu vao AddIns: $xlamPath" -ForegroundColor Green
-    
     # Tich hop Ribbon CustomUI XML (Icon HD 32x32)
-    Add-RibbonCustomUI -targetXlam $xlamPath
+    Add-RibbonCustomUI -targetXlam $tempBuildXlam
     
     # Dong bo ban sao xlam vao thu muc nguon repository (addin\KangatangGuard.xlam)
     $repoXlam = Join-Path $ScriptDir "KangatangGuard.xlam"
     try {
-        Set-ItemProperty -Path $repoXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
-        Copy-Item -Path $xlamPath -Destination $repoXlam -Force
+        if (Test-Path $repoXlam) { Set-ItemProperty -Path $repoXlam -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue }
+        Copy-Item -Path $tempBuildXlam -Destination $repoXlam -Force
         Write-Host "   -> [OK] Da cap nhat ban sao repository: $repoXlam" -ForegroundColor Green
     } catch {}
+    
+    # Dong bo vao %APPDATA%\Microsoft\AddIns\KangatangGuard.xlam
+    try {
+        if (Test-Path $xlamPath) { Set-ItemProperty -Path $xlamPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue }
+        Copy-Item -Path $tempBuildXlam -Destination $xlamPath -Force -ErrorAction Stop
+        Set-ItemProperty -Path $xlamPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+        Write-Host "   -> [OK] Da luu vao AddIns: $xlamPath" -ForegroundColor Green
+    } catch {
+        Write-Host "   -> [OK] Da luu ban cap nhat tai repository (AddIns dang duoc su dung boi phien quet hien tai)." -ForegroundColor Cyan
+    }
+    Remove-Item -Path $tempBuildXlam -Force -ErrorAction SilentlyContinue
 
     # ==============================================================================
     # DANG KY EXCEL ADD-INS MANAGER & DON DEP XUNG DOT XLSTART (v3.16.0)

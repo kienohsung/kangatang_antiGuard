@@ -159,3 +159,19 @@
      - Thêm van an toàn (`Safety Valve`) trong vòng lặp chờ Backpressure/Drain để không bao giờ bị khóa cứng vĩnh viễn nếu gặp tệp mạng lỗi.
   3. **Bọc `try/catch` từng tệp + Top-level `catch` + Giới hạn bộ đệm Zero-COM LOH ở mức `4 MB` + `FinalReleaseComObject`:** Bảo vệ tuyệt đối vòng lặp chính trước mọi lỗi SMB/IO, ngăn tràn bộ nhớ LOH và giải phóng triệt để tiến trình `EXCEL.EXE` khi tái chế Worker.
 - **Tọa độ code:** [`Kangatang_FolderScanner.ps1#L246-L319`](file:///d:/7.%20AI%20tools/kangatang/addin/Kangatang_FolderScanner.ps1#L246-L319), [`L388-L558`](file:///d:/7.%20AI%20tools/kangatang/addin/Kangatang_FolderScanner.ps1#L388-L558), [`L780-L945`](file:///d:/7.%20AI%20tools/kangatang/addin/Kangatang_FolderScanner.ps1#L780-L945).
+
+---
+
+### `BUG-15`: Hệ thống tự bật chồng cửa sổ PowerShell thứ 2 khi đang chạy quét & Lệch dòng bảng Dashboard khi chia đôi màn hình (`v3.19.3`)
+- **Triệu chứng:**
+  1. Trong lúc một cửa sổ PowerShell đang chạy quét thư mục lớn, một cửa sổ PowerShell thứ 2 tự động bật lên chạy song song và tranh chấp Worker COM / `last_session.json`.
+  2. Khi người dùng xếp 2 cửa sổ cạnh nhau (thu hẹp chiều rộng cửa sổ `< 100` cột), các dòng trên bảng Live Dashboard bị tràn dòng (`line-wrap`), làm lệch tọa độ `SetCursorPosition` và để lại các dòng chữ bóng ma lặp lại.
+- **Root Cause:**
+  1. Cả `Kangatang_FolderScanner.ps1` lẫn hàm `LaunchBackgroundScanner` trong `KangatangGuard_Code.vba` chưa có khóa đơn tiến trình (`Single-Instance Mutex`) và chưa kiểm tra nhịp tim phiên quét đang chạy (`last_session.json` `Status == "IN_PROGRESS"`). Khi có lệnh gọi quét mới (từ nút Ribbon, từ hộp thoại phát hiện virus khi mở tệp Excel, hoặc từ lệnh khởi chạy bên ngoài), hệ thống mở thêm tiến trình `powershell.exe` thứ 2.
+  2. Ngoài ra, khi gọi `powershell.exe -NoExit -File ...`, lệnh `exit 0` thông thường chỉ thoát script nhưng vẫn giữ cửa sổ `PS>` mở nếu không gọi `[System.Environment]::Exit(0)`.
+  3. Hàm `Write-FixedLine` cố định độ dài `100` ký tự mà chưa co giãn theo `[Console]::WindowWidth - 1`.
+- **Cách khắc phục (`v3.19.3`):**
+  1. **Khóa Đơn Tiến Trình Kép (`Local\KangatangGuard_FolderScanner_Mutex` + `Active Session Heartbeat` + `[System.Environment]::Exit(0)`):** Ngay dòng đầu tiên của `Kangatang_FolderScanner.ps1`, kiểm tra Mutex và nhịp tim `ScannerPid` / `LastWriteTime` của `last_session.json`. Nếu đã có tiến trình quét đang hoạt động, tiến trình mới gọi `[System.Environment]::Exit(0)` đóng ngay trong `< 50ms`.
+  2. **Chốt chặn `IsScannerCurrentlyRunning()` trong VBA (`LaunchBackgroundScanner`, `ScanWorkbook`, `ShieldAfterPurge`):** Kiểm tra WMI `Win32_Process` và nhịp tim `last_session.json` trước khi gọi `wsh.Run`; không bật hộp thoại hỏi quét thư mục khi mở tệp nhiễm nếu trình quét đang chạy, và tự động `AppActivate "KangatangGuard"` đưa cửa sổ đang chạy lên tiền cảnh.
+  3. **Tự động co giãn chiều rộng dòng (`Adaptive Console Width Guard`):** Giới hạn `Write-FixedLine` theo `[Math]::Min(100, [Console]::WindowWidth - 1)` và tự động `[Console]::Clear()` vẽ lại khung chuẩn mỗi khi người dùng thay đổi kích thước cửa sổ.
+- **Tọa độ code:** [`Kangatang_FolderScanner.ps1#L15-L63`](file:///d:/7.%20AI%20tools/kangatang/addin/Kangatang_FolderScanner.ps1#L15-L63), [`L627-L666`](file:///d:/7.%20AI%20tools/kangatang/addin/Kangatang_FolderScanner.ps1#L627-L666), [`KangatangGuard_Code.vba#L628-L695`](file:///d:/7.%20AI%20tools/kangatang/addin/KangatangGuard_Code.vba#L628-L695).
