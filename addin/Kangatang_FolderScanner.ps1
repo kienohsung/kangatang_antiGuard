@@ -260,7 +260,10 @@ $maxQueueDepth = [Math]::Max(60, $workerCount * 30)
 
 # 5. Nap du lieu Fast Resume tu scanned_files.log vao RAM Hashtable & HashSet phat hien Tai nhiem (RE_INFECTED)
 $resumeMap = @{}
-$script:everScannedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+$script:everScannedPaths   = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+$script:scannedDirsSet     = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+$script:orderedScannedDirs = New-Object 'System.Collections.Generic.List[string]'
+$targetPrefixInit = $TargetFolder.ToLowerInvariant()
 if (Test-Path -LiteralPath $scannedLogFile) {
     try {
         foreach ($line in [System.IO.File]::ReadAllLines($scannedLogFile)) {
@@ -268,11 +271,18 @@ if (Test-Path -LiteralPath $scannedLogFile) {
             if ($trimmed.Length -gt 0) {
                 $idxSep = $trimmed.IndexOf("|")
                 if ($idxSep -gt 0) {
-                    $k = $trimmed.Substring(0, $idxSep).ToLowerInvariant()
+                    $rawPath = $trimmed.Substring(0, $idxSep)
+                    $k = $rawPath.ToLowerInvariant()
                     $v = $trimmed.Substring($idxSep + 1)
                     [void]$script:everScannedPaths.Add($k)
                     if ($isResume) {
                         $resumeMap[$k] = $v
+                        if ($k.StartsWith($targetPrefixInit)) {
+                            $dName = [System.IO.Path]::GetDirectoryName($rawPath)
+                            if ($dName -and $script:scannedDirsSet.Add($dName)) {
+                                $script:orderedScannedDirs.Add($dName)
+                            }
+                        }
                     }
                 }
             }
@@ -1311,13 +1321,66 @@ $initTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:total
 Flush-ScanLogs "IN_PROGRESS" $initTarget $script:totalScanned $script:totalCleaned $startTimeStr
 Render-LiveDashboard $true $false
 
-$dirQueue  = New-Object System.Collections.Generic.Queue[string]
-$dirQueue.Enqueue($TargetFolder)
+$freshDirQueue = New-Object System.Collections.Generic.Queue[string]
+$dirQueue      = New-Object System.Collections.Generic.Queue[string]
+$visitedDirs   = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+$queuedSeedSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+$lastScannedDir = ""
+if ($isResume -and $script:orderedScannedDirs.Count -gt 0) {
+    $script:folderIdx       = $script:orderedScannedDirs.Count
+    $script:totalDiscovered = $script:totalScanned
+    $lastScannedDir         = $script:orderedScannedDirs[$script:orderedScannedDirs.Count - 1]
+
+    # Uu tien nap ngay cha/ong cua thu muc cuoi cung (#15,941) de nhay thang sang thu muc #15,942 trong 0.1 giay
+    $curAnc = $lastScannedDir
+    while ($curAnc -and ($curAnc.Length -ge $TargetFolder.Length)) {
+        if ($queuedSeedSet.Add($curAnc)) {
+            $dirQueue.Enqueue($curAnc)
+        }
+        if ($curAnc.Equals($TargetFolder, [System.StringComparison]::OrdinalIgnoreCase)) { break }
+        $curAnc = [System.IO.Path]::GetDirectoryName($curAnc)
+    }
+
+    # Nap cac nhanh bien gioi (Frontier) tu cuoi danh sach da quet nguoc ve truoc
+    for ($idxD = $script:orderedScannedDirs.Count - 1; $idxD -ge 0; $idxD--) {
+        $dItem = $script:orderedScannedDirs[$idxD]
+        $pItem = [System.IO.Path]::GetDirectoryName($dItem)
+        if ($pItem -and ($pItem.Length -ge $TargetFolder.Length) -and $queuedSeedSet.Add($pItem)) {
+            $dirQueue.Enqueue($pItem)
+        }
+        if ($queuedSeedSet.Add($dItem)) {
+            $dirQueue.Enqueue($dItem)
+        }
+    }
+}
+if ($queuedSeedSet.Add($TargetFolder)) {
+    $dirQueue.Enqueue($TargetFolder)
+}
 $validExts = @(".xls", ".xlsx", ".xlsm", ".xlsb")
 
 try {
-    while ($dirQueue.Count -gt 0) {
-        $folder = $dirQueue.Dequeue()
+    while (($freshDirQueue.Count -gt 0) -or ($dirQueue.Count -gt 0)) {
+        $folder = if ($freshDirQueue.Count -gt 0) { $freshDirQueue.Dequeue() } else { $dirQueue.Dequeue() }
+        if (-not $visitedDirs.Add($folder)) { continue }
+
+        # Neu thu muc nay da quet xong 100% tep o phien truoc (nam trong scannedDirsSet, tru thu muc cuoi cung co the dang quet do):
+        # Chi lay nhanh danh sach thu muc con chua quet day vao $freshDirQueue, BO QUA HOAN TOAN viec doc lai tep Excel cu!
+        if ($isResume -and $script:scannedDirsSet.Contains($folder) -and (-not $folder.Equals($lastScannedDir, [System.StringComparison]::OrdinalIgnoreCase))) {
+            try {
+                foreach ($sd in [System.IO.Directory]::GetDirectories($folder)) {
+                    $sdName = [System.IO.Path]::GetFileName($sd)
+                    if (-not (Test-SkippedFolderName $sdName)) {
+                        if (-not $script:scannedDirsSet.Contains($sd)) {
+                            $freshDirQueue.Enqueue($sd)
+                        } else {
+                            $dirQueue.Enqueue($sd)
+                        }
+                    }
+                }
+            } catch {}
+            continue
+        }
 
         # Tang 1: Single-Pass SMB Enumeration (1 SMB FindFirstFileW lay ca SubDirs + FileInfo kem Length/LastWriteTime)
         $excelFiles = New-Object System.Collections.Generic.List[System.IO.FileInfo]
@@ -1326,7 +1389,11 @@ try {
             foreach ($fsi in $dirInfo.GetFileSystemInfos()) {
                 if (($fsi.Attributes -band [System.IO.FileAttributes]::Directory) -ne 0) {
                     if (-not (Test-SkippedFolderName $fsi.Name)) {
-                        $dirQueue.Enqueue($fsi.FullName)
+                        if ($isResume -and (-not $script:scannedDirsSet.Contains($fsi.FullName))) {
+                            $freshDirQueue.Enqueue($fsi.FullName)
+                        } else {
+                            $dirQueue.Enqueue($fsi.FullName)
+                        }
                     }
                 } else {
                     $fName = $fsi.Name
@@ -1341,7 +1408,9 @@ try {
         }
 
         if ($excelFiles.Count -eq 0) { continue }
-        $script:folderIdx++
+        if (-not ($isResume -and $folder.Equals($lastScannedDir, [System.StringComparison]::OrdinalIgnoreCase))) {
+            $script:folderIdx++
+        }
         $script:currentFolder = $folder
         $script:totalDiscovered += $excelFiles.Count
 
