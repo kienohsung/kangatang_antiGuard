@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.16.0"
+$ReleaseVersion = "3.17.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -51,9 +51,9 @@ $versionObj = @{
         standalone     = "Kangatang_Standalone_Scanner.ps1"
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
-    # v3.16.0: Instant Add-In Manager Integration & Zero-Spin Architecture
+    # v3.17.0: 100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Instant Add-In Manager Integration & Zero-Spin Architecture: Khac phuc triet de loi quay tron va khong add duoc Add-in trong hop thoai File -> Options -> Add-ins -> Go; loai bo co che tu go cai dat Add-in (oAi.Installed = False) trong CleanAddInCollisions, chuan hoa cai dat vao %APPDATA%\Microsoft\AddIns\KangatangGuard.xlam, dang ky OPEN* bao toan Add-in ben thu 3 (MyExcel.xlam), va toi uu InitializeGuard() < 5ms."
+    changelog         = "v${ReleaseVersion} - 100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture: Khac phuc triet de loi Antivirus (Seqrite Endpoint Security / Quick Heal) nhan nham va cach ly Kangatang_FolderScanner.ps1 trong %APPDATA%\KangatangGuard; tich hop trinh quet thu muc RunNativeFolderScan 100% Native VBA ben trong KangatangGuard.xlam, tu dong xoa bo file .ps1 cu trong %APPDATA%\KangatangGuard va loai bo toan bo ma C# P/Invoke trong cac script ho tro."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4

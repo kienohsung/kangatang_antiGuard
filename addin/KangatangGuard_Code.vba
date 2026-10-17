@@ -1,6 +1,6 @@
 '==============================================================================
 ' KangatangGuard - Excel Add-in Diet Virus Macro Kangatang
-' Phien ban: v3.12.0 (Deep Copy/Paste Healing, Auto-Restore on Safe Files & Unrestricted Selection)
+' Phien ban: v3.17.0 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
 ' Mo ta: Tu dong quet va tieu diet virus macro Kangatang/Laroux/mypersonnel
 '         ngay khi mo file Excel. Ho tro Trung tam Phan phoi May chu Tep LAN:
 '         \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang
@@ -110,7 +110,7 @@ End Sub
 
 
 '### SECTION: modKangatangScanner ###
-'--- Standard Module: Logic quet chinh, backup, lam sach va dieu phoi worker ---
+'--- Standard Module: Logic quet chinh, backup, lam sach va dieu phoi quet thu muc Native VBA ---
 
 Option Explicit
 
@@ -128,10 +128,10 @@ Private bStartupSweepScheduled As Boolean
 
 ' Scan Cache chong lag: key=UCase(FullName), value=Date
 Private dicScanCache As Object
-' v3.10.0: Chong bat trung nhieu cua so quet ngam cho cung 1 thu muc trong 1 phien
+' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.16.0"
+Public Const CURRENT_VERSION As String = "3.17.0"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -171,12 +171,23 @@ Public Function Uni(ByVal txt As String) As String
 End Function
 
 ' ===========================================================================
-' HAM HIEN THI THONG BAO TIENG VIET CO DAU (v3.4.0)
+' HAM HIEN THI THONG BAO TIENG VIET CO DAU (v3.17.0)
 ' Goi truc tiep API MessageBoxW cua Windows de khong bao gio bi loi font dau ?
+' Tu dong bo qua khi Excel chay an (Headless COM) de khong treo tien trinh
 ' ===========================================================================
 Public Function MsgBoxW(ByVal prompt As String, Optional ByVal buttons As VbMsgBoxStyle = vbOKOnly, Optional ByVal title As String = "") As VbMsgBoxResult
-    Dim h As LongPtr
     On Error Resume Next
+    If Not Application.Visible Then
+        WriteLog "[MSGBOX_SUPPRESSED_HEADLESS] " & Replace(prompt, vbCrLf, " | ")
+        If (buttons And vbYesNo) = vbYesNo Then
+            MsgBoxW = vbNo
+        Else
+            MsgBoxW = vbOK
+        End If
+        Exit Function
+    End If
+    
+    Dim h As LongPtr
     h = Application.Hwnd
     On Error GoTo 0
     
@@ -582,11 +593,13 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
                         CENTRAL_BACKUP_HUB)
             If bLaunch Then
                 okMsg = okMsg & vbCrLf & vbCrLf & _
-                        Uni("Ti\u1ebfn tr\u00ecnh qu\u00e9t ng\u1ea7m \u0111\u1ed9c l\u1eadp s\u1ebd T\u1ef0 \u0110\u1ed8NG QU\u00c9T TO\u00c0N B\u1ed8 TH\u01af M\u1ee4C ch\u1ee9a t\u1ec7p n\u00e0y m\u00e0 kh\u00f4ng l\u00e0m gi\u00e1n \u0111o\u1ea1n Excel c\u1ee7a b\u1ea1n!")
+                        Uni("B\u1ea1n c\u00f3 mu\u1ed1n QU\u00c9T TO\u00c0N B\u1ed8 TH\u01af M\u1ee4C ch\u1ee9a t\u1ec7p n\u00e0y ngay b\u00e2y gi\u1edd \u0111\u1ec3 di\u1ec7t s\u1ea1ch c\u00e1c t\u1ec7p l\u00e2n c\u1eadn kh\u00f4ng?")
+                If MsgBoxW(okMsg, vbYesNo + vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")) = vbYes Then
+                    Call RunNativeFolderScan(wb.Path, False, False)
+                End If
+            Else
+                MsgBoxW okMsg, vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")
             End If
-            MsgBoxW okMsg, vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")
-            
-            If bLaunch Then Call LaunchBackgroundScanner(wb.Path)
         Else
             WriteLog "[ERROR] Clean failed: " & wb.FullName
             MsgBoxW Uni("C\u1ea2NH B\u00c1O: Ph\u00e1t hi\u1ec7n virus nh\u01b0ng KH\u00d4NG TH\u1ec2 l\u00e0m s\u1ea1ch ho\u00e0n to\u00e0n t\u1ef1 \u0111\u1ed9ng!" & vbCrLf & _
@@ -611,167 +624,369 @@ ScanError:
 End Sub
 
 ' ===========================================================================
-' HAM KHOI CHAY TIEN TRINH QUET NGAM DOC LAP (v3.6.0 - ASYNCHRONOUS WORKER)
-' Chay ngoai tien trinh (Out-of-Process), thoat ngay trong 10ms
-' Ho tro tham so bResume de tiep tuc phien quet truoc do
+' TRINH QUET THU MUC 100% NATIVE VBA (v3.17.0 - ZERO-PS1 ANTIVIRUS-SAFE ENGINE)
+' Chay truc tiep ben trong VBA voi AutomationSecurity = 3 (ForceDisable Macro),
+' khong tao hay goi bat ky tep .ps1 nao trong %APPDATA% -> Loai bo triet de 100%
+' canh bao nham (False-Positive Quarantine) cua Seqrite / Quick Heal / EDR!
 ' ===========================================================================
 Public Sub LaunchBackgroundScanner(ByVal folderPath As String, Optional ByVal bResume As Boolean = False, Optional ByVal bForce As Boolean = False)
-    On Error GoTo LaunchErr
+    Call RunNativeFolderScan(folderPath, bResume, Not bForce)
+End Sub
+
+Public Sub RunNativeFolderScan(ByVal folderPath As String, Optional ByVal bResume As Boolean = False, Optional ByVal bSilentSummary As Boolean = False)
+    On Error GoTo ScanFolderErr
     
-    ' VACCINE v3.5.4+: Cat bo toan bo dau \ o cuoi duong dan de tranh loi Command Line Escaping (\" trong Windows CLI)
+    If bIsFolderScanning Then Exit Sub
+    
     Dim cleanFolder As String
-    cleanFolder = folderPath
-    Do While Right(cleanFolder, 1) = "\" And Len(cleanFolder) > 0
-        cleanFolder = Left(cleanFolder, Len(cleanFolder) - 1)
+    cleanFolder = Trim$(folderPath)
+    Do While Len(cleanFolder) > 3 And Right$(cleanFolder, 1) = "\"
+        cleanFolder = Left$(cleanFolder, Len(cleanFolder) - 1)
     Loop
-    
-    ' v3.10.0: Chong bat trung - moi thu muc chi khoi chay 1 lan trong 30 phut (tru Resume / nguoi dung chu dong)
-    If Not bResume And Not bForce And Len(cleanFolder) > 0 Then
-        If dicLaunchedFolders Is Nothing Then Set dicLaunchedFolders = CreateObject("Scripting.Dictionary")
-        Dim folderKey As String
-        folderKey = LCase(cleanFolder)
-        If dicLaunchedFolders.Exists(folderKey) Then
-            If DateDiff("n", dicLaunchedFolders(folderKey), Now) < RELAUNCH_FOLDER_MINUTES Then
-                WriteLog "[BG_LAUNCH_SKIPPED] Already scanning recently: " & cleanFolder
-                Exit Sub
-            End If
-        End If
-        dicLaunchedFolders(folderKey) = Now
-    End If
+    If Len(cleanFolder) = 0 Then Exit Sub
     
     Dim fso As Object
     Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FolderExists(cleanFolder) Then
+        WriteLog "[FOLDER_SCAN_ERR] Target folder does not exist: " & cleanFolder
+        If Not bSilentSummary Then
+            MsgBoxW Uni("Kh\u00f4ng t\u00ecm th\u1ea5y th\u01b0 m\u1ee5c c\u1ea7n qu\u00e9t:" & vbCrLf) & cleanFolder, _
+                    vbExclamation, Uni("KangatangGuard v") & CURRENT_VERSION
+        End If
+        Set fso = Nothing
+        Exit Sub
+    End If
     
-    Dim wsh As Object
-    Set wsh = CreateObject("WScript.Shell")
+    ' Don sach DocumentRecovery truoc khi quet
+    Call CleanDocumentRecoveryRegistry
     
-    Dim scannerScript As String
-    scannerScript = ""
+    ' Khoi tao thu muc luu phien quet & log resume
+    Dim guardDir As String, lastSessionPath As String, scannedLogPath As String
+    guardDir = Environ("APPDATA") & "\" & LOG_SUBFOLDER
+    If Not fso.FolderExists(guardDir) Then fso.CreateFolder guardDir
+    lastSessionPath = guardDir & "\last_session.json"
+    scannedLogPath = guardDir & "\scanned_files.log"
     
-    ' Uu tien 1: Doc duong dan da dang ky trong Registry (Chong Antivirus/EDR xoa file trong APPDATA)
-    Dim regPath As String
+    Dim dicResume As Object
+    Set dicResume = CreateObject("Scripting.Dictionary")
+    dicResume.CompareMode = 1 ' vbTextCompare
+    
+    If bResume And fso.FileExists(scannedLogPath) Then
+        On Error Resume Next
+        Dim tsRead As Object, lineStr As String, pSep As Long
+        Set tsRead = fso.OpenTextFile(scannedLogPath, 1, False, -1)
+        If Not tsRead Is Nothing Then
+            Do While Not tsRead.AtEndOfStream
+                lineStr = Trim$(tsRead.ReadLine)
+                If Len(lineStr) > 0 Then
+                    pSep = InStr(1, lineStr, "|")
+                    If pSep > 1 Then
+                        dicResume(Left$(lineStr, pSep - 1)) = Mid$(lineStr, pSep + 1)
+                    End If
+                End If
+            Loop
+            tsRead.Close
+            Set tsRead = Nothing
+        End If
+        Err.Clear
+        On Error GoTo ScanFolderErr
+    Else
+        On Error Resume Next
+        Dim tsInit As Object
+        Set tsInit = fso.CreateTextFile(scannedLogPath, True, True)
+        If Not tsInit Is Nothing Then
+            tsInit.Close
+            Set tsInit = Nothing
+        End If
+        Err.Clear
+        On Error GoTo ScanFolderErr
+    End If
+    
+    ' Thu thap danh sach tep Excel trong thu muc
+    Dim colFiles As New Collection
+    Call CollectExcelFilesRecursive(fso, fso.GetFolder(cleanFolder), colFiles)
+    
+    Dim totalFiles As Long
+    totalFiles = colFiles.Count
+    Dim startTimeStr As String
+    startTimeStr = Format$(Now, "yyyy-mm-dd hh:nn:ss")
+    
+    WriteLog "[FOLDER_SCAN_START] Folder=" & cleanFolder & " | Files=" & totalFiles & " | Resume=" & bResume
+    Call WriteScanSessionJson(fso, lastSessionPath, cleanFolder, startTimeStr, "IN_PROGRESS", totalFiles, 0, 0)
+    
+    If totalFiles = 0 Then
+        Call WriteScanSessionJson(fso, lastSessionPath, cleanFolder, startTimeStr, "COMPLETED", 0, 0, 0)
+        If Not bSilentSummary Then
+            MsgBoxW Uni("Kh\u00f4ng t\u00ecm th\u1ea5y t\u1ec7p Excel n\u00e0o trong th\u01b0 m\u1ee5c:" & vbCrLf) & cleanFolder, _
+                    vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION
+        End If
+        Set fso = Nothing
+        Exit Sub
+    End If
+    
+    ' Luu trang thai Excel va tat EnableEvents (Workbooks.Open tu VBA mac dinh khong chay Auto_Open,
+    ' va EnableEvents = False chan triet de Workbook_Open ma van giu VBProject truy cap duoc 100%)
+    Dim prevScreenUpdating As Boolean, prevDisplayAlerts As Boolean, prevEnableEvents As Boolean
+    Dim bStateSaved As Boolean
+    prevScreenUpdating = Application.ScreenUpdating
+    prevDisplayAlerts = Application.DisplayAlerts
+    prevEnableEvents = Application.EnableEvents
+    bStateSaved = True
+    
+    bIsFolderScanning = True
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+    
+    Dim logStream As Object
     On Error Resume Next
-    regPath = wsh.RegRead("HKCU\Software\KangatangGuard\ScannerScript")
-    On Error GoTo LaunchErr
-    If Len(regPath) > 0 Then
-        If fso.FileExists(regPath) Then
-            scannerScript = regPath
-        End If
-    End If
+    Set logStream = fso.OpenTextFile(scannedLogPath, 8, True, -1)
+    Err.Clear
+    On Error GoTo ScanFolderErr
     
-    ' Uu tien 2: Kiem tra trong thu muc Add-in goc dang chay
-    If Len(scannerScript) = 0 Then
-        Dim addinDir As String
-        addinDir = ThisWorkbook.Path & "\"
-        If fso.FileExists(addinDir & "Kangatang_FolderScanner.ps1") Then
-            scannerScript = addinDir & "Kangatang_FolderScanner.ps1"
-        End If
-    End If
+    Dim idx As Long, nScanned As Long, nSkipped As Long, nInfected As Long, nCleaned As Long, nErrors As Long
+    Dim filePath As String, fileObj As Object, fileSig As String
+    Dim wbTarget As Workbook, bWasOpen As Boolean, bKeepOpenForPurge As Boolean
+    Dim detailMsg As String, virusFound As Boolean, cleanOk As Boolean
     
-    ' Uu tien 3: Kiem tra thu muc du an goc tren o D:
-    If Len(scannerScript) = 0 Then
-        Dim defaultRepoPath As String
-        defaultRepoPath = "d:\7. AI tools\kangatang\addin\Kangatang_FolderScanner.ps1"
-        If fso.FileExists(defaultRepoPath) Then
-            scannerScript = defaultRepoPath
-        End If
-    End If
-    
-    ' Uu tien 4: Kiem tra Desktop mirror
-    If Len(scannerScript) = 0 Then
-        Dim desktopRepoPath As String
-        desktopRepoPath = Environ("USERPROFILE") & "\Desktop\python\coding\AI tools\kangatang\addin\Kangatang_FolderScanner.ps1"
-        If fso.FileExists(desktopRepoPath) Then
-            scannerScript = desktopRepoPath
-        End If
-    End If
-    
-    ' Uu tien 5: Kiem tra trong APPDATA\KangatangGuard
-    If Len(scannerScript) = 0 Then
-        Dim appDataScript As String
-        appDataScript = Environ("APPDATA") & "\" & LOG_SUBFOLDER & "\Kangatang_FolderScanner.ps1"
-        If fso.FileExists(appDataScript) Then
-            scannerScript = appDataScript
-        End If
-    End If
-    
-    ' AUTO-REPAIR v3.9.0: Neu khong tim thay file scanner, tu dong tai tu Hub LAN truoc khi bao loi
-    If Len(scannerScript) = 0 Then
-        WriteLog "[AUTO_REPAIR] Scanner script not found locally, attempting download from LAN Hub..."
-        Dim hubSources As Variant
-        hubSources = Array(DEFAULT_HUB_PRIMARY, DEFAULT_HUB_BACKUP)
-        Dim repairTarget As String
-        repairTarget = Environ("APPDATA") & "\" & LOG_SUBFOLDER & "\Kangatang_FolderScanner.ps1"
+    For idx = 1 To totalFiles
+        filePath = CStr(colFiles(idx))
         
-        ' Dam bao thu muc ton tai
-        Dim repairDir As String
-        repairDir = Environ("APPDATA") & "\" & LOG_SUBFOLDER
-        If Not fso.FolderExists(repairDir) Then
-            fso.CreateFolder repairDir
+        On Error Resume Next
+        Application.StatusBar = Uni("KangatangGuard: \u0110ang qu\u00e9t (") & idx & "/" & totalFiles & ") " & fso.GetFileName(filePath) & Uni(" | \u0110\u00e3 di\u1ec7t: ") & nCleaned
+        If (idx Mod 5) = 0 Then DoEvents
+        
+        Set fileObj = Nothing
+        Set fileObj = fso.GetFile(filePath)
+        If fileObj Is Nothing Then
+            Err.Clear
+            GoTo NextFileLoop
+        End If
+        fileSig = CStr(fileObj.Size) & "|" & Format$(fileObj.DateLastModified, "yyyymmddhhnnss")
+        
+        If bResume And dicResume.Exists(LCase$(filePath)) Then
+            If CStr(dicResume(LCase$(filePath))) = fileSig Then
+                nSkipped = nSkipped + 1
+                nScanned = nScanned + 1
+                GoTo NextFileLoop
+            End If
         End If
         
-        Dim h As Long
-        For h = LBound(hubSources) To UBound(hubSources)
-            Dim hubScanner As String
-            hubScanner = hubSources(h) & "\Kangatang_FolderScanner.ps1"
-            On Error Resume Next
-            If IsUncReachable(CStr(hubSources(h))) Then
-                If fso.FileExists(hubScanner) Then
-                    fso.CopyFile hubScanner, repairTarget, True
-                    If Err.Number = 0 And fso.FileExists(repairTarget) Then
-                        scannerScript = repairTarget
-                        ' Cap nhat Registry de lan sau khoi can repair
-                        wsh.RegWrite "HKCU\Software\KangatangGuard\ScannerScript", repairTarget, "REG_SZ"
-                        WriteLog "[AUTO_REPAIR] SUCCESS - Downloaded scanner from: " & hubSources(h)
-                        On Error GoTo LaunchErr
-                        GoTo RepairDone
+        Set wbTarget = FindOpenWorkbookByPath(filePath)
+        bWasOpen = Not (wbTarget Is Nothing)
+        bKeepOpenForPurge = False
+        
+        If Not bWasOpen Then
+            Err.Clear
+            Set wbTarget = Application.Workbooks.Open(FileName:=filePath, UpdateLinks:=0, ReadOnly:=False, _
+                                                      Password:="", WriteResPassword:="", _
+                                                      IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+            If Err.Number <> 0 Or wbTarget Is Nothing Then
+                WriteLog "[FOLDER_SCAN_SKIP] Cannot open file (protected or locked): " & filePath & " (" & Err.Description & ")"
+                nErrors = nErrors + 1
+                Err.Clear
+                GoTo NextFileLoop
+            End If
+        End If
+        
+        detailMsg = ""
+        virusFound = CheckWorkbookInfection(wbTarget, detailMsg)
+        If virusFound Then
+            nInfected = nInfected + 1
+            WriteLog "[FOLDER_SCAN_DETECTED] " & filePath & " | " & Replace(detailMsg, vbCrLf, " ")
+            If Not wbTarget.ReadOnly Then
+                If BackupBeforeClean(wbTarget) Then
+                    bPurgeDeferred = False
+                    cleanOk = CleanInfectedWorkbook(wbTarget, True, True)
+                    If bPurgeDeferred Then
+                        bKeepOpenForPurge = True
+                        bPurgeDeferred = False
+                        nCleaned = nCleaned + 1
+                    ElseIf cleanOk Then
+                        nCleaned = nCleaned + 1
+                        WriteLog "[FOLDER_SCAN_CLEANED] " & filePath
                     End If
                 End If
             End If
-            Err.Clear
-            On Error GoTo LaunchErr
-        Next h
-    End If
+        End If
+        
+        If Not bWasOpen And Not bKeepOpenForPurge Then
+            wbTarget.Close SaveChanges:=False
+        End If
+        Set wbTarget = Nothing
+        
+        nScanned = nScanned + 1
+        
+        ' Ghi nhan tep da quet vao scanned_files.log de ho tro Fast Resume
+        Set fileObj = Nothing
+        Set fileObj = fso.GetFile(filePath)
+        If Not fileObj Is Nothing And Not logStream Is Nothing Then
+            fileSig = CStr(fileObj.Size) & "|" & Format$(fileObj.DateLastModified, "yyyymmddhhnnss")
+            logStream.WriteLine LCase$(filePath) & "|" & fileSig
+        End If
+        
+        If (idx Mod 10) = 0 Then
+            Call WriteScanSessionJson(fso, lastSessionPath, cleanFolder, startTimeStr, "IN_PROGRESS", totalFiles, nScanned, nCleaned)
+        End If
+        
+NextFileLoop:
+        Err.Clear
+    Next idx
     
-RepairDone:
-    ' Kiem tra cuoi cung: Neu van khong tim thay file script thi thong bao ro rang
-    If Len(scannerScript) = 0 Or Not fso.FileExists(scannerScript) Then
-        WriteLog "[ERROR] Scanner script not found after all fallbacks and auto-repair attempts"
-        Set fso = Nothing
-        Set wsh = Nothing
-        MsgBoxW Uni("Kh\u00f4ng t\u00ecm th\u1ea5y t\u1ec7p tr\u00ecnh qu\u00e9t ng\u1ea7m: Kangatang_FolderScanner.ps1!" & vbCrLf & vbCrLf & _
-                    "H\u1ec7 th\u1ed1ng \u0111\u00e3 th\u1eed t\u1ea3i l\u1ea1i t\u1eeb M\u00e1y ch\u1ee7 LAN nh\u01b0ng kh\u00f4ng th\u00e0nh c\u00f4ng." & vbCrLf & _
-                    "Vui l\u00f2ng ki\u1ec3m tra k\u1ebft n\u1ed1i m\u1ea1ng v\u00e0 ch\u1ea1y l\u1ea1i t\u1ec7p C\u00e0i \u0111\u1eb7t Add-in ho\u1eb7c li\u00ean h\u1ec7 IT."), _
-                vbCritical, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Thi\u1ebfu t\u1ec7p h\u1ec7 th\u1ed1ng")
-        Exit Sub
+ScanFolderCleanUp:
+    On Error Resume Next
+    If Not logStream Is Nothing Then
+        logStream.Close
+        Set logStream = Nothing
+    End If
+    If bStateSaved Then
+        Application.EnableEvents = prevEnableEvents
+        Application.DisplayAlerts = prevDisplayAlerts
+        Application.ScreenUpdating = prevScreenUpdating
+    End If
+    Application.StatusBar = False
+    bIsFolderScanning = False
+    
+    Call WriteScanSessionJson(fso, lastSessionPath, cleanFolder, startTimeStr, "COMPLETED", totalFiles, nScanned, nCleaned)
+    Call EnsureClipboardShortcutsAndMenus
+    WriteLog "[FOLDER_SCAN_DONE] Folder=" & cleanFolder & " | Total=" & totalFiles & " | Scanned=" & nScanned & " | Skipped=" & nSkipped & " | Infected=" & nInfected & " | Cleaned=" & nCleaned
+    
+    If Not bSilentSummary Then
+        Dim sumMsg As String
+        sumMsg = Uni("HO\u00c0N T\u1ea4T QU\u00c9T TH\u01af M\u1ee4C!" & vbCrLf & vbCrLf & _
+                     "\u2022 Th\u01b0 m\u1ee5c: ") & cleanFolder & vbCrLf & _
+                 Uni("\u2022 T\u1ed5ng s\u1ed1 t\u1ec7p Excel: ") & totalFiles & vbCrLf & _
+                 Uni("\u2022 \u0110\u00e3 ki\u1ec3m tra: ") & nScanned & Uni(" t\u1ec7p (B\u1ecf qua nhanh: ") & nSkipped & ")" & vbCrLf & _
+                 Uni("\u2022 Ph\u00e1t hi\u1ec7n nhi\u1ec5m virus: ") & nInfected & Uni(" t\u1ec7p") & vbCrLf & _
+                 Uni("\u2022 \u0110\u00e3 di\u1ec7t s\u1ea1ch & sao l\u01b0u: ") & nCleaned & Uni(" t\u1ec7p")
+        MsgBoxW sumMsg, vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - K\u1ebft qu\u1ea3 qu\u00e9t th\u01b0 m\u1ee5c")
     End If
     Set fso = Nothing
-    
-    ' VACCINE v3.6.0: Ho tro tham so -Resume
-    Dim cmd As String
-    If bResume Then
-        If Len(cleanFolder) > 0 Then
-            cmd = "powershell.exe -NoExit -ExecutionPolicy Bypass -File """ & scannerScript & """ -TargetFolder """ & cleanFolder & """ -Resume"
-        Else
-            cmd = "powershell.exe -NoExit -ExecutionPolicy Bypass -File """ & scannerScript & """ -Resume"
-        End If
-    Else
-        cmd = "powershell.exe -NoExit -ExecutionPolicy Bypass -File """ & scannerScript & """ -TargetFolder """ & cleanFolder & """"
-    End If
-    
-    ' VACCINE v3.8.3: Don sach DocumentRecovery truoc khi khoi chay quet
-    Call CleanDocumentRecoveryRegistry
-    
-    ' Tham so 1 = Normal window, False = Asynchronous non-blocking (Khong cho, thoat ngay lap tuc!)
-    wsh.Run cmd, 1, False
-    Set wsh = Nothing
-    
-    WriteLog "[BG_LAUNCH] Da khoi chay tien trinh quet ngam cho: " & cleanFolder & " (Resume: " & bResume & ", Script: " & scannerScript & ")"
+    On Error GoTo 0
     Exit Sub
     
-LaunchErr:
-    WriteLog "[BG_LAUNCH_ERROR] Loi khoi chay worker: " & Err.Description
+ScanFolderErr:
+    WriteLog "[FOLDER_SCAN_ERROR] " & Err.Description
+    Resume ScanFolderCleanUp
+End Sub
+
+Private Sub CollectExcelFilesRecursive(ByVal fso As Object, ByVal folderObj As Object, ByVal colFiles As Collection)
+    On Error Resume Next
+    If folderObj Is Nothing Then Exit Sub
+    
+    Dim fl As Object
+    For Each fl In folderObj.Files
+        If Err.Number = 0 Then
+            If IsScannableExcelFile(fl.Name) Then
+                colFiles.Add fl.Path
+            End If
+        Else
+            Err.Clear
+        End If
+    Next fl
+    
+    Dim subFolder As Object
+    For Each subFolder In folderObj.SubFolders
+        If Err.Number = 0 Then
+            If Not IsSkippedScanFolderName(subFolder.Name) Then
+                If (subFolder.Attributes And 4) = 0 And (subFolder.Attributes And 1024) = 0 Then
+                    Call CollectExcelFilesRecursive(fso, subFolder, colFiles)
+                End If
+            End If
+        Else
+            Err.Clear
+        End If
+    Next subFolder
     On Error GoTo 0
+End Sub
+
+Private Function IsSkippedScanFolderName(ByVal folderName As String) As Boolean
+    Dim lowName As String
+    lowName = LCase$(Trim$(folderName))
+    If Len(lowName) = 0 Then
+        IsSkippedScanFolderName = True
+        Exit Function
+    End If
+    If Left$(lowName, 1) = "." Or Left$(lowName, 1) = "$" Then
+        IsSkippedScanFolderName = True
+        Exit Function
+    End If
+    If lowName = "_backup_kangatang" Or lowName = "quarantine_backup" Or lowName = "threat_samples" Or _
+       lowName = "node_modules" Or lowName = "system volume information" Or Left$(lowName, 15) = "_backup_source_" Then
+        IsSkippedScanFolderName = True
+    End If
+End Function
+
+Private Function IsScannableExcelFile(ByVal fileName As String) As Boolean
+    Dim lowName As String
+    lowName = LCase$(Trim$(fileName))
+    If Len(lowName) < 5 Then Exit Function
+    If Left$(lowName, 2) = "~$" Then Exit Function
+    If Left$(lowName, 14) = "kangatangguard" Then Exit Function
+    
+    Dim dotPos As Long, ext As String
+    dotPos = InStrRev(lowName, ".")
+    If dotPos <= 1 Then Exit Function
+    ext = Mid$(lowName, dotPos)
+    
+    If ext = ".xls" Or ext = ".xlsm" Or ext = ".xlsb" Or ext = ".xlsx" Then
+        IsScannableExcelFile = True
+    End If
+End Function
+
+Private Function FindOpenWorkbookByPath(ByVal fullPath As String) As Workbook
+    On Error Resume Next
+    Dim w As Workbook
+    For Each w In Application.Workbooks
+        If StrComp(w.FullName, fullPath, vbTextCompare) = 0 Then
+            Set FindOpenWorkbookByPath = w
+            Exit Function
+        End If
+    Next w
+    On Error GoTo 0
+End Function
+
+Private Sub WriteScanSessionJson(ByVal fso As Object, ByVal sessionPath As String, ByVal targetFolder As String, ByVal startTimeStr As String, ByVal statusStr As String, ByVal totalFiles As Long, ByVal totalScanned As Long, ByVal totalCleaned As Long)
+    On Error Resume Next
+    Dim safeFolder As String
+    safeFolder = Replace(targetFolder, "\", "\\")
+    safeFolder = Replace(safeFolder, """", "\""")
+    
+    Dim json As String
+    json = "{" & vbCrLf & _
+           "  ""TargetFolder"": """ & safeFolder & """," & vbCrLf & _
+           "  ""StartTime"": """ & startTimeStr & """," & vbCrLf & _
+           "  ""LastUpdate"": """ & Format$(Now, "yyyy-mm-dd hh:nn:ss") & """," & vbCrLf & _
+           "  ""Status"": """ & statusStr & """," & vbCrLf & _
+           "  ""TotalFiles"": " & totalFiles & "," & vbCrLf & _
+           "  ""TotalScanned"": " & totalScanned & "," & vbCrLf & _
+           "  ""TotalCleaned"": " & totalCleaned & vbCrLf & _
+           "}"
+           
+    Dim writeOk As Boolean
+    Dim stm As Object
+    Set stm = CreateObject("ADODB.Stream")
+    If Not stm Is Nothing Then
+        stm.Type = 2 ' adTypeText
+        stm.Charset = "utf-8"
+        stm.Open
+        stm.WriteText json
+        stm.SaveToFile sessionPath, 2 ' adSaveCreateOverWrite
+        stm.Close
+        writeOk = (Err.Number = 0)
+        Err.Clear
+    End If
+    
+    If Not writeOk Then
+        Dim ts As Object
+        Set ts = fso.CreateTextFile(sessionPath, True, True)
+        If Not ts Is Nothing Then
+            ts.Write json
+            ts.Close
+            Set ts = Nothing
+        End If
+    End If
+    Err.Clear
 End Sub
 
 ' ===========================================================================
@@ -1269,7 +1484,7 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
         ' ban luu hien tai van con module-sheet -> Phase 2 ghi de ban sach ngay sau do).
         Call DeferModuleSheetPurge(wb, (Not wb.ReadOnly) And (Len(wb.Path) > 0))
         WriteLog "[CLEAN_DEFERRED] " & wb.FullName & " - " & nModuleSheetsDeferred & " legacy module sheet(s) handed to two-phase purge."
-        Call RestoreExcelClipboardAndUI(wb)
+        If Not bIsFolderScanning Then Call RestoreExcelClipboardAndUI(wb)
         CleanInfectedWorkbook = False
         Exit Function
     End If
@@ -1292,7 +1507,7 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
             WriteLog "[CLEAN_SAVE_ERROR] " & wb.FullName & ": " & Err.Description
             Err.Clear
             Application.DisplayAlerts = prevAlerts
-            Call RestoreExcelClipboardAndUI(wb)
+            If Not bIsFolderScanning Then Call RestoreExcelClipboardAndUI(wb)
             On Error GoTo CleanError
             Exit Function
         End If
@@ -1301,7 +1516,7 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
     End If
     
     ' Khoi phuc clipboard va giao dien sau khi lam sach
-    Call RestoreExcelClipboardAndUI(wb)
+    If Not bIsFolderScanning Then Call RestoreExcelClipboardAndUI(wb)
     
     CleanInfectedWorkbook = Not stillInfected
     Exit Function
@@ -1309,7 +1524,7 @@ Public Function CleanInfectedWorkbook(ByVal wb As Workbook, Optional ByVal bSave
 CleanError:
     WriteLog "[CLEAN_ERROR] " & wb.FullName & ": " & Err.Description
     Application.DisplayAlerts = True
-    Call RestoreExcelClipboardAndUI(wb)
+    If Not bIsFolderScanning Then Call RestoreExcelClipboardAndUI(wb)
     CleanInfectedWorkbook = False
 End Function
 
@@ -1333,8 +1548,8 @@ Public Sub ScanActiveWorkbook()
 End Sub
 
 ' ===========================================================================
-' HAM MENU: Quet thu muc moi (goi tu menu, hien hop thoai chon thu muc)
-' v3.6.0: Tach tien trinh quet ngam doc lap khong lam treo Excel
+' HAM MENU: Quet thu muc moi (v3.17.0 - 100% Native VBA Folder Scanner)
+' Chay truc tiep trong VBA voi AutomationSecurity = 3, khong goi PowerShell ngoai
 ' ===========================================================================
 Public Sub ScanFolderDialog()
     Dim fd As FileDialog
@@ -1345,21 +1560,12 @@ Public Sub ScanFolderDialog()
     If fd.Show = -1 Then
         Dim folderPath As String
         folderPath = fd.SelectedItems(1)
-        
-        ' v3.6.0: Goi worker ngam doc lap (non-blocking)
-        Call LaunchBackgroundScanner(folderPath, bForce:=True)
-        
-        ' Thong bao nhanh cho nguoi dung (Excel tiep tuc hoat dong ngay lap tuc)
-        MsgBoxW Uni("\u0110\u00e3 kh\u1edfi ch\u1ea1y ti\u1ebfn tr\u00ecnh qu\u00e9t ng\u1ea7m \u0111\u1ed9c l\u1eadp cho th\u01b0 m\u1ee5c:" & vbCrLf & vbCrLf) & _
-                folderPath & vbCrLf & vbCrLf & _
-                Uni("Ti\u1ebfn tr\u00ecnh \u0111ang ch\u1ea1y tr\u00ean c\u1eeda s\u1ed5 ri\u00eang bi\u1ec7t v\u1edbi thanh ti\u1ebfn \u0111\u1ed9 % th\u1eddi gian th\u1ef1c." & vbCrLf & _
-                    "B\u1ea1n c\u00f3 th\u1ec3 TI\u1ebeP T\u1ee4C L\u00c0M VI\u1ec6C tr\u00ean Excel b\u00ecnh th\u01b0\u1eddng m\u00e0 kh\u00f4ng lo b\u1ecb treo m\u00e1y!"), _
-                vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Ti\u1ebfn tr\u00ecnh ng\u1ea7m")
+        Call RunNativeFolderScan(folderPath, False, False)
     End If
 End Sub
 
 ' ===========================================================================
-' HAM MENU: Tiep tuc phien quet truoc do (v3.6.0 - Resume In-Progress Scan)
+' HAM MENU: Tiep tuc phien quet truoc do (v3.17.0 - Native Fast Resume)
 ' ===========================================================================
 Public Sub ResumeScanDialog()
     On Error GoTo ResumeErr
@@ -1396,7 +1602,7 @@ Public Sub ResumeScanDialog()
         MsgBoxW Uni("Phi\u00ean qu\u00e9t g\u1ea7n nh\u1ea5t \u0111\u00e3 HO\u00c0N T\u1ea4T 100%!" & vbCrLf & _
                     "Th\u01b0 m\u1ee5c: ") & targetVal & vbCrLf & _
                 Uni("\u0110\u00e3 qu\u00e9t: ") & scannedVal & Uni(" t\u1ec7p | \u0110\u00e3 di\u1ec7t: ") & cleanedVal & Uni(" t\u1ec7p" & vbCrLf & vbCrLf & _
-                    "B\u1ea1n c\u00f3 th\u1ec3 ch\u1ecdn 'Qu\u00e9t th\u01b0 m\u1ee5c m\u1edbi...' n\u1ebfu mu\u1ed1n qu\u00e9t l\u1ea1i ho\u1eb7c ch\u1ecdn th\u01b0 m\u1ee5c kh\u00e1c."), _
+                    "B\u1ea1n c\u00f3 th\u1ec3 ch\u1ecdn 'Qu\u00e9t th\u01b0 m\u1ee5c...' n\u1ebfu mu\u1ed1n qu\u00e9t l\u1ea1i ho\u1eb7c ch\u1ecdn th\u01b0 m\u1ee5c kh\u00e1c."), _
                 vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Phi\u00ean \u0111\u00e3 ho\u00e0n t\u1ea5t")
         Exit Sub
     End If
@@ -1413,10 +1619,7 @@ Public Sub ResumeScanDialog()
     res = MsgBoxW(promptMsg, vbYesNo + vbQuestion, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t"))
     
     If res = vbYes Then
-        Call LaunchBackgroundScanner(targetVal, bResume:=True)
-        MsgBoxW Uni("\u0110\u00e3 k\u00edch ho\u1ea1t ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t ng\u1ea7m tr\u00ean c\u1eeda s\u1ed5 ri\u00eang bi\u1ec7t." & vbCrLf & _
-                    "B\u1ea1n c\u00f3 th\u1ec3 ti\u1ebfp t\u1ee5c l\u00e0m vi\u1ec7c tr\u00ean Excel b\u00ecnh th\u01b0\u1eddng!"), _
-                vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - Ti\u1ebfp t\u1ee5c phi\u00ean")
+        Call RunNativeFolderScan(targetVal, True, False)
     End If
     Exit Sub
     
@@ -1446,7 +1649,7 @@ Private Function ExtractJsonValue(ByVal json As String, ByVal key As String) As 
         p1 = p1 + 1
         p2 = InStr(p1, json, """")
         If p2 > p1 Then
-            ExtractJsonValue = Mid(json, p1, p2 - p1)
+            ExtractJsonValue = Replace(Mid(json, p1, p2 - p1), "\\", "\")
         End If
     Else
         p2 = p1
@@ -1548,14 +1751,13 @@ Public Sub ShowAbout()
     On Error GoTo 0
     
     If Len(regVer) = 0 Then regVer = CURRENT_VERSION
-    If Len(regVer) = 0 Then regVer = CURRENT_VERSION
     If Len(regSrc) = 0 Then regSrc = DEFAULT_HUB_PRIMARY
     
     MsgBoxW Uni("KangatangGuard v" & CURRENT_VERSION & vbCrLf & vbCrLf & _
                 "H\u1ec7 th\u1ed1ng b\u1ea3o v\u1ec7 Excel chuy\u00ean d\u1ee5ng ch\u1ed1ng virus macro Kangatang / Laroux / mypersonnel." & vbCrLf & vbCrLf & _
                 "- T\u1ef1 \u0111\u1ed9ng qu\u00e9t th\u1eddi gian th\u1ef1c khi m\u1edf t\u1ec7p." & vbCrLf & _
                 "- ScanCache th\u00f4ng minh ch\u1ed1ng lag khi l\u01b0u v\u00e0 AutoSave." & vbCrLf & _
-                "- Ki\u1ebfn tr\u00fac Out-of-Process Worker: Excel kh\u00f4ng bao gi\u1edd b\u1ecb treo (Not Responding)!" & vbCrLf & _
+                "- Ki\u1ebfn tr\u00fac 100% Native VBA Scanner: T\u01b0\u01a1ng th\u00edch tuy\u1ec7t \u0111\u1ed1i v\u1edbi m\u1ecdi Antivirus/EDR (Seqrite/Quick Heal)!" & vbCrLf & _
                 "- T\u00ednh n\u0103ng Fast Resume: Ti\u1ebfp t\u1ee5c phi\u00ean qu\u00e9t d\u1edf dang si\u00eau t\u1ed1c." & vbCrLf & _
                 "- Trung t\u00e2m Ph\u00e2n ph\u1ed1i LAN Hub (\\192.168.223.7) & T\u1ef1 \u0111\u1ed9ng C\u1eadp nh\u1eadt." & vbCrLf & vbCrLf & _
                 "\u2022 M\u00e1y ch\u1ee7 ngu\u1ed3n: " & regSrc & vbCrLf & _
@@ -1766,9 +1968,8 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
         fso.CreateFolder stagedDir
     End If
     
-    ' Sao chep tap tin tu Hub vao bo dem tam staged_update (uu tien ban danh so phien ban de tranh SMB lock)
-    Dim srcXlam As String, srcPs1 As String
-    Dim targetXlam As String, targetPs1 As String
+    ' v3.17.0: Chi sao chep KangatangGuard.xlam, TUYET DOI KHONG sao chep .ps1 vao %APPDATA%
+    Dim srcXlam As String, targetXlam As String, targetPs1 As String
     If fso.FileExists(updateSource & "\KangatangGuard_v" & serverVer & ".xlam") Then
         srcXlam = updateSource & "\KangatangGuard_v" & serverVer & ".xlam"
     ElseIf fso.FileExists(updateSource & "\KangatangGuard_latest.xlam") Then
@@ -1776,7 +1977,6 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     Else
         srcXlam = updateSource & "\KangatangGuard.xlam"
     End If
-    srcPs1 = updateSource & "\Kangatang_FolderScanner.ps1"
     targetXlam = stagedDir & "\KangatangGuard.xlam"
     targetPs1 = stagedDir & "\Kangatang_FolderScanner.ps1"
     
@@ -1801,12 +2001,6 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
         If fso.FileExists(targetXlam) Then fso.GetFile(targetXlam).Attributes = 0
         On Error GoTo InstallErr
     End If
-    If fso.FileExists(srcPs1) Then
-        fso.CopyFile srcPs1, targetPs1, True
-        On Error Resume Next
-        If fso.FileExists(targetPs1) Then fso.GetFile(targetPs1).Attributes = 0
-        On Error GoTo InstallErr
-    End If
     
     ' Tao script ap dung cap nhat ngoai tien trinh (Out-of-Process Updater)
     Dim updaterBat As String
@@ -1819,7 +2013,7 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     
     Dim ts As Object
     Set ts = fso.CreateTextFile(updaterBat, True)
-    ' v3.11.0: Polling nhanh 2 giay, tu dong don zombie process sau 60s, assert AccessVBOM
+    ' v3.17.0: Polling nhanh 2 giay, don sach legacy .ps1 trong %APPDATA%\KangatangGuard, assert AccessVBOM
     ts.WriteLine "@echo off"
     ts.WriteLine "setlocal"
     ts.WriteLine "set ""LOG=" & guardDir & "\update_apply.log"""
@@ -1842,20 +2036,19 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     ts.WriteLine "attrib -r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "attrib -r """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "attrib -r """ & stagedDir & "\KangatangGuard.xlam"" >nul 2>&1"
-    ts.WriteLine "attrib -r """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1"
+    ts.WriteLine "if exist """ & guardDir & "\Kangatang_FolderScanner.ps1"" (attrib -r """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1 & del /f /q """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1)"
     ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "if errorlevel 1 goto FALLBACK_XLSTART"
     ts.WriteLine "fc /b """ & stagedDir & "\KangatangGuard.xlam"" """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "if errorlevel 1 goto FALLBACK_XLSTART"
     ts.WriteLine "if exist """ & xlStartDir & "\KangatangGuard.xlam"" del /f /q """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
-    ts.WriteLine "goto COPY_PS1"
+    ts.WriteLine "goto REG_UPDATE"
     ts.WriteLine ":FALLBACK_XLSTART"
     ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "if errorlevel 1 goto FAIL"
-    ts.WriteLine ":COPY_PS1"
-    ts.WriteLine "if exist """ & stagedDir & "\Kangatang_FolderScanner.ps1"" copy /y """ & stagedDir & "\Kangatang_FolderScanner.ps1"" """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1"
+    ts.WriteLine ":REG_UPDATE"
     ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""InstalledVersion"" /t REG_SZ /d """ & serverVer & """ /f >nul 2>&1"
-    ts.WriteLine "reg add ""HKCU\Software\KangatangGuard"" /v ""ScannerScript"" /t REG_SZ /d """ & guardDir & "\Kangatang_FolderScanner.ps1"" /f >nul 2>&1"
+    ts.WriteLine "reg delete ""HKCU\Software\KangatangGuard"" /v ""ScannerScript"" /f >nul 2>&1"
     ts.WriteLine "reg add ""HKCU\Software\Microsoft\Office\16.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1"
     ts.WriteLine "reg add ""HKCU\Software\Microsoft\Office\15.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1"
     ts.WriteLine "reg add ""HKCU\Software\Microsoft\Office\14.0\Excel\Security"" /v ""AccessVBOM"" /t REG_DWORD /d 1 /f >nul 2>&1"
@@ -2517,26 +2710,29 @@ Public Sub CleanAddInCollisions()
         End If
     End If
     
-    ' 3. Tu dong provision Kangatang_FolderScanner.ps1 va Registry HKCU\Software\KangatangGuard
-    '    khi nguoi dung add truc tiep file .xlam qua Options -> Add-ins -> Go -> Browse
-    Dim guardDir As String, localPs1 As String, siblingPs1 As String
+    ' 3. v3.17.0: Don sach moi tep Kangatang_FolderScanner.ps1 cu trong %APPDATA%\KangatangGuard
+    '    de loai bo triet de nguy co Antivirus/EDR (Seqrite / Quick Heal) nhan nham va cach ly!
+    Dim guardDir As String, localPs1 As String, stagedPs1 As String
     guardDir = Environ("APPDATA") & "\KangatangGuard"
     If Not fso.FolderExists(guardDir) Then fso.CreateFolder guardDir
     localPs1 = guardDir & "\Kangatang_FolderScanner.ps1"
-    If Len(ThisWorkbook.Path) > 0 Then
-        siblingPs1 = ThisWorkbook.Path & "\Kangatang_FolderScanner.ps1"
+    stagedPs1 = guardDir & "\staged_update\Kangatang_FolderScanner.ps1"
+    If fso.FileExists(localPs1) Then
+        fso.GetFile(localPs1).Attributes = 0
+        fso.DeleteFile localPs1, True
         If Not fso.FileExists(localPs1) Then
-            If fso.FileExists(siblingPs1) Then
-                fso.CopyFile siblingPs1, localPs1, True
-                WriteLog "[ADDIN_SYNC] Provisioned scanner script from " & siblingPs1
-            End If
+            WriteLog "[AV_SAFE_CLEANUP] Removed legacy PS1 worker from AppData: " & localPs1
         End If
+        Err.Clear
+    End If
+    If fso.FileExists(stagedPs1) Then
+        fso.GetFile(stagedPs1).Attributes = 0
+        fso.DeleteFile stagedPs1, True
+        Err.Clear
     End If
     If Not wsh Is Nothing Then
         wsh.RegWrite "HKCU\Software\KangatangGuard\InstalledVersion", CURRENT_VERSION, "REG_SZ"
-        If fso.FileExists(localPs1) Then
-            wsh.RegWrite "HKCU\Software\KangatangGuard\ScannerScript", localPs1, "REG_SZ"
-        End If
+        wsh.RegDelete "HKCU\Software\KangatangGuard\ScannerScript"
         Err.Clear
     End If
     
@@ -2831,11 +3027,8 @@ Public Sub SchedulePostExitVbomFix()
 End Sub
 
 ' ===========================================================================
-' TU PHUC HOI NGAM KHI VBProject BI CHAN (v3.15.0 - ZERO-POPUP SELF-HEALING)
-' Khong hien popup canh bao gay hoang mang cho nguoi dung:
-'   1. Tu dong bat lai AccessVBOM = 1 trong Registry ngay lap tuc.
-'   2. Neu tep dang mo nam tren o dia va co macro, kich hoat Background Scanner
-'      (chay trong tien trinh moi doc AccessVBOM = 1 vua bat) de quet ngam an toan.
+' TU PHUC HOI NGAM KHI VBProject BI CHAN (v3.17.0 - ZERO-POPUP, ZERO-PS1 SELF-HEALING)
+' Tu dong bat lai AccessVBOM = 1 trong Registry ngay lap tuc ma khong goi PowerShell ngoai.
 ' ===========================================================================
 Public Sub ReportVbomBlocked(ByVal wb As Workbook)
     On Error Resume Next
@@ -2843,15 +3036,7 @@ Public Sub ReportVbomBlocked(ByVal wb As Workbook)
     
     If Not mVbomWarned Then
         mVbomWarned = True
-        WriteLog "[NO_VBOM_AUTOFIXED] AccessVBOM re-enabled in Registry for " & wb.FullName & " (silent self-healing v3.15.0)."
-    End If
-    
-    ' Neu tep luu tren o dia (khong phai Book1 moi tao va khong nam trong XLSTART),
-    ' goi trinh quet ngam doc lap (tien trinh moi se ap dung ngay AccessVBOM = 1 vua ghi).
-    If Not wb Is Nothing Then
-        If Len(wb.Path) > 0 And (Not IsInStartupFolder(wb.FullName)) Then
-            Call LaunchBackgroundScanner(wb.Path)
-        End If
+        WriteLog "[NO_VBOM_AUTOFIXED] AccessVBOM re-enabled in Registry for " & wb.FullName & " (silent self-healing v3.17.0)."
     End If
     Err.Clear
 End Sub
@@ -3160,22 +3345,27 @@ Public Sub ShieldAfterPurge()
     
     If Application.Visible Then
         If ok Then
-            MsgBoxW Uni("C\u1ea2NH B\u00c1O: PH\u00c1T HI\u1ec6N VIRUS KANGATANG!" & vbCrLf & vbCrLf & _
+            Dim purgeMsg As String
+            purgeMsg = Uni("C\u1ea2NH B\u00c1O: PH\u00c1T HI\u1ec6N VIRUS KANGATANG!" & vbCrLf & vbCrLf & _
                         "T\u1ec7p: ") & wb.Name & vbCrLf & vbCrLf & _
                     Uni("(D\u1ea1ng virus: Module-sheet Excel 5 \u1ea9n - \u0111\u00e3 g\u1ee1 an to\u00e0n ngo\u00e0i lu\u1ed3ng s\u1ef1 ki\u1ec7n)" & vbCrLf & _
                         "Tr\u1ea1ng th\u00e1i: \u0110\u00c3 TI\u00caU DI\u1ec6T TH\u00c0NH C\u00d4NG!" & vbCrLf & _
-                        "B\u1ea3n sao l\u01b0u g\u1ed1c \u0111\u00e3 \u0111\u01b0\u1ee3c c\u00e1ch ly an to\u00e0n v\u1ec1 Kho M\u00e1y ch\u1ee7 LAN."), _
-                    vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")
+                        "B\u1ea3n sao l\u01b0u g\u1ed1c \u0111\u00e3 \u0111\u01b0\u1ee3c c\u00e1ch ly an to\u00e0n v\u1ec1 Kho M\u00e1y ch\u1ee7 LAN.")
+            If bSave And Len(wb.Path) > 0 And (Not IsInStartupFolder(fn)) Then
+                purgeMsg = purgeMsg & vbCrLf & vbCrLf & _
+                           Uni("B\u1ea1n c\u00f3 mu\u1ed1n QU\u00c9T TO\u00c0N B\u1ed8 TH\u01af M\u1ee4C ch\u1ee9a t\u1ec7p n\u00e0y ngay b\u00e2y gi\u1edd \u0111\u1ec3 di\u1ec7t s\u1ea1ch c\u00e1c t\u1ec7p l\u00e2n c\u1eadn kh\u00f4ng?")
+                If MsgBoxW(purgeMsg, vbYesNo + vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")) = vbYes Then
+                    Call RunNativeFolderScan(wb.Path, False, False)
+                End If
+            Else
+                MsgBoxW purgeMsg, vbExclamation, Uni("KangatangGuard - Ti\u00eau di\u1ec7t th\u00e0nh c\u00f4ng")
+            End If
         Else
             MsgBoxW Uni("C\u1ea2NH B\u00c1O: Ph\u00e1t hi\u1ec7n virus nh\u01b0ng KH\u00d4NG TH\u1ec2 l\u00e0m s\u1ea1ch ho\u00e0n to\u00e0n t\u1ef1 \u0111\u1ed9ng!" & vbCrLf & _
                         "T\u1ec7p: ") & wb.Name & vbCrLf & _
                     Uni("Vui l\u00f2ng ch\u1ea1y Chay_Diet_Virus_Ngoai.bat ho\u1eb7c li\u00ean h\u1ec7 IT."), _
                 vbCritical, Uni("KangatangGuard v") & CURRENT_VERSION & Uni(" - L\u1ed7i")
         End If
-    End If
-    
-    If ok And bSave And Len(wb.Path) > 0 Then
-        If Not IsInStartupFolder(fn) Then Call LaunchBackgroundScanner(wb.Path)
     End If
     Exit Sub
     

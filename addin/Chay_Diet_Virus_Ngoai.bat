@@ -1,18 +1,16 @@
-﻿@echo off
-:: ============================================================================
-:: KANGATANGGUARD v3.8.1 - TRÌNH DIỆT VIRUS EXCEL ĐỘC LẬP (STANDALONE 1-CLICK)
-:: Dành cho mọi máy tính trong mạng LAN (Không cần cài đặt Add-in)
-:: ============================================================================
+@echo off
+REM ============================================================================
+REM KANGATANGGUARD v3.17.0 - STANDALONE 1-CLICK SCANNER
+REM ============================================================================
 
-title KANGATANGGUARD v3.8.1 - DIET VIRUS EXCEL NGOAI (STANDALONE)
+title KANGATANGGUARD v3.17.0 - STANDALONE SCANNER
 chcp 65001 >nul
 
-:: Chuyển đổi ngữ cảnh đường dẫn an toàn (Hỗ trợ đường dẫn mạng UNC)
 pushd "%~dp0"
 
 echo ======================================================================
-echo    KANGATANGGUARD v3.8.1 - TRINH DIET VIRUS EXCEL NGOAI (STANDALONE)
-echo    Khoi chay bo may diet virus doc lap chong treo...
+echo    KANGATANGGUARD v3.17.0 - TRINH DIET VIRUS EXCEL NGOAI (STANDALONE)
+echo    Khoi chay bo may diet virus doc lap...
 echo ======================================================================
 echo.
 

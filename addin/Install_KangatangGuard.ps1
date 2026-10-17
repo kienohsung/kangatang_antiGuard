@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao %APPDATA%\Microsoft\AddIns
-# Phien ban: v3.16.0 (Instant Add-In Manager Integration & Zero-Spin Architecture)
+# Phien ban: v3.17.0 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.16.0"
+$InstallerVersion = "3.17.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
@@ -459,9 +459,9 @@ try {
 }
 
 # ==============================================================================
-# BUOC 3: TAO THU MUC LOG, SESSIONS VA CAI DAT WORKER SCANNER DOC LAP (v3.6.0)
+# BUOC 3: TAO THU MUC LOG, SESSIONS VA DON SACH LEGACY PS1 TRONG APPDATA (v3.17.0)
 # ==============================================================================
-Write-Host "`n[3/3] Dang thiet lap thu muc Log, Sessions va cai dat Background Worker..." -ForegroundColor Yellow
+Write-Host "`n[3/3] Dang thiet lap thu muc Log, Sessions va don sach legacy PS1 (Antivirus-Safe)..." -ForegroundColor Yellow
 $logDir = Join-Path $env:APPDATA "KangatangGuard"
 if (-not (Test-Path $logDir)) {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -473,34 +473,30 @@ if (-not (Test-Path $sessionsDir)) {
 Write-Host "   -> [OK] Thu muc Log: $logDir" -ForegroundColor Green
 Write-Host "   -> [OK] Thu muc Sessions: $sessionsDir" -ForegroundColor Green
 
-# Sao chep Kangatang_FolderScanner.ps1 vao APPDATA\KangatangGuard (Luu y: KHONG chep vao XLSTART vi Excel se tu mo script nhu workbook)
-$srcWorker = Join-Path $ScriptDir "Kangatang_FolderScanner.ps1"
-if (Test-Path $srcWorker) {
-    # 1. Thu muc hoat dong mac dinh APPDATA\KangatangGuard
-    $dstWorker1 = Join-Path $logDir "Kangatang_FolderScanner.ps1"
-    Copy-Item -Path $srcWorker -Destination $dstWorker1 -Force
-    Write-Host "   -> [OK] Da cai dat Background Worker vao KangatangGuard: $dstWorker1" -ForegroundColor Green
-    
-    # 2. Xoa khoi XLSTART neu vo tinh co (tranh Excel tu mo va quet nham)
-    $badXlStartWorker = Join-Path $xlStartPath "Kangatang_FolderScanner.ps1"
-    if (Test-Path $badXlStartWorker) {
-        Remove-Item -Path $badXlStartWorker -Force -ErrorAction SilentlyContinue
+# v3.17.0: Xoa triet de Kangatang_FolderScanner.ps1 trong APPDATA\KangatangGuard va XLSTART
+# (Toan bo logic quet thu muc da tich hop 100% Native VBA ben trong KangatangGuard.xlam,
+#  khong luu bat ky file .ps1 nao trong AppData de tranh Seqrite/Quick Heal nhan nham!)
+foreach ($oldPs1 in @(
+    (Join-Path $logDir "Kangatang_FolderScanner.ps1"),
+    (Join-Path $logDir "staged_update\Kangatang_FolderScanner.ps1"),
+    (Join-Path $xlStartPath "Kangatang_FolderScanner.ps1")
+)) {
+    if (Test-Path $oldPs1) {
+        try { Set-ItemProperty -Path $oldPs1 -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
+        Remove-Item -Path $oldPs1 -Force -ErrorAction SilentlyContinue
+        Write-Host "   -> [OK] Da go bo legacy script khoi AppData: $oldPs1" -ForegroundColor Green
     }
-    
-    # 3. Dang ky ScannerScript vao Registry de Add-in uu tien doc tu vi tri an toan (Chong Antivirus/EDR xoa file trong APPDATA)
-    $guardRegKey = "HKCU:\Software\KangatangGuard"
-    if (-not (Test-Path $guardRegKey)) {
-        New-Item -Path $guardRegKey -Force | Out-Null
-    }
-    Set-ItemProperty -Path $guardRegKey -Name "ScannerScript" -Value $srcWorker -Force
-    Set-ItemProperty -Path $guardRegKey -Name "InstalledVersion" -Value $InstallerVersion -Force
-    Set-ItemProperty -Path $guardRegKey -Name "UpdateSource" -Value "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang" -Force
-    Write-Host "   -> [OK] Da dang ky ScannerScript vao Registry: $srcWorker" -ForegroundColor Green
-    Write-Host "   -> [OK] Da dang ky InstalledVersion: v$InstallerVersion" -ForegroundColor Green
-    Write-Host "   -> [OK] Da dang ky UpdateSource: \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang" -ForegroundColor Green
-} else {
-    Write-Host "   -> [CANH BAO] Khong tim thay $srcWorker de sao chep." -ForegroundColor DarkYellow
 }
+
+$guardRegKey = "HKCU:\Software\KangatangGuard"
+if (-not (Test-Path $guardRegKey)) {
+    New-Item -Path $guardRegKey -Force | Out-Null
+}
+Remove-ItemProperty -Path $guardRegKey -Name "ScannerScript" -Force -ErrorAction SilentlyContinue
+Set-ItemProperty -Path $guardRegKey -Name "InstalledVersion" -Value $InstallerVersion -Force
+Set-ItemProperty -Path $guardRegKey -Name "UpdateSource" -Value "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang" -Force
+Write-Host "   -> [OK] Da dang ky InstalledVersion: v$InstallerVersion (100% Native VBA Scanner)" -ForegroundColor Green
+Write-Host "   -> [OK] Da dang ky UpdateSource: \\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang" -ForegroundColor Green
 
 # ==============================================================================
 # HOAN TAT

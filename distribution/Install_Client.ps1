@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_Client.ps1
 # PowerShell Installer cho May Client trong Mang LAN
-# Phien ban: v3.16.0 (Instant Add-In Manager Integration & Zero-Spin Architecture)
+# Phien ban: v3.17.0 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.16.0)    " -ForegroundColor Cyan
+Write-Host "   KANGATANG GUARD - CAI DAT ADD-IN TU MAY CHU LAN (CLIENT v3.17.0)    " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -32,7 +32,7 @@ if ($ScriptDir.StartsWith("\\")) {
 Write-Host "`n[1/5] May chu phan phoi (Hub): $uncSource" -ForegroundColor Yellow
 
 # Doc thong tin phien ban tu version.json neu co
-$versionInfo = "3.16.0"
+$versionInfo = "3.17.0"
 $versionJsonPath = Join-Path $uncSource "version.json"
 if (Test-Path $versionJsonPath) {
     try {
@@ -58,10 +58,6 @@ foreach ($cand in $srcXlamCandidates) {
         $srcXlam = $cand
         break
     }
-}
-$srcScanner = Join-Path $uncSource "Kangatang_FolderScanner.ps1"
-if (-not (Test-Path $srcScanner)) {
-    $srcScanner = Join-Path $ScriptDir "Kangatang_FolderScanner.ps1"
 }
 
 if (-not (Test-Path $srcXlam)) {
@@ -190,11 +186,14 @@ if (Test-Path $dstXlamXLSTART) {
     Write-Host "   -> [OK] Da xoa ban sao cu trong XLSTART: $dstXlamXLSTART" -ForegroundColor Green
 }
 
-# Sao chep Background Worker
-if (Test-Path $srcScanner) {
-    $dstScanner = Join-Path $localAppData "Kangatang_FolderScanner.ps1"
-    Copy-Item -Path $srcScanner -Destination $dstScanner -Force
-    Write-Host "   -> [OK] Da cai dat Background Worker: $dstScanner" -ForegroundColor Green
+# v3.17.0: Xoa triet de Kangatang_FolderScanner.ps1 trong APPDATA\KangatangGuard
+# (Toan bo logic quet thu muc da tich hop 100% Native VBA trong KangatangGuard.xlam,
+#  khong luu bat ky file .ps1 nao trong AppData de tranh Antivirus Seqrite/Quick Heal nhan nham!)
+$dstScanner = Join-Path $localAppData "Kangatang_FolderScanner.ps1"
+if (Test-Path $dstScanner) {
+    try { Set-ItemProperty -Path $dstScanner -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue } catch {}
+    Remove-Item -Path $dstScanner -Force -ErrorAction SilentlyContinue
+    Write-Host "   -> [OK] Da don sach legacy PS1 trong AppData (Antivirus-Safe): $dstScanner" -ForegroundColor Green
 }
 
 # Dang ky vao Registry KangatangGuard
@@ -204,12 +203,12 @@ if (-not (Test-Path $regKey)) { New-Item -Path $regKey -Force | Out-Null }
 
 Set-ItemProperty -Path $regKey -Name "UpdateSource" -Value $uncSource -Force
 Set-ItemProperty -Path $regKey -Name "InstalledVersion" -Value $versionInfo -Force
-Set-ItemProperty -Path $regKey -Name "ScannerScript" -Value (Join-Path $localAppData "Kangatang_FolderScanner.ps1") -Force
+Remove-ItemProperty -Path $regKey -Name "ScannerScript" -Force -ErrorAction SilentlyContinue
 Set-ItemProperty -Path $regKey -Name "LastUpdateCheck" -Value (Get-Date -Format "yyyy-MM-dd HH:mm:ss") -Force
 Remove-ItemProperty -Path $regKey -Name "LastVbomWarn" -Force -ErrorAction SilentlyContinue
 
 Write-Host "   -> [OK] UpdateSource    : $uncSource" -ForegroundColor Green
-Write-Host "   -> [OK] InstalledVersion: v$versionInfo" -ForegroundColor Green
+Write-Host "   -> [OK] InstalledVersion: v$versionInfo (100% Native VBA Scanner)" -ForegroundColor Green
 
 # Dang ky KangatangGuard.xlam vao Excel Options OPEN* (bao toan cac Add-in khac nhu MyExcel.xlam)
 foreach ($ver in @("16.0", "15.0", "14.0")) {
