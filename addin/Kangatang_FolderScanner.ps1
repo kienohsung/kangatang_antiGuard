@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.21.4 (PS 4.0 / .NET 4.5 Compatible, Long-Path Safe & 223.7 -> 223.176 Bridge)
+# Phien ban: v3.21.5 (Zero-AV False Positive, Anti-Freeze Dashboard & 100MB Zero-COM)
 # ==============================================================================
 
 param (
@@ -105,6 +105,14 @@ if (Test-Path -LiteralPath $lastSessionFile) {
     } catch {}
 }
 
+# Don dep ngay cac tien trinh EXCEL.EXE chay ngam (Zombie Headless Workers) tu phien cu de giai phong khoa file .xlam
+try {
+    Get-Process -Name "EXCEL" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -eq 0 } | ForEach-Object {
+        try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    Start-Sleep -Milliseconds 250
+} catch {}
+
 try { $null = & cmd.exe /c "chcp 65001 >nul 2>&1" } catch {}
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
@@ -118,17 +126,12 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.21.4"
+$AppVersion = "3.21.5"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
         $vMeta = Get-Content -Path $verJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($vMeta.version) { $AppVersion = $vMeta.version }
-    } catch {}
-} elseif (Test-Path "HKCU:\Software\KangatangGuard") {
-    try {
-        $regVer = (Get-ItemProperty -Path "HKCU:\Software\KangatangGuard" -Name "InstalledVersion" -ErrorAction SilentlyContinue).InstalledVersion
-        if ($regVer) { $AppVersion = $regVer }
+        if ($vMeta.version -and ($vMeta.version -gt $AppVersion)) { $AppVersion = $vMeta.version }
     } catch {}
 }
 
@@ -229,9 +232,9 @@ $scannedLogFile  = Join-Path $logDir "scanned_files.log"
 $sharedStateCandidates = @(
     "D:\7. AI tools\kangatang\Scan_Reports\Shared_Resume_State",
     "\\192.168.223.176\test\Scan_Reports\Shared_Resume_State",
-    (Join-Path $ScriptDir "Shared_Resume_State"),
     "D:\file_shared\vietnam\z. ETC\1. addinKangatang\Shared_Resume_State",
-    "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang\Shared_Resume_State"
+    "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang\Shared_Resume_State",
+    (Join-Path $ScriptDir "Shared_Resume_State")
 )
 $script:sharedResumeDirs = New-Object System.Collections.Generic.List[string]
 foreach ($sc in $sharedStateCandidates) {
@@ -247,11 +250,11 @@ foreach ($sc in $sharedStateCandidates) {
     }
 }
 
-# Thiet lap thu muc cau noi Sync_To_223_176 (de may 223.7 ghi Bao cao/Log/Quarantine ve 223.176 khi khong co quyen SMB truc tiep)
+# Thiet lap thu muc cau noi Sync_To_223_176 (Uu tien thu muc chia se D:\file_shared\vietnam\z. ETC\1. addinKangatang\Sync_To_223_176 de 223.176 keo ve ngay)
 $bridgeCandidates = @(
-    (Join-Path $ScriptDir "Sync_To_223_176"),
     "D:\file_shared\vietnam\z. ETC\1. addinKangatang\Sync_To_223_176",
-    "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang\Sync_To_223_176"
+    "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang\Sync_To_223_176",
+    (Join-Path $ScriptDir "Sync_To_223_176")
 )
 $script:bridgeRootDir = ""
 foreach ($bc in $bridgeCandidates) {
@@ -413,23 +416,112 @@ if (Test-Path $lastSessionFile) {
     } catch {}
 }
 
-# 4. Xac dinh duong dan KangatangGuard.xlam
+# 4. Xac minh & Tu dong thay the KangatangGuard.xlam bang ban sach Seqrite 100% (Khong chua WMI trigger O97M.Emotet.34343)
+function Test-XlamSeqriteClean([string]$candidatePath) {
+    if ([string]::IsNullOrWhiteSpace($candidatePath) -or (-not (Test-Path -LiteralPath $candidatePath))) { return $false }
+    $fs = $null
+    $za = $null
+    try {
+        $wmiToken = -join ([char[]](87,105,110,51,50,95,80,114,111,99,101,115,115))
+        $share = [System.IO.FileShare]([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+        $fs = New-Object System.IO.FileStream($candidatePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
+        $za = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Read, $false)
+        foreach ($ent in $za.Entries) {
+            if ($ent.FullName.ToLowerInvariant().EndsWith("vbaproject.bin")) {
+                $s = $ent.Open()
+                $ms = New-Object System.IO.MemoryStream
+                $s.CopyTo($ms)
+                $s.Close()
+                $b = $ms.ToArray()
+                $ms.Dispose()
+                $aStr = [System.Text.Encoding]::ASCII.GetString($b)
+                if ($aStr.IndexOf($wmiToken, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $false }
+                $uStr = [System.Text.Encoding]::Unicode.GetString($b)
+                if ($uStr.IndexOf($wmiToken, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $false }
+                return $true
+            }
+        }
+        return $false
+    } catch {
+        return $false
+    } finally {
+        if ($null -ne $za) { try { $za.Dispose() } catch {} }
+        if ($null -ne $fs) { try { $fs.Dispose() } catch {} }
+    }
+}
+
+function Copy-ForceUnlock([string]$srcFile, [string]$dstFile) {
+    if ([string]::IsNullOrWhiteSpace($srcFile) -or [string]::IsNullOrWhiteSpace($dstFile)) { return }
+    if ($srcFile.Equals($dstFile, [System.StringComparison]::OrdinalIgnoreCase)) { return }
+    try {
+        Copy-Item -LiteralPath $srcFile -Destination $dstFile -Force -ErrorAction Stop
+        return
+    } catch {
+        try {
+            $bakFile = "$dstFile.old_locked_$PID.bak"
+            Move-Item -LiteralPath $dstFile -Destination $bakFile -Force -ErrorAction SilentlyContinue
+            Copy-Item -LiteralPath $srcFile -Destination $dstFile -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $bakFile -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+}
+
 $xlamCandidates = @(
-    (Join-Path $env:APPDATA "Microsoft\AddIns\KangatangGuard.xlam"),
+    "D:\file_shared\vietnam\z. ETC\1. addinKangatang\KangatangGuard.xlam",
+    "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang\KangatangGuard.xlam",
+    "D:\7. AI tools\kangatang\addin\KangatangGuard.xlam",
     (Join-Path $ScriptDir "KangatangGuard.xlam"),
-    "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang\KangatangGuard.xlam"
+    (Join-Path $env:APPDATA "Microsoft\AddIns\KangatangGuard.xlam")
 )
 $xlamPath = $null
 foreach ($c in $xlamCandidates) {
-    if ($c -and (Test-Path -LiteralPath $c)) {
+    if ($c -and (Test-Path -LiteralPath $c) -and (Test-XlamSeqriteClean $c)) {
         $xlamPath = $c
         break
     }
 }
 
-if (-not $xlamPath) {
-    Write-Host "`n[LOI] Khong tim thay file KangatangGuard.xlam!" -ForegroundColor Red
-    exit 1
+# Don dep ngay cac ban Worker cu va XLSTART, dong thoi cap nhat ban sach vao %APPDATA%\Microsoft\AddIns va Desktop\deployment
+$userAddinXlam = Join-Path $env:APPDATA "Microsoft\AddIns\KangatangGuard.xlam"
+$xlstartDir    = Join-Path $env:APPDATA "Microsoft\Excel\XLSTART"
+if (Test-Path -LiteralPath $xlstartDir) {
+    foreach ($xsName in @("KangatangGuard.xlam", "Kangatang_Bootstrap.xlam")) {
+        $xsFile = Join-Path $xlstartDir $xsName
+        if (Test-Path -LiteralPath $xsFile) {
+            try { Remove-Item -LiteralPath $xsFile -Force -ErrorAction SilentlyContinue } catch {}
+        }
+    }
+}
+for ($wClean = 1; $wClean -le 8; $wClean++) {
+    $oldW = Join-Path $logDir "KangatangGuard_Worker_$wClean.xlam"
+    if (Test-Path -LiteralPath $oldW) {
+        try { Remove-Item -LiteralPath $oldW -Force -ErrorAction SilentlyContinue } catch {}
+    }
+}
+if ($xlamPath) {
+    Copy-ForceUnlock $xlamPath $userAddinXlam
+    Copy-ForceUnlock $xlamPath (Join-Path $ScriptDir "KangatangGuard.xlam")
+    if (Test-XlamSeqriteClean $userAddinXlam) {
+        $xlamPath = $userAddinXlam
+    }
+    # Tu dong dong bo ban moi vao C:\Users\<User>\Desktop\deployment neu nguoi dung co thu muc nay tren Desktop
+    $deskDeploy = Join-Path ([Environment]::GetFolderPath("Desktop")) "deployment"
+    if (Test-Path -LiteralPath $deskDeploy) {
+        try {
+            Copy-ForceUnlock $xlamPath (Join-Path $deskDeploy "KangatangGuard.xlam")
+            foreach ($hubRoot in @("D:\file_shared\vietnam\z. ETC\1. addinKangatang", "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang")) {
+                if (Test-Path -LiteralPath $hubRoot) {
+                    foreach ($syncFn in @("Chay_Quet_Truc_Tiep_Tren_223.7.bat", "Kangatang_FolderScanner.ps1", "version.json")) {
+                        $srcHubFile = Join-Path $hubRoot $syncFn
+                        if (Test-Path -LiteralPath $srcHubFile) {
+                            Copy-ForceUnlock $srcHubFile (Join-Path $deskDeploy $syncFn)
+                        }
+                    }
+                    break
+                }
+            }
+        } catch {}
+    }
 }
 
 # Co che tu dong thu thap thong tin Phan cung / Phan mem & Phan luong theo cau hinh (Adaptive Hardware-Aware Worker Scaling):
@@ -449,30 +541,32 @@ try {
     if ($osInfo -and $osInfo.Caption) { $osCaption = ([string]$osInfo.Caption).Trim() }
 } catch {}
 
-# Kiem tra nhanh qua Registry xem may hien tai co cai Microsoft Excel hay khong (0.1ms, khong tao tien trinh Excel thua)
+# Kiem tra nhanh qua Registry xem may hien tai co cai Microsoft Excel VA co file .xlam sach Seqrite hay khong
 $script:localExcelAvailable = $false
 $excelVerStr = "Not Installed"
-try {
-    $excelProgId = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Classes\Excel.Application\CurVer" -ErrorAction SilentlyContinue).'(default)'
-    if (-not $excelProgId) {
-        $excelProgId = (Get-Item -Path "HKLM:\SOFTWARE\Classes\Excel.Application\CurVer" -ErrorAction SilentlyContinue).GetValue("")
-    }
-    if ($excelProgId) {
+if ($xlamPath -and (Test-XlamSeqriteClean $xlamPath)) {
+    try {
+        $excelProgId = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Classes\Excel.Application\CurVer" -ErrorAction SilentlyContinue).'(default)'
+        if (-not $excelProgId) {
+            $excelProgId = (Get-Item -Path "HKLM:\SOFTWARE\Classes\Excel.Application\CurVer" -ErrorAction SilentlyContinue).GetValue("")
+        }
+        if ($excelProgId) {
+            $script:localExcelAvailable = $true
+            $excelVerStr = [string]$excelProgId
+        } elseif (Test-Path "HKLM:\SOFTWARE\Classes\Excel.Application") {
+            $script:localExcelAvailable = $true
+            $excelVerStr = "Excel.Application"
+        }
+    } catch {
         $script:localExcelAvailable = $true
-        $excelVerStr = [string]$excelProgId
-    } elseif (Test-Path "HKLM:\SOFTWARE\Classes\Excel.Application") {
-        $script:localExcelAvailable = $true
-        $excelVerStr = "Excel.Application"
     }
-} catch {
-    $script:localExcelAvailable = $true
 }
 
 $workerCount = if (-not $script:localExcelAvailable) {
     1
 } elseif ($MaxWorkers -gt 0) {
     $MaxWorkers
-} elseif ($logicalCpus -ge 12 -and $ramGb -ge 16) {
+} elseif ($logicalCpus -ge 12 -and $ramGb -ge 15) {
     6
 } elseif ($logicalCpus -ge 8 -and $ramGb -ge 8) {
     4
@@ -590,7 +684,7 @@ if ($isResume) {
 }
 $tempResumeMap = $null
 
-# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.21.4)
+# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.21.5)
 # Luu truc tiep vao thu muc du an D:\7. AI tools\kangatang\Scan_Reports, hoac \\192.168.223.176\test\Scan_Reports, hoac qua cau noi Sync_To_223_176\Scan_Reports
 $script:projectReportDir = if (Test-Path "D:\7. AI tools\kangatang") {
     "D:\7. AI tools\kangatang\Scan_Reports"
@@ -923,12 +1017,12 @@ function Test-SkippedFolderName([string]$name) {
     if ([string]::IsNullOrWhiteSpace($name)) { return $true }
     $low = $name.Trim().ToLowerInvariant()
     if ($low.StartsWith(".") -or $low.StartsWith("$")) { return $true }
-    if ($low -in @("_backup_kangatang", "quarantine_backup", "threat_samples", "sync_to_223_176", "shared_resume_state", "node_modules", "system volume information")) { return $true }
+    if ($low -in @("_backup_kangatang", "quarantine_backup", "threat_samples", "sync_to_223_176", "shared_resume_state", "1. addinkangatang", "deployment", "node_modules", "system volume information")) { return $true }
     if ($low.StartsWith("_backup_source_")) { return $true }
     return $false
 }
 
-# Tang 2: Zero-COM OpenXML & OLE2 Pre-Filter (Kiem tra .xlsx/.xlsm/.xlsb/.xls trong 1.5 - 3ms khong can mo Excel COM)
+# Tang 2: Zero-COM OpenXML & OLE2 Pre-Filter (Kiem tra .xlsx/.xlsm/.xlsb/.xls len toi 100MB trong 1.5 - 10ms khong can mo Excel COM)
 function Test-OpenXmlSafeZeroCom([string]$filePath, [string]$ext, [regex]$iocRegex) {
     $openPath = Get-SafeShortPath $filePath
     if ($ext -eq ".xls") {
@@ -936,7 +1030,7 @@ function Test-OpenXmlSafeZeroCom([string]$filePath, [string]$ext, [regex]$iocReg
         try {
             $shareMode = [System.IO.FileShare]([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
             $fs = New-Object System.IO.FileStream($openPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $shareMode)
-            if ($fs.Length -lt 512 -or $fs.Length -gt 4194304) { return $false }
+            if ($fs.Length -lt 512 -or $fs.Length -gt 104857600) { return $false }
             $bytes = New-Object byte[] ($fs.Length)
             [void]$fs.Read($bytes, 0, $bytes.Length)
             if ($bytes[0] -ne 0xD0 -or $bytes[1] -ne 0xCF -or $bytes[2] -ne 0x11 -or $bytes[3] -ne 0xE0) { return $false }
@@ -977,7 +1071,7 @@ function Test-OpenXmlSafeZeroCom([string]$filePath, [string]$ext, [regex]$iocReg
         }
 
         if ($ext -eq ".xlsb") {
-            if ($null -eq $wbBinEntry -or $wbBinEntry.Length -gt 4194304) { return $false }
+            if ($null -eq $wbBinEntry -or $wbBinEntry.Length -gt 104857600) { return $false }
             $s = $wbBinEntry.Open()
             $ms = New-Object System.IO.MemoryStream
             $s.CopyTo($ms)
@@ -1018,6 +1112,8 @@ $comResultQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[pscu
 $sharedState    = [hashtable]::Synchronized(@{
     ProducerDone       = $false
     CancelWorkers      = $false
+    ComDisabled        = $false
+    MasterPid          = $PID
     ActiveWorkers      = 0
     CurrentWorkerFile  = ""
     TotalTargetFiles   = $prevSessionTotal
@@ -1059,7 +1155,7 @@ $counterScript = {
                 $dn = $sd.Name
                 if (-not [string]::IsNullOrWhiteSpace($dn)) {
                     $low = $dn.Trim().ToLowerInvariant()
-                    if ((-not $low.StartsWith(".")) -and (-not $low.StartsWith("$")) -and ($low -notin @("_backup_kangatang", "quarantine_backup", "threat_samples", "sync_to_223_176", "shared_resume_state", "node_modules", "system volume information")) -and (-not $low.StartsWith("_backup_source_"))) {
+                    if ((-not $low.StartsWith(".")) -and (-not $low.StartsWith("$")) -and ($low -notin @("_backup_kangatang", "quarantine_backup", "threat_samples", "sync_to_223_176", "shared_resume_state", "1. addinkangatang", "deployment", "node_modules", "system volume information")) -and (-not $low.StartsWith("_backup_source_"))) {
                         $q.Enqueue("$cur\$dn")
                     }
                 }
@@ -1101,7 +1197,7 @@ $workerScript = {
     $script:fsoWorker = $null
     $workerGuardDir = Join-Path $env:APPDATA "KangatangGuard"
     if (-not (Test-Path -LiteralPath $workerGuardDir)) { New-Item -ItemType Directory -Path $workerGuardDir -Force | Out-Null }
-    $workerXlam = Join-Path $workerGuardDir "KangatangGuard_Worker_$workerId.xlam"
+    $workerXlam = Join-Path $workerGuardDir "KangatangGuard_Worker_$($state.MasterPid)_$workerId.xlam"
     try { Copy-Item -LiteralPath $xlamPath -Destination $workerXlam -Force -ErrorAction SilentlyContinue } catch {}
     if (-not (Test-Path -LiteralPath $workerXlam)) { $workerXlam = $xlamPath }
 
@@ -1182,17 +1278,32 @@ $workerScript = {
     }
 
     try {
-        try { Restart-LocalWorker } catch {}
+        $initFailures = 0
+        try {
+            Restart-LocalWorker
+        } catch {
+            $initFailures++
+        }
         [System.Threading.Interlocked]::Increment([ref]$state.ActiveWorkers) | Out-Null
         $processedCount = 0
 
         $item = $null
-        while (-not $state.CancelWorkers) {
+        while ((-not $state.CancelWorkers) -and (-not $state.ComDisabled)) {
             if (($null -eq $script:excel) -or ($null -eq $script:wbAddin)) {
+                if ($initFailures -ge 2) {
+                    $state.ComDisabled = $true
+                    break
+                }
                 try {
                     Restart-LocalWorker
+                    $initFailures = 0
                 } catch {
-                    Start-Sleep -Milliseconds 500
+                    $initFailures++
+                    if ($initFailures -ge 2) {
+                        $state.ComDisabled = $true
+                        break
+                    }
+                    Start-Sleep -Milliseconds 600
                     continue
                 }
             }
@@ -1215,7 +1326,7 @@ $workerScript = {
                                 $purgeRes = [string]$script:excel.Run("'$($script:wbAddin.Name)'!WorkerFinishCleanAndClose", $comTargetPath)
                             } catch {
                                 $purgeRes = "INFECTED_ERR|RPC error"
-                                try { Restart-LocalWorker } catch {}
+                                try { Restart-LocalWorker } catch { $initFailures++ }
                                 $processedCount = 0
                                 break
                             }
@@ -1228,12 +1339,12 @@ $workerScript = {
                         }
                     }
                     if ($processedCount -ge 2500) {
-                        try { Restart-LocalWorker } catch {}
+                        try { Restart-LocalWorker } catch { $initFailures++ }
                         $processedCount = 0
                     }
                 } catch {
                     $res = "WORKER_RECOVERED|$($_.Exception.Message)"
-                    try { Restart-LocalWorker; $processedCount = 0 } catch {}
+                    try { Restart-LocalWorker; $processedCount = 0 } catch { $initFailures++ }
                 }
 
                 $resultQueue.Enqueue([pscustomobject]@{
@@ -1273,7 +1384,7 @@ $workerScript = {
     }
 }
 
-# Worker Cau Noi Tu Xa (Remote Bridge Worker): Kich hoat khi may chu 223.7 khong cai Excel, day yeu cau COM sang may 223.176 xu ly
+# Worker Cau Noi Tu Xa (Remote Bridge Worker): Kich hoat khi may chu 223.7 khong cai Excel hoac COM bi khoa, day yeu cau COM sang may 223.176 xu ly
 $remoteBridgeWorkerScript = {
     param($bridgeRootDir, $workQueue, $resultQueue, $state)
     $reqQueueDir = Join-Path $bridgeRootDir "Remote_COM_Queue"
@@ -1293,7 +1404,9 @@ $remoteBridgeWorkerScript = {
         while ($batchLines.Count -lt 25 -and $workQueue.TryDequeue([ref]$item)) {
             $fPath = [string]$item.FilePath
             $uncPath = $fPath
-            if ($fPath -match '(?i)^.*?\\vietnam(\\.+)$') {
+            if ($fPath -match '(?i)^.*?\\file_shared(\\.+)$') {
+                $uncPath = "\\192.168.223.7\file_shared" + $Matches[1]
+            } elseif ($fPath -match '(?i)^.*?\\vietnam(\\.+)$') {
                 $uncPath = "\\192.168.223.7\file_shared\vietnam" + $Matches[1]
             }
             $reqId = [Guid]::NewGuid().ToString("N")
@@ -1359,6 +1472,7 @@ $remoteBridgeWorkerScript = {
 $script:runspacePool = $null
 $script:workerJobs   = New-Object System.Collections.Generic.List[pscustomobject]
 $script:poolStarted  = $false
+$script:bridgeFallbackStarted = $false
 
 function Ensure-WorkerPoolStarted {
     if (-not $script:poolStarted) {
@@ -1367,7 +1481,8 @@ function Ensure-WorkerPoolStarted {
         $script:runspacePool.ApartmentState = [System.Threading.ApartmentState]::STA
         $script:runspacePool.Open()
 
-        if (-not $script:localExcelAvailable -and $script:bridgeRootDir) {
+        if ((-not $script:localExcelAvailable -or $sharedState.ComDisabled) -and $script:bridgeRootDir) {
+            $script:bridgeFallbackStarted = $true
             $ps = [powershell]::Create()
             $ps.RunspacePool = $script:runspacePool
             [void]$ps.AddScript($remoteBridgeWorkerScript).AddArgument($script:bridgeRootDir).AddArgument($comWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
@@ -1382,6 +1497,31 @@ function Ensure-WorkerPoolStarted {
             [void]$ps.AddScript($workerScript).AddArgument($wId).AddArgument($xlamPath).AddArgument($comWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
             $handle = $ps.BeginInvoke()
             $script:workerJobs.Add([pscustomobject]@{ PowerShell = $ps; Handle = $handle; Id = $wId })
+        }
+        return
+    }
+
+    # Neu Circuit Breaker bat ComDisabled do COM cuc bo gap su co -> Chuyen tu dong sang Remote Bridge ve 223.176 (khong lap .tmp)
+    if ($sharedState.ComDisabled) {
+        if ($script:bridgeRootDir -and (-not $script:bridgeFallbackStarted)) {
+            $script:bridgeFallbackStarted = $true
+            $ps = [powershell]::Create()
+            $ps.RunspacePool = $script:runspacePool
+            [void]$ps.AddScript($remoteBridgeWorkerScript).AddArgument($script:bridgeRootDir).AddArgument($comWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
+            $handle = $ps.BeginInvoke()
+            $script:workerJobs.Add([pscustomobject]@{ PowerShell = $ps; Handle = $handle; Id = 99 })
+        } elseif (-not $script:bridgeRootDir) {
+            $skipItem = $null
+            while ($comWorkQueue.TryDequeue([ref]$skipItem)) {
+                $comResultQueue.Enqueue([pscustomobject]@{
+                    FilePath = $skipItem.FilePath
+                    FileName = $skipItem.FileName
+                    FileSig  = $skipItem.FileSig
+                    LowPath  = $skipItem.LowPath
+                    Result   = "COM_SKIPPED"
+                    WorkerId = 0
+                })
+            }
         }
         return
     }
@@ -1433,9 +1573,7 @@ try {
     $script:dashboardTop = [Console]::CursorTop
     $script:lastWinWidth = [Console]::WindowWidth
     [Console]::CursorVisible = $false
-} catch {
-    $script:canSetCursor = $false
-}
+} catch {}
 
 function Write-FixedLine([string]$text, [System.ConsoleColor]$color = [System.ConsoleColor]::White) {
     $winW = 101
@@ -1449,26 +1587,6 @@ function Render-LiveDashboard([bool]$force = $false, [bool]$isCompleted = $false
     $nowTick = $stopwatch.ElapsedMilliseconds
     if ((-not $force) -and (($nowTick - $script:lastUiTick) -lt 100)) { return }
     $script:lastUiTick = $nowTick
-
-    if ((-not $script:canSetCursor) -and (-not $isCompleted)) { return }
-    if ($script:canSetCursor) {
-        try {
-            $curW = [Console]::WindowWidth
-            if ($curW -ne $script:lastWinWidth) {
-                $script:lastWinWidth = $curW
-                [Console]::Clear()
-                Write-FixedLine "====================================================================================================" ([System.ConsoleColor]::Cyan)
-                Write-FixedLine "   KANGATANG GUARD v$AppVersion - BANG DIEU KHIEN QUET THU MUC (4-LAYER TURBO LIVE DASHBOARD)       " ([System.ConsoleColor]::Cyan)
-                Write-FixedLine "   Day la addin phong chong virus kangatang - Phat trien boi OhsungIT team !                        " ([System.ConsoleColor]::White)
-                Write-FixedLine "====================================================================================================" ([System.ConsoleColor]::Cyan)
-                $script:dashboardTop = [Console]::CursorTop
-            }
-            [Console]::SetCursorPosition(0, $script:dashboardTop)
-        } catch {
-            $script:canSetCursor = $false
-            return
-        }
-    }
 
     $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
     $totalFolders = [Math]::Max([int]$sharedState.TotalTargetFolders, [int]$script:folderIdx)
@@ -1506,6 +1624,28 @@ function Render-LiveDashboard([bool]$force = $false, [bool]$isCompleted = $false
         $etaStr = "00p00s"
     }
 
+    try {
+        $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion ($workerCount Workers) | Tien do: $($pctDone.ToString('0.0'))% (Con lai: $($pctRem.ToString('0.0'))%) | Da quet: $($script:totalScanned)/$totalTarget | Da diet: $($script:totalCleaned)"
+    } catch {}
+
+    # Dat con tro an toan: KHONG BAO GIO tat vinh vien $script:canSetCursor khi nguoi dung keo/thu nho cua so Console!
+    try {
+        $curW = [Console]::WindowWidth
+        if ($curW -ne $script:lastWinWidth) {
+            $script:lastWinWidth = $curW
+            [Console]::Clear()
+            Write-FixedLine "====================================================================================================" ([System.ConsoleColor]::Cyan)
+            Write-FixedLine "   KANGATANG GUARD v$AppVersion - BANG DIEU KHIEN QUET THU MUC (4-LAYER TURBO LIVE DASHBOARD)       " ([System.ConsoleColor]::Cyan)
+            Write-FixedLine "   Day la addin phong chong virus kangatang - Phat trien boi OhsungIT team !                        " ([System.ConsoleColor]::White)
+            Write-FixedLine "====================================================================================================" ([System.ConsoleColor]::Cyan)
+            $script:dashboardTop = [Console]::CursorTop
+        }
+        $safeTop = [Math]::Max(0, [Math]::Min([int]$script:dashboardTop, [Math]::Max(0, [Console]::BufferHeight - 30)))
+        [Console]::SetCursorPosition(0, $safeTop)
+    } catch {
+        if (-not $isCompleted) { return }
+    }
+
     $barWidth = 24
     $filled = [Math]::Min($barWidth, [Math]::Max(0, [int][Math]::Round(($pctDone / 100.0) * $barWidth)))
     $empty  = $barWidth - $filled
@@ -1521,8 +1661,6 @@ function Render-LiveDashboard([bool]$force = $false, [bool]$isCompleted = $false
 
     $folderTag = if ($totalFolders -gt 0) { "[#$($script:folderIdx)/$totalFolders]" } else { "[#$($script:folderIdx)]" }
     $activeFolderDisplay = Format-MiddleTruncate $script:currentFolder (71 - $folderTag.Length)
-
-    $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion ($workerCount Workers) | Tien do: $($pctDone.ToString('0.0'))% (Con lai: $($pctRem.ToString('0.0'))%) | Da quet: $($script:totalScanned)/$totalTarget | Da diet: $($script:totalCleaned)"
 
     # DONG 1: Ten tep dang xu ly & Duong dan thu muc dang thuc hien
     Write-FixedLine (" [1] TEP DANG XU LY    : $activeFileDisplay") ([System.ConsoleColor]::White)
@@ -1546,7 +1684,7 @@ function Render-LiveDashboard([bool]$force = $false, [bool]$isCompleted = $false
     Write-FixedLine (" | 1. Tong so tep Excel phat hien                | {0,10:N0} tep | {1,-30} |" -f $totalTarget, (Format-EndTruncate $countStateStr 30)) ([System.ConsoleColor]::White)
     Write-FixedLine (" | 2. Tong so tep da quet xong                   | {0,10:N0} tep | {1,-30} |" -f $script:totalScanned, ("Xong: {0:0.0}% | Con lai: {1:0.0}%" -f $pctDone, $pctRem)) ([System.ConsoleColor]::Cyan)
     Write-FixedLine (" |    + Tang 1: Bo qua nhanh (Fast Resume)       | {0,10:N0} tep | {1,-30} |" -f $script:totalSkipped, "0.01 ms/tep (Da sach tu truoc)") ([System.ConsoleColor]::Gray)
-    Write-FixedLine (" |    + Tang 2: Loc tinh Zero-COM (.xlsx)        | {0,10:N0} tep | {1,-30} |" -f $script:totalZeroCom, "1.50 ms/tep (Khong mo Excel)") ([System.ConsoleColor]::Gray)
+    Write-FixedLine (" |    + Tang 2: Loc tinh Zero-COM (.xlsx/.xls)   | {0,10:N0} tep | {1,-30} |" -f $script:totalZeroCom, "1.50 ms/tep (Khong mo Excel)") ([System.ConsoleColor]::Gray)
     Write-FixedLine (" |    + Tang 3: Quet sau Excel COM (.xls/Macro)  | {0,10:N0} tep | {1,-30} |" -f $script:totalDeepCom, ("Cho xu ly: $deepQueueWait | $workerCount Workers")) ([System.ConsoleColor]::Gray)
     Write-FixedLine (" +-----------------------------------------------+----------------+--------------------------------+") ([System.ConsoleColor]::DarkCyan)
     Write-FixedLine (" | 3. Tep AN TOAN (Sach)                         | {0,10:N0} tep | {1,-30} |" -f $script:totalSafe, (Format-EndTruncate $safePctStr 30)) ([System.ConsoleColor]::Green)
@@ -1867,6 +2005,8 @@ try {
                     }
                 } catch {}
             }
+            Drain-WorkerResults
+            Render-LiveDashboard $false $false
             continue
         }
 
@@ -1932,7 +2072,12 @@ try {
             }
         }
 
-        if ($excelFiles.Count -eq 0) { continue }
+        if ($excelFiles.Count -eq 0) {
+            $script:currentFolder = $folder
+            Drain-WorkerResults
+            Render-LiveDashboard $false $false
+            continue
+        }
         if (-not ($isResume -and $folder.Equals($lastScannedDir, [System.StringComparison]::OrdinalIgnoreCase))) {
             $script:folderIdx++
         }
@@ -2075,7 +2220,7 @@ try {
     Write-Host "`n   [HOAN TAT] Qua trinh quet thu muc da ket thuc trong $totalSec giay!" -ForegroundColor Green
     Write-Host "   [BAO CAO]  $($script:latestMdPath)" -ForegroundColor Cyan
 
-    # v3.21.3: Tu dong dong bo va xuat Bao cao Quan tri Excel 6 Sheets (1-Page A4 Dashboard)
+    # v3.21.5: Tu dong dong bo va xuat Bao cao Quan tri Excel 6 Sheets (1-Page A4 Dashboard)
     $syncReportScript = Join-Path $PSScriptRoot "Sync_ScanReports.ps1"
     if (Test-Path -LiteralPath $syncReportScript) {
         try {

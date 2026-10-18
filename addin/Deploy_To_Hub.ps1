@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.21.3"
+$ReleaseVersion = "3.21.5"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -58,7 +58,7 @@ foreach ($psFile in @(
 )) {
     Sync-FileRegex $psFile @{
         '\$AppVersion\s*=\s*"[^"]+"' = "`$AppVersion = `"$ReleaseVersion`""
-        'v3\.\d+\.\d+'               = "v$ReleaseVersion"
+        '# Phien ban: v3\.\d+\.\d+'  = "# Phien ban: v$ReleaseVersion"
     }
 }
 Sync-FileRegex (Join-Path $AddinDir "Sync_ScanReports.ps1") @{
@@ -66,7 +66,9 @@ Sync-FileRegex (Join-Path $AddinDir "Sync_ScanReports.ps1") @{
 }
 foreach ($batFile in @(
     (Join-Path $AddinDir "Chay_Diet_Virus_Ngoai.bat"),
+    (Join-Path $AddinDir "Chay_Quet_Truc_Tiep_Tren_223.7.bat"),
     (Join-Path $LocalDist "Chay_Diet_Virus_Ngoai.bat"),
+    (Join-Path $LocalDist "Chay_Quet_Truc_Tiep_Tren_223.7.bat"),
     (Join-Path $RootDir "Chay_Diet_Virus.bat"),
     (Join-Path $RootDir "Diet_Virus_Kangatang.bat"),
     (Join-Path $RootDir "Xuat_Bao_Cao_Dinh_Ky.bat"),

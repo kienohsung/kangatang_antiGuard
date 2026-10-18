@@ -1,6 +1,6 @@
 # ==============================================================================
 # clean_excel_virus.ps1 -> Chuyen tiep tuong thich nguoc sang Kangatang_Standalone_Scanner.ps1
-# Phien ban: v3.21.3
+# Phien ban: v3.21.5
 # ==============================================================================
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
