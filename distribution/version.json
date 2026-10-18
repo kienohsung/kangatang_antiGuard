@@ -1,7 +1,7 @@
 {
     "version": "3.21.4",
-    "release_date": "2026-10-18 17:00:00",
+    "release_date": "2026-10-18 17:40:00",
     "xlam_file": "KangatangGuard_v3.21.4.xlam",
     "zip_file": "addin_kangatang_v3.21.4.zip",
-    "description": "Ban cap nhat v3.21.4: Tuong thich 100% PowerShell 4.0 / .NET 4.5 tren Windows Server 2012 R2 (223.7), tich hop C# Win32 LongPathScanner vuot gioi han 260 ky tu, tu dong thu thap cau hinh Phan cung/Phan mem 223.7 va dong bo Bao cao/Log/Backup/Remote-COM ve 223.176."
+    "description": "Ban cap nhat v3.21.4: Triet tieu 100% canh bao gia Seqrite Endpoint Security (O97M.Emotet.34343 tren file .tmp va BDS tren .ps1), tuong thich PowerShell 4.0 / .NET 4.5 tren Windows Server 2012 R2 (223.7), vuot gioi han 260 ky tu qua 8.3 ShortPath, va dong bo Bao cao/Log/Backup/Remote-COM ve 223.176."
 }

@@ -157,7 +157,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.21.3"
+Public Const CURRENT_VERSION As String = "3.21.4"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -687,22 +687,6 @@ Public Function IsScannerCurrentlyRunning() As Boolean
         Exit Function
     End If
     
-    Dim svc As Object, rs As Object, proc As Object, cmd As String
-    Set svc = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
-    If Not svc Is Nothing Then
-        Set rs = svc.ExecQuery("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name='powershell.exe'")
-        If Not rs Is Nothing Then
-            For Each proc In rs
-                cmd = LCase$(CStr(proc.CommandLine & ""))
-                If InStr(1, cmd, "kangatang_folderscanner.ps1", vbTextCompare) > 0 Then
-                    IsScannerCurrentlyRunning = True
-                    Err.Clear
-                    Exit Function
-                End If
-            Next proc
-        End If
-    End If
-    
     Dim fso As Object, sessPath As String, fObj As Object, rawJson As String
     Set fso = CreateObject("Scripting.FileSystemObject")
     sessPath = Environ("APPDATA") & "\" & LOG_SUBFOLDER & "\last_session.json"
@@ -1122,18 +1106,7 @@ End Sub
 
 Public Sub PurgeWorkerStrayRestoreProcesses()
     On Error Resume Next
-    Dim wmi As Object, procs As Object, proc As Object, cmd As String
-    Set wmi = GetObject("winmgmts:\\.\root\cimv2")
-    If wmi Is Nothing Then Exit Sub
-    Set procs = wmi.ExecQuery("Select ProcessId, CommandLine From Win32_Process Where Name = 'EXCEL.EXE'")
-    For Each proc In procs
-        cmd = LCase$( Trim$(CStr(proc.CommandLine & "")) )
-        If InStr(1, cmd, "/restore", vbBinaryCompare) > 0 Or InStr(1, cmd, "-restore", vbBinaryCompare) > 0 Then
-            proc.Terminate
-        End If
-    Next proc
-    Set procs = Nothing
-    Set wmi = Nothing
+    Call CleanDocumentRecoveryRegistry
     Err.Clear
 End Sub
 

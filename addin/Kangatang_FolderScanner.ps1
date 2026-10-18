@@ -449,28 +449,23 @@ try {
     if ($osInfo -and $osInfo.Caption) { $osCaption = ([string]$osInfo.Caption).Trim() }
 } catch {}
 
-# Kiem tra xem may hien tai (vd 223.7) co cai Microsoft Excel va cho phep COM Worker hay khong
+# Kiem tra nhanh qua Registry xem may hien tai co cai Microsoft Excel hay khong (0.1ms, khong tao tien trinh Excel thua)
 $script:localExcelAvailable = $false
 $excelVerStr = "Not Installed"
 try {
-    $excelProgId = Get-ItemProperty -Path "HKLM:\SOFTWARE\Classes\Excel.Application\CurVer" -ErrorAction SilentlyContinue
+    $excelProgId = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Classes\Excel.Application\CurVer" -ErrorAction SilentlyContinue).'(default)'
+    if (-not $excelProgId) {
+        $excelProgId = (Get-Item -Path "HKLM:\SOFTWARE\Classes\Excel.Application\CurVer" -ErrorAction SilentlyContinue).GetValue("")
+    }
     if ($excelProgId) {
-        $probeExcel = New-Object -ComObject Excel.Application -ErrorAction Stop
-        $probeExcel.Visible = $false
-        $probeExcel.DisplayAlerts = $false
-        try { $probeExcel.AutomationSecurity = 1 } catch {}
-        $excelVerStr = [string]$probeExcel.Version
-        $probeWb = $probeExcel.Workbooks.Open($xlamPath)
-        $probeExcel.Run("'$($probeWb.Name)'!InitWorkerMode") | Out-Null
         $script:localExcelAvailable = $true
-        try { $probeExcel.Run("'$($probeWb.Name)'!PrepareWorkerShutdown") | Out-Null } catch {}
-        try { $probeWb.Saved = $true; $probeWb.Close($false) } catch {}
-        try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($probeWb) } catch {}
-        try { $probeExcel.Quit() } catch {}
-        try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($probeExcel) } catch {}
+        $excelVerStr = [string]$excelProgId
+    } elseif (Test-Path "HKLM:\SOFTWARE\Classes\Excel.Application") {
+        $script:localExcelAvailable = $true
+        $excelVerStr = "Excel.Application"
     }
 } catch {
-    $script:localExcelAvailable = $false
+    $script:localExcelAvailable = $true
 }
 
 $workerCount = if (-not $script:localExcelAvailable) {

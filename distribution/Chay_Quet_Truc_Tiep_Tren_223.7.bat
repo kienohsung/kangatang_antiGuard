@@ -22,6 +22,9 @@ if not exist "%SYNC_HUB_DIR%" mkdir "%SYNC_HUB_DIR%" >nul 2>&1
 if exist "%~dp0KangatangGuard.xlam" (
     copy /Y "%~dp0KangatangGuard.xlam" "%ADDIN_DIR%\KangatangGuard.xlam" >nul 2>&1
 )
+for %%W in (1 2 3 4 5 6 7 8) do (
+    if exist "%GUARD_DIR%\KangatangGuard_Worker_%%W.xlam" del /F /Q "%GUARD_DIR%\KangatangGuard_Worker_%%W.xlam" >nul 2>&1
+)
 if exist "%~dp0Kangatang_FolderScanner.ps1" (
     copy /Y "%~dp0Kangatang_FolderScanner.ps1" "%ADDIN_DIR%\Kangatang_FolderScanner.ps1" >nul 2>&1
 )
@@ -41,6 +44,7 @@ for %%D in (D E F G C) do (
         set "SYNC_HUB_DIR=%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\Sync_To_223_176"
         if not exist "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\Sync_To_223_176" mkdir "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\Sync_To_223_176" >nul 2>&1
         copy /Y "%~dp0Chay_Quet_Truc_Tiep_Tren_223.7.bat" "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\Chay_Quet_Truc_Tiep_Tren_223.7.bat" >nul 2>&1
+        copy /Y "%~dp0KangatangGuard.xlam" "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\KangatangGuard.xlam" >nul 2>&1
         copy /Y "%~dp0Kangatang_FolderScanner.ps1" "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\Kangatang_FolderScanner.ps1" >nul 2>&1
         copy /Y "%~dp0version.json" "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\version.json" >nul 2>&1
     )
