@@ -35,6 +35,19 @@ if exist "%~dp0Shared_Resume_State\last_session.json" (
     )
 )
 
+for %%D in (D E F G C) do (
+    if exist "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang" (
+        copy /Y "%~dp0Chay_Quet_Truc_Tiep_Tren_223.7.bat" "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\Chay_Quet_Truc_Tiep_Tren_223.7.bat" >nul 2>&1
+        copy /Y "%~dp0Kangatang_FolderScanner.ps1" "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\Kangatang_FolderScanner.ps1" >nul 2>&1
+        copy /Y "%~dp0version.json" "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\version.json" >nul 2>&1
+    )
+    if exist "%%D:\vietnam\z. ETC\1. addinKangatang" (
+        copy /Y "%~dp0Chay_Quet_Truc_Tiep_Tren_223.7.bat" "%%D:\vietnam\z. ETC\1. addinKangatang\Chay_Quet_Truc_Tiep_Tren_223.7.bat" >nul 2>&1
+        copy /Y "%~dp0Kangatang_FolderScanner.ps1" "%%D:\vietnam\z. ETC\1. addinKangatang\Kangatang_FolderScanner.ps1" >nul 2>&1
+        copy /Y "%~dp0version.json" "%%D:\vietnam\z. ETC\1. addinKangatang\version.json" >nul 2>&1
+    )
+)
+
 echo [2/3] Opening Folder Selection Dialog...
 echo       (Tip: Select the local drive folder on 223.7, e.g. D:\file_shared\vietnam)
 echo [3/3] All scan reports, logs, and backups will be saved to 192.168.223.176!
