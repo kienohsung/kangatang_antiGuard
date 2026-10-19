@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.23.1 (Zero-AV False Positive, Anti-Freeze Dashboard & 100MB Zero-COM)
+# Phien ban: v3.23.2 (Zero-AV False Positive, Anti-Freeze Dashboard & 100MB Zero-COM)
 # ==============================================================================
 
 param (
@@ -147,7 +147,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.23.1"
+$AppVersion = "3.23.2"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -616,7 +616,9 @@ if ($xlamPath -and (Test-XlamSeqriteClean $xlamPath)) {
     }
 }
 
-$baseWorkers = if ($logicalCpus -ge 8 -and $ramGb -ge 8) {
+$baseWorkers = if ($logicalCpus -ge 12 -and $ramGb -ge 15) {
+    4
+} elseif ($logicalCpus -ge 8 -and $ramGb -ge 8) {
     3
 } else {
     2
@@ -625,13 +627,29 @@ $activeWindowCount = 1 + @(Get-OtherScannerPids).Count
 $workerCount = if (-not $script:localExcelAvailable) {
     1
 } elseif ($MaxWorkers -gt 0) {
-    $MaxWorkers
+    [Math]::Max(1, [Math]::Min(16, $MaxWorkers))
 } elseif ($activeWindowCount -eq 1) {
     $baseWorkers
 } elseif ($activeWindowCount -eq 2) {
-    [Math]::Max(2, [int][Math]::Floor($baseWorkers / 2))
+    [Math]::Max(2, $baseWorkers - 1)
 } else {
     2
+}
+
+if ($InteractivePrompt -and ($MaxWorkers -le 0) -and $script:localExcelAvailable) {
+    try {
+        Write-Host ""
+        Write-Host (" [CAU HINH WORKER] Phan cung: {0} luong CPU | {1} GB RAM | Cua so quet dang mo: {2}" -f $logicalCpus, $ramGb, $activeWindowCount) -ForegroundColor Yellow
+        Write-Host -NoNewline (" -> Nhap so luong Workers Excel COM [1 - 12] (Bam Enter de dung muc goi y = {0}): " -f $workerCount) -ForegroundColor Cyan
+        $rawWorkerInput = Read-Host
+        if (-not [string]::IsNullOrWhiteSpace($rawWorkerInput)) {
+            $parsedW = 0
+            if ([int]::TryParse($rawWorkerInput.Trim(), [ref]$parsedW)) {
+                $workerCount = [Math]::Max(1, [Math]::Min(16, $parsedW))
+            }
+        }
+        Write-Host ("    [OK] Da kich hoat che do quet voi {0} Workers Excel COM song song!" -f $workerCount) -ForegroundColor Green
+    } catch {}
 }
 $maxQueueDepth = [Math]::Max(60, $workerCount * 30)
 
@@ -1107,7 +1125,7 @@ function Test-SkippedFolderName([string]$name) {
     if ([string]::IsNullOrWhiteSpace($name)) { return $true }
     $low = $name.Trim().ToLowerInvariant()
     if ($low.StartsWith(".") -or $low.StartsWith("$")) { return $true }
-    if ($low -in @("_backup_kangatang", "quarantine_backup", "threat_samples", "sync_to_223_176", "shared_resume_state", "1. addinkangatang", "deployment", "node_modules", "system volume information")) { return $true }
+    if ($low -in @("_backup_kangatang", "quarantine_backup", "threat_samples", "sync_to_223_176", "shared_resume_state", "1. addinkangatang", "deployment", "node_modules", "bower_components", "vendor", "packages", "webproject", "windows", "program files", "program files (x86)", "programdata", "system volume information")) { return $true }
     if ($low.StartsWith("_backup_source_")) { return $true }
     return $false
 }
@@ -1290,13 +1308,13 @@ $counterScript = {
                 $dn = $sd.Name
                 if (-not [string]::IsNullOrWhiteSpace($dn)) {
                     $low = $dn.Trim().ToLowerInvariant()
-                    if ((-not $low.StartsWith(".")) -and (-not $low.StartsWith("$")) -and ($low -notin @("_backup_kangatang", "quarantine_backup", "threat_samples", "sync_to_223_176", "shared_resume_state", "1. addinkangatang", "deployment", "node_modules", "system volume information")) -and (-not $low.StartsWith("_backup_source_"))) {
+                    if ((-not $low.StartsWith(".")) -and (-not $low.StartsWith("$")) -and ($low -notin @("_backup_kangatang", "quarantine_backup", "threat_samples", "sync_to_223_176", "shared_resume_state", "1. addinkangatang", "deployment", "node_modules", "bower_components", "vendor", "packages", "webproject", "windows", "program files", "program files (x86)", "programdata", "system volume information")) -and (-not $low.StartsWith("_backup_source_"))) {
                         $q.Enqueue("$cur\$dn")
                     }
                 }
             }
             $hasExcel = $false
-            foreach ($fi in $di.GetFiles()) {
+            foreach ($fi in $di.GetFiles("*.xls*")) {
                 $fn = $fi.Name
                 $dot = $fn.LastIndexOf('.')
                 $ex = if ($dot -ge 0) { $fn.Substring($dot).ToLowerInvariant() } else { "" }
@@ -2167,28 +2185,27 @@ try {
         $enumDir = Get-SafeShortPath $folder -IsDirectory
         try {
             $dirInfo = New-Object System.IO.DirectoryInfo($enumDir)
-            foreach ($fsi in $dirInfo.GetFileSystemInfos()) {
-                $itemName = $fsi.Name
-                $fullChildPath = "$folder\$itemName"
-                if (($fsi.Attributes -band [System.IO.FileAttributes]::Directory) -ne 0) {
-                    if (-not (Test-SkippedFolderName $itemName)) {
-                        if ($isResume -and (-not $script:scannedDirsSet.Contains($fullChildPath))) {
-                            $freshDirQueue.Enqueue($fullChildPath)
-                        } else {
-                            $dirQueue.Enqueue($fullChildPath)
-                        }
+            foreach ($sdObj in $dirInfo.GetDirectories()) {
+                $itemName = $sdObj.Name
+                if (-not (Test-SkippedFolderName $itemName)) {
+                    $fullChildPath = "$folder\$itemName"
+                    if ($isResume -and (-not $script:scannedDirsSet.Contains($fullChildPath))) {
+                        $freshDirQueue.Enqueue($fullChildPath)
+                    } else {
+                        $dirQueue.Enqueue($fullChildPath)
                     }
-                } else {
-                    $ext = Get-SafeExtension $itemName
-                    if (($ext -in $validExts) -and (-not $itemName.StartsWith('~$')) -and (-not $itemName.ToLowerInvariant().StartsWith("kangatangguard"))) {
-                        $fInfoItem = [System.IO.FileInfo]$fsi
-                        $excelFiles.Add([pscustomobject]@{
-                            FullName = $fullChildPath
-                            Name     = $itemName
-                            Ext      = $ext
-                            FileSig  = "$($fInfoItem.Length)|$($fInfoItem.LastWriteTime.ToString('yyyyMMddHHmmss'))"
-                        })
-                    }
+                }
+            }
+            foreach ($fInfoItem in $dirInfo.GetFiles("*.xls*")) {
+                $itemName = $fInfoItem.Name
+                $ext = Get-SafeExtension $itemName
+                if (($ext -in $validExts) -and (-not $itemName.StartsWith('~$')) -and (-not $itemName.ToLowerInvariant().StartsWith("kangatangguard"))) {
+                    $excelFiles.Add([pscustomobject]@{
+                        FullName = "$folder\$itemName"
+                        Name     = $itemName
+                        Ext      = $ext
+                        FileSig  = "$($fInfoItem.Length)|$($fInfoItem.LastWriteTime.ToString('yyyyMMddHHmmss'))"
+                    })
                 }
             }
         } catch {
