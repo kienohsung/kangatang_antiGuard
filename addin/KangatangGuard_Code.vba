@@ -157,7 +157,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.22.1"
+Public Const CURRENT_VERSION As String = "3.22.2"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -2544,7 +2544,7 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
     
     If Len(updateSource) = 0 Then
         If Not bSilent Then
-            MsgBoxW Uni("Kh\u00f4ng th\u1ec3 k\u1ebft n\u1ed1i \u0111\u1ebfn M\u00e1y ch\u1ee7 LAN (223.7 / 223.176) ho\u1eb7c kh\u00f4ng t\u00ecm th\u1ea5y version.json." & vbCrLf & vbCrLf & _
+            MsgBoxW Uni("Kh\u00f4ng th\u1ec3 k\u1ebft n\u1ed1i \u0111\u1ebfn M\u00e1y ch\u1ee7 LAN ho\u1eb7c kh\u00f4ng t\u00ecm th\u1ea5y th\u00f4ng tin phi\u00ean b\u1ea3n." & vbCrLf & vbCrLf & _
                         "Vui l\u00f2ng ki\u1ec3m tra k\u1ebft n\u1ed1i m\u1ea1ng LAN."), _
                     vbExclamation, Uni("KangatangGuard v" & CURRENT_VERSION & " - C\u1eadp nh\u1eadt")
         Else
@@ -2561,9 +2561,8 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
             On Error Resume Next
             wsh.RegWrite "HKCU\Software\KangatangGuard\LastUpdateCheck", Format(Now, "yyyy-MM-dd HH:mm:ss"), "REG_SZ"
         Else
-            MsgBoxW Uni("Kh\u00f4ng th\u1ec3 k\u1ebft n\u1ed1i \u0111\u1ebfn M\u00e1y ch\u1ee7 LAN ho\u1eb7c kh\u00f4ng t\u00ecm th\u1ea5y th\u00f4ng tin phi\u00ean b\u1ea3n:" & vbCrLf & vbCrLf) & _
-                    updateSource & vbCrLf & vbCrLf & _
-                    Uni("Vui l\u00f2ng ki\u1ec3m tra k\u1ebft n\u1ed1i m\u1ea1ng LAN ho\u1eb7c m\u00e1y ch\u1ee7 c\u00f3 \u0111ang b\u1eadt kh\u00f4ng."), _
+            MsgBoxW Uni("Kh\u00f4ng th\u1ec3 k\u1ebft n\u1ed1i \u0111\u1ebfn M\u00e1y ch\u1ee7 LAN ho\u1eb7c kh\u00f4ng t\u00ecm th\u1ea5y th\u00f4ng tin phi\u00ean b\u1ea3n." & vbCrLf & vbCrLf & _
+                        "Vui l\u00f2ng ki\u1ebfm tra k\u1ebft n\u1ed1i m\u1ea1ng LAN ho\u1eb7c m\u00e1y ch\u1ee7 c\u00f3 \u0111ang b\u1eadt kh\u00f4ng."), _
                     vbExclamation, Uni("KangatangGuard v" & CURRENT_VERSION & " - K\u1ebft n\u1ed1i th\u1ea5t b\u1ea1i")
         End If
         Exit Sub
@@ -2612,8 +2611,7 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
         End If
     Else
         If Not bSilent Then
-            MsgBoxW Uni("B\u1ea1n \u0111ang s\u1eed d\u1ee5ng phi\u00ean b\u1ea3n M\u1edaI NH\u1ea4T (v") & CURRENT_VERSION & ")!" & vbCrLf & vbCrLf & _
-                    Uni("M\u00e1y ch\u1ee7 ph\u00e2n ph\u1ed1i: ") & updateSource, _
+            MsgBoxW Uni("B\u1ea1n \u0111ang s\u1eed d\u1ee5ng phi\u00ean b\u1ea3n M\u1edaI NH\u1ea4T (v") & CURRENT_VERSION & ")!", _
                     vbInformation, Uni("KangatangGuard v" & CURRENT_VERSION & " - H\u1ec7 th\u1ed1ng \u0111\u00e3 c\u1eadp nh\u1eadt")
         End If
     End If

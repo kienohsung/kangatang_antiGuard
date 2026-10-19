@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.22.1"
+$ReleaseVersion = "3.22.2"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -113,7 +113,7 @@ $versionObj = @{
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Workstation Log Access Lock & Multi-Window Scanner: Vo hieu hoa (Disable) nut Nhat ky (Log) tren toan bo may tram, chi cho phep mo tren may quan tri 223.176; ho tro chay dong thoi nhieu cua so PowerShell quet nhieu thu muc khac nhau."
+    changelog         = "v${ReleaseVersion} - Bao mat duong dan may chu phan phoi LAN, khoa nut Nhat ky (Log) tren may tram va ho tro chay song song nhieu cua so quet thu muc."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
