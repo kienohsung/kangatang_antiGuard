@@ -66,33 +66,39 @@ function Ensure-BridgeExcelWorker {
 }
 
 $processedReqIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+$lastReqLineCount = 0
+$lastLogSyncTime  = [datetime]::MinValue
 
-Write-Output "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Bridge Daemon v3.21.4 started: Monitoring $remoteBridgeDir"
+Write-Output "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Bridge Daemon v3.23.3 started: Monitoring $remoteBridgeDir"
 
 while ($true) {
     try {
         if (Test-Path -LiteralPath $remoteHubRoot) {
-            # 1. Dong bo Shared_Resume_State (Server_Profile, last_session.json, scanned_files.log)
+            # 1. Dong bo Shared_Resume_State (Server_Profile, last_session.json; scanned_files.log moi 60s de tranh nghen SMB)
             if (Test-Path -LiteralPath $remoteStateDir) {
                 Get-ChildItem -LiteralPath $remoteStateDir -Filter "Server_Profile_*.json" -ErrorAction SilentlyContinue | ForEach-Object {
-                    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $localStateDir $_.Name) -Force -ErrorAction SilentlyContinue
-                    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $localReportDir $_.Name) -Force -ErrorAction SilentlyContinue
-                }
-                $remSess = Join-Path $remoteStateDir "last_session.json"
-                $locSess = Join-Path $localStateDir "last_session.json"
-                if (Test-Path -LiteralPath $remSess) {
-                    $rMeta = Get-Content -LiteralPath $remSess -Raw -Encoding UTF8 | ConvertFrom-Json
-                    if ($rMeta -and ([int]$rMeta.TotalScanned -ge 86450)) {
-                        Copy-Item -LiteralPath $remSess -Destination $locSess -Force -ErrorAction SilentlyContinue
+                    $dstProf = Join-Path $localReportDir $_.Name
+                    if ((-not (Test-Path -LiteralPath $dstProf)) -or ($_.LastWriteTime -gt (Get-Item -LiteralPath $dstProf).LastWriteTime)) {
+                        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $localStateDir $_.Name) -Force -ErrorAction SilentlyContinue
+                        Copy-Item -LiteralPath $_.FullName -Destination $dstProf -Force -ErrorAction SilentlyContinue
                     }
                 }
-                $remLog = Join-Path $remoteStateDir "scanned_files.log"
-                $locLog = Join-Path $localStateDir "scanned_files.log"
-                if ((Test-Path -LiteralPath $remLog) -and (Test-Path -LiteralPath $locLog)) {
-                    $rLen = (Get-Item -LiteralPath $remLog).Length
-                    $lLen = (Get-Item -LiteralPath $locLog).Length
-                    if ($rLen -gt $lLen) {
-                        Copy-Item -LiteralPath $remLog -Destination $locLog -Force -ErrorAction SilentlyContinue
+                $nowUtc = [datetime]::UtcNow
+                if (($nowUtc - $lastLogSyncTime).TotalSeconds -ge 60) {
+                    $lastLogSyncTime = $nowUtc
+                    $remSess = Join-Path $remoteStateDir "last_session.json"
+                    $locSess = Join-Path $localStateDir "last_session.json"
+                    if (Test-Path -LiteralPath $remSess) {
+                        Copy-Item -LiteralPath $remSess -Destination $locSess -Force -ErrorAction SilentlyContinue
+                    }
+                    $remLog = Join-Path $remoteStateDir "scanned_files.log"
+                    $locLog = Join-Path $localStateDir "scanned_files.log"
+                    if ((Test-Path -LiteralPath $remLog) -and (Test-Path -LiteralPath $locLog)) {
+                        $rItem = Get-Item -LiteralPath $remLog -ErrorAction SilentlyContinue
+                        $lItem = Get-Item -LiteralPath $locLog -ErrorAction SilentlyContinue
+                        if ($rItem -and $lItem -and ($rItem.LastWriteTime -gt $lItem.LastWriteTime) -and ($rItem.Length -ne $lItem.Length)) {
+                            Copy-Item -LiteralPath $remLog -Destination $locLog -Force -ErrorAction SilentlyContinue
+                        }
                     }
                 }
             }
@@ -135,60 +141,65 @@ while ($true) {
                 }
             }
 
-            # 4. Xu ly Hang doi Remote_COM_Queue neu may 223.7 khong co Excel COM cuc bo
+            # 4. Xu ly Hang doi Remote_COM_Queue (Chi doc cac dong moi tu $lastReqLineCount)
             $remQueueDir = Join-Path $remoteBridgeDir "Remote_COM_Queue"
             $reqFile = Join-Path $remQueueDir "remote_com_requests.jsonl"
             $resFile = Join-Path $remQueueDir "remote_com_results.jsonl"
             if (Test-Path -LiteralPath $reqFile) {
                 $reqLines = [System.IO.File]::ReadAllLines($reqFile, $utf8NoBom)
-                $outLines = New-Object System.Collections.Generic.List[string]
-                foreach ($ln in $reqLines) {
-                    if ([string]::IsNullOrWhiteSpace($ln)) { continue }
-                    $reqObj = $ln | ConvertFrom-Json
-                    if ($reqObj -and $reqObj.ReqId -and $processedReqIds.Add([string]$reqObj.ReqId)) {
-                        $uncTarget = Get-BridgeShortPath ([string]$reqObj.UncPath)
-                        $resStr = "SAFE"
-                        if (Ensure-BridgeExcelWorker) {
-                            try {
-                                $resStr = [string]$script:excelWorker.Run("'$($script:wbWorker.Name)'!ScanSingleFileForWorker", $uncTarget)
-                                if ($resStr.StartsWith("PURGE_NEEDED|")) {
-                                    $detail = $resStr.Substring(13)
-                                    $purgeRes = "MORE_PURGE"
-                                    for ($att = 1; $att -le 5; $att++) {
-                                        try { $script:excelWorker.Run("'$($script:wbWorker.Name)'!WorkerDeleteOneModuleSheet", $uncTarget) | Out-Null } catch {}
-                                        try {
-                                            $purgeRes = [string]$script:excelWorker.Run("'$($script:wbWorker.Name)'!WorkerFinishCleanAndClose", $uncTarget)
-                                        } catch {
-                                            $purgeRes = "INFECTED_ERR|RPC error"
-                                            $script:excelWorker = $null
-                                            $script:wbWorker = $null
-                                            break
+                if ($reqLines.Count -lt $lastReqLineCount) { $lastReqLineCount = 0 }
+                if ($reqLines.Count -gt $lastReqLineCount) {
+                    $outLines = New-Object System.Collections.Generic.List[string]
+                    for ($idxReq = $lastReqLineCount; $idxReq -lt $reqLines.Count; $idxReq++) {
+                        $ln = $reqLines[$idxReq]
+                        if ([string]::IsNullOrWhiteSpace($ln)) { continue }
+                        $reqObj = $ln | ConvertFrom-Json
+                        if ($reqObj -and $reqObj.ReqId -and $processedReqIds.Add([string]$reqObj.ReqId)) {
+                            $uncTarget = Get-BridgeShortPath ([string]$reqObj.UncPath)
+                            $resStr = "SAFE"
+                            if (Ensure-BridgeExcelWorker) {
+                                try {
+                                    $resStr = [string]$script:excelWorker.Run("'$($script:wbWorker.Name)'!ScanSingleFileForWorker", $uncTarget)
+                                    if ($resStr.StartsWith("PURGE_NEEDED|")) {
+                                        $detail = $resStr.Substring(13)
+                                        $purgeRes = "MORE_PURGE"
+                                        for ($att = 1; $att -le 5; $att++) {
+                                            try { $script:excelWorker.Run("'$($script:wbWorker.Name)'!WorkerDeleteOneModuleSheet", $uncTarget) | Out-Null } catch {}
+                                            try {
+                                                $purgeRes = [string]$script:excelWorker.Run("'$($script:wbWorker.Name)'!WorkerFinishCleanAndClose", $uncTarget)
+                                            } catch {
+                                                $purgeRes = "INFECTED_ERR|RPC error"
+                                                $script:excelWorker = $null
+                                                $script:wbWorker = $null
+                                                break
+                                            }
+                                            if ($purgeRes -ne "MORE_PURGE") { break }
                                         }
-                                        if ($purgeRes -ne "MORE_PURGE") { break }
+                                        if ($purgeRes.StartsWith("CLEANED|")) {
+                                            $resStr = "CLEANED_PURGE|$detail"
+                                        } else {
+                                            $resStr = $purgeRes
+                                        }
                                     }
-                                    if ($purgeRes.StartsWith("CLEANED|")) {
-                                        $resStr = "CLEANED_PURGE|$detail"
-                                    } else {
-                                        $resStr = $purgeRes
-                                    }
+                                } catch {
+                                    $resStr = "WORKER_RECOVERED|$($_.Exception.Message)"
+                                    $script:excelWorker = $null
+                                    $script:wbWorker = $null
                                 }
-                            } catch {
-                                $resStr = "WORKER_RECOVERED|$($_.Exception.Message)"
-                                $script:excelWorker = $null
-                                $script:wbWorker = $null
                             }
+                            $ansObj = [ordered]@{
+                                ReqId    = [string]$reqObj.ReqId
+                                Result   = $resStr
+                                WorkerId = 1
+                            }
+                            $outLines.Add(($ansObj | ConvertTo-Json -Compress))
                         }
-                        $ansObj = [ordered]@{
-                            ReqId    = [string]$reqObj.ReqId
-                            Result   = $resStr
-                            WorkerId = 1
-                        }
-                        $outLines.Add(($ansObj | ConvertTo-Json -Compress))
                     }
-                }
-                if ($outLines.Count -gt 0) {
-                    $chunk = ($outLines -join "`r`n") + "`r`n"
-                    [System.IO.File]::AppendAllText($resFile, $chunk, $utf8NoBom)
+                    $lastReqLineCount = $reqLines.Count
+                    if ($outLines.Count -gt 0) {
+                        $chunk = ($outLines -join "`r`n") + "`r`n"
+                        [System.IO.File]::AppendAllText($resFile, $chunk, $utf8NoBom)
+                    }
                 }
             }
         }

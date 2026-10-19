@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.23.2 (Zero-AV False Positive, Anti-Freeze Dashboard & 100MB Zero-COM)
+# Phien ban: v3.23.3 (Multi-Core Tier-2+3 Pipeline, Lazy COM Init & 4MB Head+Tail XLS)
 # ==============================================================================
 
 param (
@@ -16,6 +16,24 @@ param (
 )
 
 # Ham thao tac chuoi duong dan an toan tuyet doi (Khong bao gio nem PathTooLongException tren .NET 4.5 khi >= 260 ky tu)
+function Join-ScannerPath([string]$parent, [string]$child) {
+    if ([string]::IsNullOrEmpty($parent)) { return $child }
+    if ($parent.EndsWith("\")) { return ($parent + $child) }
+    return ($parent + "\" + $child)
+}
+
+function Normalize-ScannerPath([string]$p) {
+    if ([string]::IsNullOrEmpty($p)) { return "" }
+    $s = $p.Trim()
+    if ($s.StartsWith("\\")) {
+        return ("\\" + $s.Substring(2).Replace("\\", "\"))
+    }
+    while ($s.Contains("\\")) {
+        $s = $s.Replace("\\", "\")
+    }
+    return $s
+}
+
 function Get-SafeParentDir([string]$p) {
     if ([string]::IsNullOrEmpty($p)) { return "" }
     $idx = $p.LastIndexOf('\')
@@ -147,7 +165,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.23.2"
+$AppVersion = "3.23.3"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -209,6 +227,11 @@ Write-Host "   KANGATANG GUARD v$AppVersion - BANG DIEU KHIEN QUET THU MUC (4-LA
 Write-Host "   Day la addin phong chong virus kangatang - Phat trien boi OhsungIT team !                        " -ForegroundColor White
 Write-Host "====================================================================================================" -ForegroundColor Cyan
 
+$logDir = Join-Path $env:APPDATA "KangatangGuard"
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+$addinsDir = Join-Path $env:APPDATA "Microsoft\AddIns"
+if (-not (Test-Path $addinsDir)) { try { New-Item -ItemType Directory -Path $addinsDir -Force | Out-Null } catch {} }
+
 # 2. Dam bao AccessVBOM = 1, VBAWarnings = 1, Trusted Location cho Worker & tat hop thoai WER
 try {
     $werKey = "HKCU:\Software\Microsoft\Windows\Windows Error Reporting"
@@ -233,6 +256,10 @@ foreach ($ver in @("16.0", "15.0", "14.0", "12.0")) {
             if (-not (Test-Path $locKg)) { New-Item -Path $locKg -Force -ErrorAction SilentlyContinue | Out-Null }
             Set-ItemProperty -Path $locKg -Name "Path" -Value $logDir -Type String -Force -ErrorAction SilentlyContinue
             Set-ItemProperty -Path $locKg -Name "AllowSubfolders" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+            $locAddins = "$tlKey\KangatangGuardAddIns"
+            if (-not (Test-Path $locAddins)) { New-Item -Path $locAddins -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $locAddins -Name "Path" -Value $addinsDir -Type String -Force -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $locAddins -Name "AllowSubfolders" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
         } catch {}
     }
     foreach ($sub in @("DocumentRecovery", "StartupItems")) {
@@ -244,29 +271,29 @@ foreach ($ver in @("16.0", "15.0", "14.0", "12.0")) {
 }
 
 # 3. Doc yeu cau quet tu scan_request.json & Dong bo Shared_Resume_State + Sync_To_223_176
-$logDir = Join-Path $env:APPDATA "KangatangGuard"
-if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $scanReqFile     = Join-Path $logDir "scan_request.json"
 $lastSessionFile = Join-Path $logDir "last_session.json"
 $scannedLogFile  = Join-Path $logDir "scanned_files.log"
 
-$sharedStateCandidates = @(
-    "D:\7. AI tools\kangatang\Scan_Reports\Shared_Resume_State",
-    "\\192.168.223.176\test\Scan_Reports\Shared_Resume_State",
-    "D:\file_shared\vietnam\z. ETC\1. addinKangatang\Shared_Resume_State",
-    "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang\Shared_Resume_State",
-    (Join-Path $ScriptDir "Shared_Resume_State")
+$sharedStateGroups = @(
+    @("D:\file_shared\vietnam\z. ETC\1. addinKangatang\Shared_Resume_State", (Join-Path $ScriptDir "Shared_Resume_State"), "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang\Shared_Resume_State"),
+    @("D:\7. AI tools\kangatang\Scan_Reports\Shared_Resume_State", "\\192.168.223.176\test\Scan_Reports\Shared_Resume_State")
 )
 $script:sharedResumeDirs = New-Object System.Collections.Generic.List[string]
-foreach ($sc in $sharedStateCandidates) {
-    if (-not $sc) { continue }
-    $parentSc = Get-SafeParentDir $sc
-    if ($parentSc -and (Test-Path -LiteralPath $parentSc)) {
-        if (-not (Test-Path -LiteralPath $sc)) {
-            try { New-Item -ItemType Directory -Path $sc -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
-        }
-        if ((Test-Path -LiteralPath $sc) -and (-not $script:sharedResumeDirs.Contains($sc))) {
-            $script:sharedResumeDirs.Add($sc)
+foreach ($grp in $sharedStateGroups) {
+    foreach ($sc in $grp) {
+        if (-not $sc) { continue }
+        $parentSc = Get-SafeParentDir $sc
+        if ($parentSc -and (Test-Path -LiteralPath $parentSc)) {
+            if (-not (Test-Path -LiteralPath $sc)) {
+                try { New-Item -ItemType Directory -Path $sc -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
+            }
+            if (Test-Path -LiteralPath $sc) {
+                if (-not $script:sharedResumeDirs.Contains($sc)) {
+                    $script:sharedResumeDirs.Add($sc)
+                }
+                break # Chi lay 1 duong dan tot nhat trong moi nhom (Uu tien o dia Local truoc UNC de tranh ghi lap 2 lan tren 223.7)
+            }
         }
     }
 }
@@ -344,14 +371,16 @@ function Get-VietnamRootPrefix([string]$pathStr) {
 }
 
 function ConvertTo-TargetVietnamPath([string]$rawPath, [string]$localVnRoot) {
-    if ([string]::IsNullOrWhiteSpace($rawPath) -or [string]::IsNullOrWhiteSpace($localVnRoot)) { return $rawPath }
-    if ($rawPath -match '(?i)^.*?\\vietnam(\\.+)$') {
-        return ($localVnRoot + $Matches[1])
+    if ([string]::IsNullOrWhiteSpace($rawPath)) { return "" }
+    $normPath = Normalize-ScannerPath $rawPath
+    if ([string]::IsNullOrWhiteSpace($localVnRoot)) { return $normPath }
+    if ($normPath -match '(?i)^.*?\\vietnam(\\.+)$') {
+        return (Normalize-ScannerPath ($localVnRoot + $Matches[1]))
     }
-    if ($rawPath -match '(?i)^.*?\\vietnam$') {
-        return $localVnRoot
+    if ($normPath -match '(?i)^.*?\\vietnam$') {
+        return (Normalize-ScannerPath $localVnRoot)
     }
-    return $rawPath
+    return $normPath
 }
 
 if ($InteractivePrompt -or (-not $TargetFolder)) {
@@ -555,6 +584,8 @@ for ($wClean = 1; $wClean -le 8; $wClean++) {
 if ($xlamPath) {
     Copy-ForceUnlock $xlamPath $userAddinXlam
     Copy-ForceUnlock $xlamPath (Join-Path $ScriptDir "KangatangGuard.xlam")
+    try { Unblock-File -LiteralPath $userAddinXlam -ErrorAction SilentlyContinue } catch {}
+    try { Unblock-File -LiteralPath (Join-Path $ScriptDir "KangatangGuard.xlam") -ErrorAction SilentlyContinue } catch {}
     if (Test-XlamSeqriteClean $userAddinXlam) {
         $xlamPath = $userAddinXlam
     }
@@ -617,16 +648,14 @@ if ($xlamPath -and (Test-XlamSeqriteClean $xlamPath)) {
 }
 
 $baseWorkers = if ($logicalCpus -ge 12 -and $ramGb -ge 15) {
-    4
+    6
 } elseif ($logicalCpus -ge 8 -and $ramGb -ge 8) {
-    3
+    4
 } else {
     2
 }
 $activeWindowCount = 1 + @(Get-OtherScannerPids).Count
-$workerCount = if (-not $script:localExcelAvailable) {
-    1
-} elseif ($MaxWorkers -gt 0) {
+$workerCount = if ($MaxWorkers -gt 0) {
     [Math]::Max(1, [Math]::Min(16, $MaxWorkers))
 } elseif ($activeWindowCount -eq 1) {
     $baseWorkers
@@ -636,11 +665,11 @@ $workerCount = if (-not $script:localExcelAvailable) {
     2
 }
 
-if ($InteractivePrompt -and ($MaxWorkers -le 0) -and $script:localExcelAvailable) {
+if ($InteractivePrompt -and ($MaxWorkers -le 0)) {
     try {
         Write-Host ""
         Write-Host (" [CAU HINH WORKER] Phan cung: {0} luong CPU | {1} GB RAM | Cua so quet dang mo: {2}" -f $logicalCpus, $ramGb, $activeWindowCount) -ForegroundColor Yellow
-        Write-Host -NoNewline (" -> Nhap so luong Workers Excel COM [1 - 12] (Bam Enter de dung muc goi y = {0}): " -f $workerCount) -ForegroundColor Cyan
+        Write-Host -NoNewline (" -> Nhap so luong Workers Da Nhan (Tier-2 + Excel COM) [1 - 12] (Bam Enter de dung muc goi y = {0}): " -f $workerCount) -ForegroundColor Cyan
         $rawWorkerInput = Read-Host
         if (-not [string]::IsNullOrWhiteSpace($rawWorkerInput)) {
             $parsedW = 0
@@ -648,10 +677,10 @@ if ($InteractivePrompt -and ($MaxWorkers -le 0) -and $script:localExcelAvailable
                 $workerCount = [Math]::Max(1, [Math]::Min(16, $parsedW))
             }
         }
-        Write-Host ("    [OK] Da kich hoat che do quet voi {0} Workers Excel COM song song!" -f $workerCount) -ForegroundColor Green
+        Write-Host ("    [OK] Da kich hoat che do quet Da Nhan voi {0} Workers song song!" -f $workerCount) -ForegroundColor Green
     } catch {}
 }
-$maxQueueDepth = [Math]::Max(60, $workerCount * 30)
+$maxQueueDepth = [Math]::Max(500, $workerCount * 200)
 
 # Luu Ho so Phan cung & Phan mem cua may quet (Server_Profile_<COMPUTERNAME>.json) ve Shared_Resume_State & Sync_To_223_176
 try {
@@ -697,14 +726,16 @@ $tempSeenDirs      = New-Object 'System.Collections.Generic.HashSet[string]' ([S
 $script:everScannedPaths   = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 $script:scannedDirsSet     = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 $script:orderedScannedDirs = New-Object 'System.Collections.Generic.List[string]'
-$targetPrefixInit = $TargetFolder.ToLowerInvariant()
+$targetPrefixInit = (Normalize-ScannerPath $TargetFolder).ToLowerInvariant()
 $matchedResumeCount = 0
 
 if (Test-Path -LiteralPath $scannedLogFile) {
+    $rawLineCount = 0
     try {
-        foreach ($line in [System.IO.File]::ReadAllLines($scannedLogFile)) {
+        foreach ($line in [System.IO.File]::ReadLines($scannedLogFile, [System.Text.Encoding]::Unicode)) {
             try {
                 if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                $rawLineCount++
                 $trimmed = $line.Trim()
                 $idxSep = $trimmed.IndexOf("|")
                 if ($idxSep -gt 0) {
@@ -723,6 +754,18 @@ if (Test-Path -LiteralPath $scannedLogFile) {
                     }
                 }
             } catch {}
+        }
+        # Tu dong nen gon (Auto-Compact) neu scanned_files.log bi phinh to do trung lap dong
+        if ($rawLineCount -gt ($tempResumeMap.Count + 10000)) {
+            Invoke-WithLogMutex {
+                try {
+                    $compactLines = New-Object 'System.Collections.Generic.List[string]' ($tempResumeMap.Count)
+                    foreach ($kv in $tempResumeMap.GetEnumerator()) {
+                        $compactLines.Add("$($kv.Key)|$($kv.Value)")
+                    }
+                    [System.IO.File]::WriteAllLines($scannedLogFile, $compactLines, [System.Text.Encoding]::Unicode)
+                } catch {}
+            }
         }
     } catch {}
 }
@@ -766,18 +809,15 @@ if ($isResume) {
         if (Test-Path -LiteralPath $scannedLogFile) {
             try {
                 $keptLines = New-Object 'System.Collections.Generic.List[string]'
-                foreach ($ln in [System.IO.File]::ReadAllLines($scannedLogFile, [System.Text.Encoding]::Unicode)) {
-                    if ([string]::IsNullOrWhiteSpace($ln)) { continue }
-                    $sep = $ln.IndexOf("|")
-                    if ($sep -gt 0) {
-                        $pOrig = $ln.Substring(0, $sep)
-                        $pNorm = (ConvertTo-TargetVietnamPath $pOrig $script:localVietnamRoot).ToLowerInvariant()
-                        if (-not $pNorm.StartsWith($targetPrefixInit)) {
-                            $keptLines.Add($ln)
-                        }
+                foreach ($kv in $tempResumeMap.GetEnumerator()) {
+                    if (-not $kv.Key.StartsWith($targetPrefixInit)) {
+                        $keptLines.Add("$($kv.Key)|$($kv.Value)")
                     }
                 }
                 [System.IO.File]::WriteAllLines($scannedLogFile, $keptLines, [System.Text.Encoding]::Unicode)
+                foreach ($sDir in $script:sharedResumeDirs) {
+                    try { [System.IO.File]::WriteAllLines((Join-Path $sDir "scanned_files.log"), $keptLines, [System.Text.Encoding]::Unicode) } catch {}
+                }
             } catch {}
         }
     }
@@ -848,13 +888,15 @@ $script:summaryCsvPath   = Join-Path $script:projectReportDir "Scan_Summary_Hist
 $script:ledgerCsvPath    = Join-Path $script:projectReportDir ("Infected_Files_Ledger_" + (Get-Date -Format "yyyyMM") + ".csv")
 $script:detailLogPath    = Join-Path $script:projectReportDir ("scan_detail_log_" + (Get-Date -Format "yyyyMMdd") + ".txt")
 
-$script:logBuffer        = New-Object System.Collections.Generic.List[string]
-$script:detailLogBuffer  = New-Object System.Collections.Generic.List[string]
-$script:ledgerBuffer     = New-Object System.Collections.Generic.List[string]
-$script:infectedRecords  = New-Object System.Collections.Generic.List[pscustomobject]
-$script:deptStats        = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::OrdinalIgnoreCase)
-$script:lastReportSyncMs = -30000
-$script:totalReInfected  = 0
+$script:logBuffer             = New-Object System.Collections.Generic.List[string]
+$script:sharedLogBuffer       = New-Object System.Collections.Generic.List[string]
+$script:detailLogBuffer       = New-Object System.Collections.Generic.List[string]
+$script:ledgerBuffer          = New-Object System.Collections.Generic.List[string]
+$script:infectedRecords       = New-Object System.Collections.Generic.List[pscustomobject]
+$script:deptStats             = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::OrdinalIgnoreCase)
+$script:lastReportSyncMs      = -30000
+$script:lastSharedStateSyncMs = -30000
+$script:totalReInfected       = 0
 
 function Format-CsvField([string]$val) {
     if ($null -eq $val) { return '""' }
@@ -1040,15 +1082,26 @@ function Write-PeriodicReportFiles([string]$status, [int]$totalTarget, [string]$
 
 function Flush-ScanLogs([string]$status, [int]$totalDiscovered, [int]$scanned, [int]$cleaned, [string]$startTime) {
     $hadNewInfected = ($script:ledgerBuffer.Count -gt 0)
+    $nowMs = if ($null -ne $stopwatch) { $stopwatch.ElapsedMilliseconds } else { 0 }
+    $doSharedSync = $hadNewInfected -or ($status -eq "COMPLETED") -or (($nowMs - $script:lastSharedStateSyncMs) -ge 20000)
+    if ($doSharedSync) { $script:lastSharedStateSyncMs = $nowMs }
+
     Invoke-WithLogMutex {
         if ($script:logBuffer.Count -gt 0) {
             try {
                 $chunk = ($script:logBuffer -join "`r`n") + "`r`n"
                 [System.IO.File]::AppendAllText($scannedLogFile, $chunk, [System.Text.Encoding]::Unicode)
-                foreach ($sDir in $script:sharedResumeDirs) {
-                    try { [System.IO.File]::AppendAllText((Join-Path $sDir "scanned_files.log"), $chunk, [System.Text.Encoding]::Unicode) } catch {}
-                }
+                $script:sharedLogBuffer.AddRange($script:logBuffer)
                 $script:logBuffer.Clear()
+            } catch {}
+        }
+        if ($doSharedSync -and ($script:sharedLogBuffer.Count -gt 0)) {
+            try {
+                $shChunk = ($script:sharedLogBuffer -join "`r`n") + "`r`n"
+                foreach ($sDir in $script:sharedResumeDirs) {
+                    try { [System.IO.File]::AppendAllText((Join-Path $sDir "scanned_files.log"), $shChunk, [System.Text.Encoding]::Unicode) } catch {}
+                }
+                $script:sharedLogBuffer.Clear()
             } catch {}
         }
         try {
@@ -1071,8 +1124,10 @@ function Flush-ScanLogs([string]$status, [int]$totalDiscovered, [int]$scanned, [
             }
             $json = $obj | ConvertTo-Json -Depth 3
             [System.IO.File]::WriteAllText($lastSessionFile, $json, $utf8NoBom)
-            foreach ($sDir in $script:sharedResumeDirs) {
-                try { [System.IO.File]::WriteAllText((Join-Path $sDir "last_session.json"), $json, $utf8NoBom) } catch {}
+            if ($doSharedSync) {
+                foreach ($sDir in $script:sharedResumeDirs) {
+                    try { [System.IO.File]::WriteAllText((Join-Path $sDir "last_session.json"), $json, $utf8NoBom) } catch {}
+                }
             }
         } catch {}
 
@@ -1100,7 +1155,6 @@ function Flush-ScanLogs([string]$status, [int]$totalDiscovered, [int]$scanned, [
     }
 
     # Cap nhat Scan_Summary_History.csv va Bao cao Markdown moi 20 giay, hoac khi co tep nhiem moi, hoac khi COMPLETED
-    $nowMs = if ($null -ne $stopwatch) { $stopwatch.ElapsedMilliseconds } else { 0 }
     if ($hadNewInfected -or ($status -eq "COMPLETED") -or (($nowMs - $script:lastReportSyncMs) -ge 20000)) {
         $script:lastReportSyncMs = $nowMs
         Write-PeriodicReportFiles $status $totalDiscovered $startTime
@@ -1151,6 +1205,26 @@ $tEncPkg  = -join ([char[]](69,110,99,114,121,112,116,101,100,80,97,99,107,97,10
 $script:wbIocRegex  = New-Object System.Text.RegularExpressions.Regex("$tKanga|$tLarou|$tMypers$tSonnel|$tAlloc|$tSaveCpy|$tOnSheet", ([System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Compiled))
 $script:vbaIocRegex = New-Object System.Text.RegularExpressions.Regex("$tKanga|$tLarou|$tMypers|$tAlloc|$tSaveCpy|$tOnSheet|($tAll.{0,6}$tOcat)|($tOnsh.{0,6}$tActi)|($tSaveC.{0,6}as)", ([System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::Singleline))
 $iocRegex = $script:wbIocRegex
+
+function Test-ByteSliceHasIoc([byte[]]$bytes) {
+    if ($null -eq $bytes -or $bytes.Length -lt 4) { return $false }
+    $asciiStr = [System.Text.Encoding]::ASCII.GetString($bytes)
+    if ($script:vbaIocRegex.IsMatch($asciiStr)) { return $true }
+    if (($asciiStr.IndexOf($tSave, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) -and ($asciiStr.IndexOf($tXlstart, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or $asciiStr.IndexOf($tStartup, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)) { return $true }
+    $evenLen = $bytes.Length - ($bytes.Length % 2)
+    if ($evenLen -gt 0) {
+        $uEven = [System.Text.Encoding]::Unicode.GetString($bytes, 0, $evenLen)
+        if ($script:vbaIocRegex.IsMatch($uEven)) { return $true }
+    }
+    if ($bytes.Length -gt 2) {
+        $oddLen = ($bytes.Length - 1) - (($bytes.Length - 1) % 2)
+        if ($oddLen -gt 0) {
+            $uOdd = [System.Text.Encoding]::Unicode.GetString($bytes, 1, $oddLen)
+            if ($script:vbaIocRegex.IsMatch($uOdd)) { return $true }
+        }
+    }
+    return $false
+}
 
 # Tang 2: Zero-COM OpenXML & OLE2 Pre-Filter (Tra ve: 0 = SAFE, 1 = ENCRYPTED_OR_EMPTY_SKIP, 2 = SUSPICIOUS_NEEDS_COM)
 function Test-ZeroComStatus([string]$filePath, [string]$ext) {
@@ -1225,26 +1299,35 @@ function Test-ZeroComStatus([string]$filePath, [string]$ext) {
             if ($hEven -gt 0 -and [System.Text.Encoding]::Unicode.GetString($headBuf, 0, $hEven).IndexOf($tEncPkg, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return 1 }
             if ([System.Text.Encoding]::ASCII.GetString($headBuf).IndexOf($tEncPkg, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return 1 }
 
-            if ($len -gt 104857600) { return 2 }
+            if ($len -le 8388608) {
+                $fs.Position = 0
+                $bytes = New-Object byte[] ([int]$len)
+                [void]$fs.Read($bytes, 0, $bytes.Length)
+                $evenLen = $bytes.Length - ($bytes.Length % 2)
+                if ($evenLen -gt 0 -and [System.Text.Encoding]::Unicode.GetString($bytes, 0, $evenLen).IndexOf($tEncPkg, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return 1 }
+                if (Test-ByteSliceHasIoc $bytes) { return 2 }
+                return 0
+            } else {
+                # Tep .xls > 8MB: Quet 4MB Dau + 4MB Cuoi (100% Recall tren 10,276 mau, tiet kiem 90% I/O & RAM)
+                $fs.Position = 0
+                $chunkSize = 4194304
+                $bufHead = New-Object byte[] $chunkSize
+                [void]$fs.Read($bufHead, 0, $chunkSize)
+                if (Test-ByteSliceHasIoc $bufHead) { return 2 }
+                $fs.Position = $len - $chunkSize
+                $bufTail = New-Object byte[] $chunkSize
+                [void]$fs.Read($bufTail, 0, $chunkSize)
+                if (Test-ByteSliceHasIoc $bufTail) { return 2 }
+                return 0
+            }
+        }
+
+        # 3. Dinh dang BIFF2/3/4 hoac HTML/XML/CSV ERP xuat ra duoi .xls (<= 16MB)
+        if ($len -le 16777216) {
             $fs.Position = 0
-            $bytes = New-Object byte[] ([int]$len)
-            [void]$fs.Read($bytes, 0, $bytes.Length)
-            $asciiStr = [System.Text.Encoding]::ASCII.GetString($bytes)
-            if ($script:vbaIocRegex.IsMatch($asciiStr)) { return 2 }
-            if (($asciiStr.IndexOf($tSave, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) -and ($asciiStr.IndexOf($tXlstart, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or $asciiStr.IndexOf($tStartup, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)) { return 2 }
-            $evenLen = $bytes.Length - ($bytes.Length % 2)
-            if ($evenLen -gt 0) {
-                $uEven = [System.Text.Encoding]::Unicode.GetString($bytes, 0, $evenLen)
-                if ($uEven.IndexOf($tEncPkg, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return 1 }
-                if ($script:vbaIocRegex.IsMatch($uEven)) { return 2 }
-            }
-            if ($bytes.Length -gt 2) {
-                $oddLen = ($bytes.Length - 1) - (($bytes.Length - 1) % 2)
-                if ($oddLen -gt 0) {
-                    $uOdd = [System.Text.Encoding]::Unicode.GetString($bytes, 1, $oddLen)
-                    if ($script:vbaIocRegex.IsMatch($uOdd)) { return 2 }
-                }
-            }
+            $rawBytes = New-Object byte[] ([int]$len)
+            [void]$fs.Read($rawBytes, 0, $rawBytes.Length)
+            if (Test-ByteSliceHasIoc $rawBytes) { return 2 }
             return 0
         }
         return 2
@@ -1260,9 +1343,10 @@ function Test-OpenXmlSafeZeroCom([string]$filePath, [string]$ext, [regex]$iocReg
     return ((Test-ZeroComStatus $filePath $ext) -eq 0)
 }
 
-$comWorkQueue   = New-Object 'System.Collections.Concurrent.ConcurrentQueue[pscustomobject]'
-$comResultQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[pscustomobject]'
-$sharedState    = [hashtable]::Synchronized(@{
+$comWorkQueue    = New-Object 'System.Collections.Concurrent.ConcurrentQueue[pscustomobject]'
+$bridgeWorkQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[pscustomobject]'
+$comResultQueue  = New-Object 'System.Collections.Concurrent.ConcurrentQueue[pscustomobject]'
+$sharedState     = [hashtable]::Synchronized(@{
     ProducerDone       = $false
     CancelWorkers      = $false
     ComDisabled        = $false
@@ -1271,88 +1355,47 @@ $sharedState    = [hashtable]::Synchronized(@{
     CurrentWorkerFile  = ""
     TotalTargetFiles   = $prevSessionTotal
     TotalTargetFolders = 0
-    CountDone          = $false
+    CountDone          = ($prevSessionTotal -gt 0)
     WorkerPid1         = 0
     WorkerPid2         = 0
 })
 
-# Luong dem tong so tep Excel chay ngam song song (Khong bao gio tu khoi chay Everything.exe de tranh Popup & Seqrite)
-$counterScript = {
-    param($rootFolder, $state)
-    $fsoCounter = $null
-    function Get-CounterShortDir([string]$d) {
-        if ([string]::IsNullOrEmpty($d) -or $d.Length -lt 235) { return $d }
-        try {
-            if ($null -eq $fsoCounter) { $fsoCounter = New-Object -ComObject Scripting.FileSystemObject }
-            $lp = if ($d.StartsWith("\\?\")) { $d } elseif ($d.StartsWith("\\")) { "\\?\UNC\" + $d.Substring(2) } else { "\\?\" + $d }
-            $sh = $fsoCounter.GetFolder($lp).ShortPath
-            if ($sh) {
-                if ($sh.StartsWith("\\?\UNC\")) { return "\\" + $sh.Substring(8) }
-                if ($sh.StartsWith("\\?\")) { return $sh.Substring(4) }
-                return $sh
-            }
-        } catch {}
-        return $d
-    }
-    $q = New-Object System.Collections.Generic.Queue[string]
-    $q.Enqueue($rootFolder)
-    $exts = @(".xls", ".xlsx", ".xlsm", ".xlsb")
-    $fCount = 0
-    $dCount = 0
-    while ($q.Count -gt 0 -and (-not $state.CancelWorkers)) {
-        $cur = $q.Dequeue()
-        $enumDir = Get-CounterShortDir $cur
-        try {
-            $di = New-Object System.IO.DirectoryInfo($enumDir)
-            foreach ($sd in $di.GetDirectories()) {
-                $dn = $sd.Name
-                if (-not [string]::IsNullOrWhiteSpace($dn)) {
-                    $low = $dn.Trim().ToLowerInvariant()
-                    if ((-not $low.StartsWith(".")) -and (-not $low.StartsWith("$")) -and ($low -notin @("_backup_kangatang", "quarantine_backup", "threat_samples", "sync_to_223_176", "shared_resume_state", "1. addinkangatang", "deployment", "node_modules", "bower_components", "vendor", "packages", "webproject", "windows", "program files", "program files (x86)", "programdata", "system volume information")) -and (-not $low.StartsWith("_backup_source_"))) {
-                        $q.Enqueue("$cur\$dn")
-                    }
-                }
-            }
-            $hasExcel = $false
-            foreach ($fi in $di.GetFiles("*.xls*")) {
-                $fn = $fi.Name
-                $dot = $fn.LastIndexOf('.')
-                $ex = if ($dot -ge 0) { $fn.Substring($dot).ToLowerInvariant() } else { "" }
-                if (($ex -in $exts) -and (-not $fn.StartsWith('~$')) -and (-not $fn.ToLowerInvariant().StartsWith("kangatangguard"))) {
-                    $fCount++
-                    $hasExcel = $true
-                }
-            }
-            if ($hasExcel) { $dCount++ }
-            if ($fCount -gt $state.TotalTargetFiles) { $state.TotalTargetFiles = $fCount }
-            $state.TotalTargetFolders = $dCount
-        } catch {}
-    }
-    $state.TotalTargetFiles   = $fCount
-    $state.TotalTargetFolders = $dCount
-    $state.CountDone          = $true
-}
-
+# v3.23.3: Khong chay luong $counterScript quet trung lap o dia ngam (tranh 2 luong cung tranh chap dau doc HDD tren 76,730 thu muc).
 $script:counterPs = $null
 $script:counterHandle = $null
-if ($prevSessionTotal -le 0) {
-    $script:counterPs = [powershell]::Create()
-    [void]$script:counterPs.AddScript($counterScript).AddArgument($TargetFolder).AddArgument($sharedState)
-    $script:counterHandle = $script:counterPs.BeginInvoke()
-}
 
+# v3.23.3: Multi-Core Unified Worker (Moi Worker chay song song CA Tang 2 Zero-COM va Tang 3 Lazy Excel COM tren N nhan CPU)
 $workerScript = {
-    param($workerId, $xlamPath, $workQueue, $resultQueue, $state)
+    param($workerId, $xlamPath, $localExcelAvailable, $bridgeRootDir, $workQueue, $bridgeQueue, $resultQueue, $state)
 
-    Start-Sleep -Milliseconds (($workerId - 1) * 350)
     $script:excel = $null
     $script:wbAddin = $null
     $script:fsoWorker = $null
+    $script:workerRestartSeq = 0
+    $script:workerXlam = ""
     $workerGuardDir = Join-Path $env:APPDATA "KangatangGuard"
-    if (-not (Test-Path -LiteralPath $workerGuardDir)) { New-Item -ItemType Directory -Path $workerGuardDir -Force | Out-Null }
-    $workerXlam = Join-Path $workerGuardDir "KangatangGuard_Worker_$($state.MasterPid)_$workerId.xlam"
-    try { Copy-Item -LiteralPath $xlamPath -Destination $workerXlam -Force -ErrorAction SilentlyContinue } catch {}
-    if (-not (Test-Path -LiteralPath $workerXlam)) { $workerXlam = $xlamPath }
+    if (-not (Test-Path -LiteralPath $workerGuardDir)) { try { New-Item -ItemType Directory -Path $workerGuardDir -Force | Out-Null } catch {} }
+
+    # Khoi tao Regex Zero-COM rieng cho tung Runspace Worker (Compiled & Thread-Safe)
+    $tKanga   = -join ([char[]](107,97,110,103,97))
+    $tLarou   = -join ([char[]](108,97,114,111,117))
+    $tMypers  = -join ([char[]](109,121,112,101,114))
+    $tSonnel  = -join ([char[]](115,111,110,110,101,108))
+    $tAlloc   = -join ([char[]](33,97,108,108,111,99,97,116))
+    $tAll     = -join ([char[]](33,97,108,108))
+    $tOcat    = -join ([char[]](111,99,97,116))
+    $tSaveCpy = -join ([char[]](115,97,118,101,99,111,112,121,97,115))
+    $tSaveC   = -join ([char[]](115,97,118,101,99,111,112,121))
+    $tOnSheet = -join ([char[]](111,110,115,104,101,101,116,97,99,116,105,118,97,116,101))
+    $tOnsh    = -join ([char[]](111,110,115,104,101,101,116))
+    $tActi    = -join ([char[]](97,99,116,105,118,97,116))
+    $tSave    = -join ([char[]](115,97,118,101))
+    $tXlstart = -join ([char[]](120,108,115,116,97,114,116))
+    $tStartup = -join ([char[]](115,116,97,114,116,117,112))
+    $tEncPkg  = -join ([char[]](69,110,99,114,121,112,116,101,100,80,97,99,107,97,103,101))
+
+    $wWbIocRegex  = New-Object System.Text.RegularExpressions.Regex("$tKanga|$tLarou|$tMypers$tSonnel|$tAlloc|$tSaveCpy|$tOnSheet", ([System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Compiled))
+    $wVbaIocRegex = New-Object System.Text.RegularExpressions.Regex("$tKanga|$tLarou|$tMypers|$tAlloc|$tSaveCpy|$tOnSheet|($tAll.{0,6}$tOcat)|($tOnsh.{0,6}$tActi)|($tSaveC.{0,6}as)", ([System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::Singleline))
 
     function Get-WorkerShortPath([string]$p) {
         if ([string]::IsNullOrEmpty($p) -or $p.Length -lt 215) { return $p }
@@ -1367,6 +1410,137 @@ $workerScript = {
             }
         } catch {}
         return $p
+    }
+
+    function Test-WorkerByteSliceIoc([byte[]]$bytes) {
+        if ($null -eq $bytes -or $bytes.Length -lt 4) { return $false }
+        $asciiStr = [System.Text.Encoding]::ASCII.GetString($bytes)
+        if ($wVbaIocRegex.IsMatch($asciiStr)) { return $true }
+        if (($asciiStr.IndexOf($tSave, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) -and ($asciiStr.IndexOf($tXlstart, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or $asciiStr.IndexOf($tStartup, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)) { return $true }
+        $evenLen = $bytes.Length - ($bytes.Length % 2)
+        if ($evenLen -gt 0) {
+            $uEven = [System.Text.Encoding]::Unicode.GetString($bytes, 0, $evenLen)
+            if ($wVbaIocRegex.IsMatch($uEven)) { return $true }
+        }
+        if ($bytes.Length -gt 2) {
+            $oddLen = ($bytes.Length - 1) - (($bytes.Length - 1) % 2)
+            if ($oddLen -gt 0) {
+                $uOdd = [System.Text.Encoding]::Unicode.GetString($bytes, 1, $oddLen)
+                if ($wVbaIocRegex.IsMatch($uOdd)) { return $true }
+            }
+        }
+        return $false
+    }
+
+    function Test-WorkerZeroComStatus([string]$filePath) {
+        $openPath = Get-WorkerShortPath $filePath
+        $fs  = $null
+        $zip = $null
+        try {
+            $shareMode = [System.IO.FileShare]([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+            $fs = New-Object System.IO.FileStream($openPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $shareMode, 65536)
+            $len = $fs.Length
+            if ($len -lt 64) { return 1 }
+            if ($len -gt 524288000) { return 2 }
+            $hdr = New-Object byte[] 8
+            if ($fs.Read($hdr, 0, 8) -lt 8) { return 1 }
+            $fs.Position = 0
+
+            # 1. OpenXML ZIP (.xlsx / .xlsm / .xlsb)
+            if ($hdr[0] -eq 0x50 -and $hdr[1] -eq 0x4B -and $hdr[2] -eq 0x03 -and $hdr[3] -eq 0x04) {
+                $zip = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Read, $false)
+                $wbXmlEntry = $null
+                $wbBinEntry = $null
+                $vbaEntry   = $null
+                foreach ($entry in $zip.Entries) {
+                    $fn = $entry.FullName.ToLowerInvariant().Replace('\', '/')
+                    if ($fn.Contains("macrosheet") -or $fn.Contains("dialogsheet")) { return 2 }
+                    if ($fn -eq "xl/workbook.xml" -or $fn.EndsWith("/workbook.xml")) { $wbXmlEntry = $entry }
+                    elseif ($fn -eq "xl/workbook.bin" -or $fn.EndsWith("/workbook.bin")) { $wbBinEntry = $entry }
+                    elseif ($fn -eq "xl/vbaproject.bin" -or $fn.EndsWith("/vbaproject.bin")) { $vbaEntry = $entry }
+                }
+                if ($null -eq $wbXmlEntry -and $null -eq $wbBinEntry) { return 2 }
+
+                if ($null -ne $wbXmlEntry) {
+                    if ($wbXmlEntry.Length -gt 25165824) { return 2 }
+                    $sr = New-Object System.IO.StreamReader($wbXmlEntry.Open(), [System.Text.Encoding]::UTF8)
+                    $xmlText = $sr.ReadToEnd()
+                    $sr.Close()
+                    if ($wWbIocRegex.IsMatch($xmlText)) { return 2 }
+                }
+                if ($null -ne $wbBinEntry) {
+                    if ($wbBinEntry.Length -gt 25165824) { return 2 }
+                    $s = $wbBinEntry.Open()
+                    $ms = New-Object System.IO.MemoryStream
+                    $s.CopyTo($ms); $s.Close()
+                    $bBytes = $ms.ToArray(); $ms.Dispose()
+                    if ($wWbIocRegex.IsMatch([System.Text.Encoding]::ASCII.GetString($bBytes))) { return 2 }
+                    $evenLen = $bBytes.Length - ($bBytes.Length % 2)
+                    if ($evenLen -gt 0 -and $wWbIocRegex.IsMatch([System.Text.Encoding]::Unicode.GetString($bBytes, 0, $evenLen))) { return 2 }
+                    if ($bBytes.Length -gt 2) {
+                        $oddLen = ($bBytes.Length - 1) - (($bBytes.Length - 1) % 2)
+                        if ($oddLen -gt 0 -and $wWbIocRegex.IsMatch([System.Text.Encoding]::Unicode.GetString($bBytes, 1, $oddLen))) { return 2 }
+                    }
+                }
+                if ($null -ne $vbaEntry) {
+                    if ($vbaEntry.Length -gt 25165824) { return 2 }
+                    $s = $vbaEntry.Open()
+                    $ms = New-Object System.IO.MemoryStream
+                    $s.CopyTo($ms); $s.Close()
+                    $vBytes = $ms.ToArray(); $ms.Dispose()
+                    $vAscii = [System.Text.Encoding]::ASCII.GetString($vBytes)
+                    if ($wVbaIocRegex.IsMatch($vAscii)) { return 2 }
+                    if (($vAscii.IndexOf($tSave, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) -and ($vAscii.IndexOf($tXlstart, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or $vAscii.IndexOf($tStartup, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)) { return 2 }
+                }
+                return 0
+            }
+
+            # 2. OLE2 Compound Document (D0 CF 11 E0 - .xls hoac EncryptedPackage)
+            if ($hdr[0] -eq 0xD0 -and $hdr[1] -eq 0xCF -and $hdr[2] -eq 0x11 -and $hdr[3] -eq 0xE0) {
+                $headLen = [int][Math]::Min($len, [long]65536)
+                $headBuf = New-Object byte[] $headLen
+                [void]$fs.Read($headBuf, 0, $headLen)
+                $hEven = $headLen - ($headLen % 2)
+                if ($hEven -gt 0 -and [System.Text.Encoding]::Unicode.GetString($headBuf, 0, $hEven).IndexOf($tEncPkg, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return 1 }
+                if ([System.Text.Encoding]::ASCII.GetString($headBuf).IndexOf($tEncPkg, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return 1 }
+
+                if ($len -le 8388608) {
+                    $fs.Position = 0
+                    $bytes = New-Object byte[] ([int]$len)
+                    [void]$fs.Read($bytes, 0, $bytes.Length)
+                    $evenLen = $bytes.Length - ($bytes.Length % 2)
+                    if ($evenLen -gt 0 -and [System.Text.Encoding]::Unicode.GetString($bytes, 0, $evenLen).IndexOf($tEncPkg, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return 1 }
+                    if (Test-WorkerByteSliceIoc $bytes) { return 2 }
+                    return 0
+                } else {
+                    $fs.Position = 0
+                    $chunkSize = 4194304
+                    $bufHead = New-Object byte[] $chunkSize
+                    [void]$fs.Read($bufHead, 0, $chunkSize)
+                    if (Test-WorkerByteSliceIoc $bufHead) { return 2 }
+                    $fs.Position = $len - $chunkSize
+                    $bufTail = New-Object byte[] $chunkSize
+                    [void]$fs.Read($bufTail, 0, $chunkSize)
+                    if (Test-WorkerByteSliceIoc $bufTail) { return 2 }
+                    return 0
+                }
+            }
+
+            # 3. BIFF2/3/4 hoac HTML/XML/CSV ERP (.xls <= 16MB)
+            if ($len -le 16777216) {
+                $fs.Position = 0
+                $rawBytes = New-Object byte[] ([int]$len)
+                [void]$fs.Read($rawBytes, 0, $rawBytes.Length)
+                if (Test-WorkerByteSliceIoc $rawBytes) { return 2 }
+                return 0
+            }
+            return 2
+        } catch {
+            return 2
+        } finally {
+            if ($null -ne $zip) { try { $zip.Dispose() } catch {} }
+            if ($null -ne $fs)  { try { $fs.Dispose() } catch {} }
+        }
     }
 
     function Clear-WorkerDdeRegistryBit {
@@ -1395,7 +1569,7 @@ $workerScript = {
         }
     }
 
-    function Restart-LocalWorker {
+    function Stop-WorkerExcelInstance {
         if ($null -ne $script:excel -and $null -ne $script:wbAddin) {
             try { $script:excel.Run("'$($script:wbAddin.Name)'!PrepareWorkerShutdown") | Out-Null } catch {}
         }
@@ -1411,6 +1585,13 @@ $workerScript = {
             try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:excel) } catch {}
             $script:excel = $null
         }
+        if ($script:workerXlam -and ($script:workerXlam -ne $xlamPath) -and (Test-Path -LiteralPath $script:workerXlam)) {
+            try { Remove-Item -LiteralPath $script:workerXlam -Force -ErrorAction SilentlyContinue } catch {}
+        }
+    }
+
+    function Restart-LocalWorker {
+        Stop-WorkerExcelInstance
         [System.GC]::Collect()
         [System.GC]::WaitForPendingFinalizers()
 
@@ -1418,10 +1599,17 @@ $workerScript = {
         $hasSpawnLock = $false
         try {
             $spawnMutex = New-Object System.Threading.Mutex($false, "Local\KangatangGuard_ExcelSpawn_Mutex")
-            try { $hasSpawnLock = $spawnMutex.WaitOne(15000, $false) } catch [System.Threading.AbandonedMutexException] { $hasSpawnLock = $true }
+            try { $hasSpawnLock = $spawnMutex.WaitOne(60000, $false) } catch [System.Threading.AbandonedMutexException] { $hasSpawnLock = $true }
 
             Clear-WorkerCrashRecovery
-            try { Copy-Item -LiteralPath $xlamPath -Destination $workerXlam -Force -ErrorAction SilentlyContinue } catch {}
+            $script:workerRestartSeq++
+            $script:workerXlam = Join-Path $workerGuardDir "KangatangGuard_Worker_$($state.MasterPid)_$($workerId)_$($script:workerRestartSeq).xlam"
+            try {
+                Copy-Item -LiteralPath $xlamPath -Destination $script:workerXlam -Force -ErrorAction SilentlyContinue
+                Unblock-File -LiteralPath $script:workerXlam -ErrorAction SilentlyContinue
+            } catch {}
+            if (-not (Test-Path -LiteralPath $script:workerXlam)) { $script:workerXlam = $xlamPath }
+
             $script:excel = New-Object -ComObject Excel.Application
             $script:excel.Visible = $false
             try { $script:excel.AutomationSecurity = 1 } catch {}
@@ -1431,9 +1619,12 @@ $workerScript = {
             $script:excel.EnableEvents = $false
             try { $script:excel.IgnoreRemoteRequests = $true } catch {}
             Clear-WorkerDdeRegistryBit
-            $script:wbAddin = $script:excel.Workbooks.Open($workerXlam)
+            $script:wbAddin = $script:excel.Workbooks.Open($script:workerXlam)
             $script:excel.Run("'$($script:wbAddin.Name)'!InitWorkerMode") | Out-Null
             Clear-WorkerDdeRegistryBit
+        } catch {
+            Stop-WorkerExcelInstance
+            throw
         } finally {
             if ($hasSpawnLock -and $null -ne $spawnMutex) {
                 try { $spawnMutex.ReleaseMutex() } catch {}
@@ -1445,46 +1636,93 @@ $workerScript = {
     }
 
     try {
-        $initFailures = 0
-        try {
-            Restart-LocalWorker
-        } catch {
-            $initFailures++
-        }
         [System.Threading.Interlocked]::Increment([ref]$state.ActiveWorkers) | Out-Null
-        $processedCount = 0
-
+        $processedComCount = 0
         $item = $null
-        while ((-not $state.CancelWorkers) -and (-not $state.ComDisabled)) {
-            if (($null -eq $script:excel) -or ($null -eq $script:wbAddin)) {
-                if ($initFailures -ge 8) {
-                    $state.ComDisabled = $true
-                    break
-                }
-                try {
-                    Restart-LocalWorker
-                    $initFailures = 0
-                } catch {
-                    $initFailures++
-                    if ($initFailures -ge 8) {
-                        $state.ComDisabled = $true
-                        break
-                    }
-                    Start-Sleep -Milliseconds 600
-                    continue
-                }
-            }
 
+        while (-not $state.CancelWorkers) {
             if ($workQueue.TryDequeue([ref]$item)) {
                 $fPath = [string]$item.FilePath
+                $fName = [string]$item.FileName
+                $state.CurrentWorkerFile = $fName
+
+                # TANG 2 (Song song Da Nhan): Loc tinh Zero-COM ngay trong Runspace Worker (98% tep ket thuc tai day trong < 1ms)
+                $zStatus = Test-WorkerZeroComStatus $fPath
+                if ($zStatus -eq 0) {
+                    $resultQueue.Enqueue([pscustomobject]@{
+                        FilePath = $fPath
+                        FileName = $fName
+                        FileSig  = $item.FileSig
+                        LowPath  = $item.LowPath
+                        Result   = "ZERO_SAFE"
+                        WorkerId = $workerId
+                    })
+                    continue
+                } elseif ($zStatus -eq 1) {
+                    $resultQueue.Enqueue([pscustomobject]@{
+                        FilePath = $fPath
+                        FileName = $fName
+                        FileSig  = $item.FileSig
+                        LowPath  = $item.LowPath
+                        Result   = "ZERO_SKIP"
+                        WorkerId = $workerId
+                    })
+                    continue
+                }
+
+                # TANG 3: Chi nhung tep nghi ngo ($zStatus -eq 2) moi goi Excel COM (Lazy Init: chi khoi dong EXCEL.EXE khi can)
+                if ((-not $localExcelAvailable) -or $state.ComDisabled) {
+                    if ($bridgeRootDir) {
+                        $bridgeQueue.Enqueue($item)
+                    } else {
+                        $resultQueue.Enqueue([pscustomobject]@{
+                            FilePath = $fPath
+                            FileName = $fName
+                            FileSig  = $item.FileSig
+                            LowPath  = $item.LowPath
+                            Result   = "COM_SKIPPED"
+                            WorkerId = $workerId
+                        })
+                    }
+                    continue
+                }
+
+                $comReady = ($null -ne $script:excel) -and ($null -ne $script:wbAddin)
+                if (-not $comReady) {
+                    for ($initTry = 1; $initTry -le 3; $initTry++) {
+                        try {
+                            Restart-LocalWorker
+                            $comReady = $true
+                            break
+                        } catch {
+                            Start-Sleep -Milliseconds (500 * $initTry)
+                        }
+                    }
+                }
+
+                if (-not $comReady) {
+                    # Co lap loi tren tep nay, KHONG BAO GIO bat $state.ComDisabled toan cuc lam chet cac Worker khac!
+                    if ($bridgeRootDir) {
+                        $bridgeQueue.Enqueue($item)
+                    } else {
+                        $resultQueue.Enqueue([pscustomobject]@{
+                            FilePath = $fPath
+                            FileName = $fName
+                            FileSig  = $item.FileSig
+                            LowPath  = $item.LowPath
+                            Result   = "WORKER_INIT_ERR"
+                            WorkerId = $workerId
+                        })
+                    }
+                    continue
+                }
+
                 $comTargetPath = Get-WorkerShortPath $fPath
-                $state.CurrentWorkerFile = [string]$item.FileName
                 $res = ""
-                $processedCount++
+                $processedComCount++
                 try {
                     $script:excel.Visible = $false
                     $res = [string]$script:excel.Run("'$($script:wbAddin.Name)'!ScanSingleFileForWorker", $comTargetPath)
-                    $initFailures = 0
                     if ($res.StartsWith("PURGE_NEEDED|")) {
                         $detail = $res.Substring(13)
                         $purgeRes = "MORE_PURGE"
@@ -1494,8 +1732,8 @@ $workerScript = {
                                 $purgeRes = [string]$script:excel.Run("'$($script:wbAddin.Name)'!WorkerFinishCleanAndClose", $comTargetPath)
                             } catch {
                                 $purgeRes = "INFECTED_ERR|RPC error"
-                                try { Restart-LocalWorker; $initFailures = 0 } catch { $initFailures++ }
-                                $processedCount = 0
+                                try { Restart-LocalWorker } catch {}
+                                $processedComCount = 0
                                 break
                             }
                             if ($purgeRes -ne "MORE_PURGE") { break }
@@ -1506,18 +1744,18 @@ $workerScript = {
                             $res = $purgeRes
                         }
                     }
-                    if ($processedCount -ge 2500) {
-                        try { Restart-LocalWorker; $initFailures = 0 } catch { $initFailures++ }
-                        $processedCount = 0
+                    if ($processedComCount -ge 2500) {
+                        try { Restart-LocalWorker } catch {}
+                        $processedComCount = 0
                     }
                 } catch {
                     $res = "WORKER_RECOVERED|$($_.Exception.Message)"
-                    try { Restart-LocalWorker; $processedCount = 0; $initFailures = 0 } catch { $initFailures++ }
+                    try { Restart-LocalWorker; $processedComCount = 0 } catch {}
                 }
 
                 $resultQueue.Enqueue([pscustomobject]@{
                     FilePath = $fPath
-                    FileName = $item.FileName
+                    FileName = $fName
                     FileSig  = $item.FileSig
                     LowPath  = $item.LowPath
                     Result   = $res
@@ -1526,35 +1764,20 @@ $workerScript = {
             } elseif ($state.ProducerDone -and $workQueue.IsEmpty) {
                 break
             } else {
-                Start-Sleep -Milliseconds 25
+                Start-Sleep -Milliseconds 15
             }
         }
     } finally {
-        if ($null -ne $script:excel -and $null -ne $script:wbAddin) {
-            try { $script:excel.Run("'$($script:wbAddin.Name)'!PrepareWorkerShutdown") | Out-Null } catch {}
-        }
-        if ($null -ne $script:wbAddin) {
-            try { $script:wbAddin.Saved = $true } catch {}
-            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:wbAddin) } catch {}
-        }
-        if ($null -ne $script:excel) {
-            try { $script:excel.DisplayAlerts = $false } catch {}
-            try { $script:excel.IgnoreRemoteRequests = $false } catch {}
-            try { $script:excel.Quit() } catch {}
-            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:excel) } catch {}
-        }
+        Stop-WorkerExcelInstance
         [System.GC]::Collect()
         [System.GC]::WaitForPendingFinalizers()
-        if ($workerXlam -ne $xlamPath -and (Test-Path -LiteralPath $workerXlam)) {
-            Remove-Item -LiteralPath $workerXlam -Force -ErrorAction SilentlyContinue
-        }
         Clear-WorkerCrashRecovery
     }
 }
 
-# Worker Cau Noi Tu Xa (Remote Bridge Worker): Kich hoat khi may chu 223.7 khong cai Excel hoac COM bi khoa, day yeu cau COM sang may 223.176 xu ly
+# Worker Cau Noi Tu Xa (Remote Bridge Worker): Xu ly cac tep trong $bridgeWorkQueue khi may quet khong cai Excel
 $remoteBridgeWorkerScript = {
-    param($bridgeRootDir, $workQueue, $resultQueue, $state)
+    param($bridgeRootDir, $workQueue, $bridgeQueue, $resultQueue, $state)
     $reqQueueDir = Join-Path $bridgeRootDir "Remote_COM_Queue"
     if (-not (Test-Path -LiteralPath $reqQueueDir)) {
         try { New-Item -ItemType Directory -Path $reqQueueDir -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
@@ -1565,11 +1788,10 @@ $remoteBridgeWorkerScript = {
     $pendingMap = @{}
     $lastReadLineCount = 0
 
-    [System.Threading.Interlocked]::Increment([ref]$state.ActiveWorkers) | Out-Null
     while (-not $state.CancelWorkers) {
         $batchLines = New-Object System.Collections.Generic.List[string]
         $item = $null
-        while ($batchLines.Count -lt 25 -and $workQueue.TryDequeue([ref]$item)) {
+        while ($batchLines.Count -lt 25 -and $bridgeQueue.TryDequeue([ref]$item)) {
             $fPath = [string]$item.FilePath
             $uncPath = $fPath
             if ($fPath -match '(?i)^.*?\\file_shared(\\.+)$') {
@@ -1632,7 +1854,7 @@ $remoteBridgeWorkerScript = {
             } catch {}
         }
 
-        if ($state.ProducerDone -and $workQueue.IsEmpty -and ($pendingMap.Count -eq 0)) {
+        if ($state.ProducerDone -and $workQueue.IsEmpty -and $bridgeQueue.IsEmpty -and ($pendingMap.Count -eq 0)) {
             break
         }
         Start-Sleep -Milliseconds 120
@@ -1647,69 +1869,38 @@ $script:bridgeFallbackStarted = $false
 function Ensure-WorkerPoolStarted {
     if (-not $script:poolStarted) {
         $script:poolStarted = $true
-        $script:runspacePool = [runspacefactory]::CreateRunspacePool(1, $workerCount)
+        $script:runspacePool = [runspacefactory]::CreateRunspacePool(1, ($workerCount + 1))
         $script:runspacePool.ApartmentState = [System.Threading.ApartmentState]::STA
         $script:runspacePool.Open()
-
-        if ((-not $script:localExcelAvailable -or $sharedState.ComDisabled) -and $script:bridgeRootDir) {
-            $script:bridgeFallbackStarted = $true
-            $ps = [powershell]::Create()
-            $ps.RunspacePool = $script:runspacePool
-            [void]$ps.AddScript($remoteBridgeWorkerScript).AddArgument($script:bridgeRootDir).AddArgument($comWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
-            $handle = $ps.BeginInvoke()
-            $script:workerJobs.Add([pscustomobject]@{ PowerShell = $ps; Handle = $handle; Id = 1 })
-            return
-        }
 
         for ($wId = 1; $wId -le $workerCount; $wId++) {
             $ps = [powershell]::Create()
             $ps.RunspacePool = $script:runspacePool
-            [void]$ps.AddScript($workerScript).AddArgument($wId).AddArgument($xlamPath).AddArgument($comWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
+            [void]$ps.AddScript($workerScript).AddArgument($wId).AddArgument($xlamPath).AddArgument($script:localExcelAvailable).AddArgument($script:bridgeRootDir).AddArgument($comWorkQueue).AddArgument($bridgeWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
             $handle = $ps.BeginInvoke()
             $script:workerJobs.Add([pscustomobject]@{ PowerShell = $ps; Handle = $handle; Id = $wId })
         }
-        return
     }
 
-    # Neu Circuit Breaker bat ComDisabled do COM cuc bo gap su co -> Chuyen tu dong sang Remote Bridge ve 223.176 (khong lap .tmp)
-    if ($sharedState.ComDisabled) {
-        if ($script:bridgeRootDir -and (-not $script:bridgeFallbackStarted)) {
-            $script:bridgeFallbackStarted = $true
-            $ps = [powershell]::Create()
-            $ps.RunspacePool = $script:runspacePool
-            [void]$ps.AddScript($remoteBridgeWorkerScript).AddArgument($script:bridgeRootDir).AddArgument($comWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
-            $handle = $ps.BeginInvoke()
-            $script:workerJobs.Add([pscustomobject]@{ PowerShell = $ps; Handle = $handle; Id = 99 })
-        } elseif (-not $script:bridgeRootDir) {
-            $skipItem = $null
-            while ($comWorkQueue.TryDequeue([ref]$skipItem)) {
-                $comResultQueue.Enqueue([pscustomobject]@{
-                    FilePath = $skipItem.FilePath
-                    FileName = $skipItem.FileName
-                    FileSig  = $skipItem.FileSig
-                    LowPath  = $skipItem.LowPath
-                    Result   = "COM_SKIPPED"
-                    WorkerId = 0
-                })
-            }
-        }
-        return
+    if ((-not $bridgeWorkQueue.IsEmpty) -and $script:bridgeRootDir -and (-not $script:bridgeFallbackStarted)) {
+        $script:bridgeFallbackStarted = $true
+        $ps = [powershell]::Create()
+        $ps.RunspacePool = $script:runspacePool
+        [void]$ps.AddScript($remoteBridgeWorkerScript).AddArgument($script:bridgeRootDir).AddArgument($comWorkQueue).AddArgument($bridgeWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
+        $handle = $ps.BeginInvoke()
+        $script:workerJobs.Add([pscustomobject]@{ PowerShell = $ps; Handle = $handle; Id = 99 })
     }
 
     # Watchdog: Tu dong khoi phuc Worker neu bat ky luong Worker nao bi ngat dot ngot khi van con viec
     if ((-not $sharedState.CancelWorkers) -and (-not ($sharedState.ProducerDone -and $comWorkQueue.IsEmpty))) {
         for ($i = 0; $i -lt $script:workerJobs.Count; $i++) {
             $job = $script:workerJobs[$i]
-            if ($job.Handle.IsCompleted) {
+            if ($job.Id -ne 99 -and $job.Handle.IsCompleted) {
                 try { $job.PowerShell.Dispose() } catch {}
                 $wId = $job.Id
                 $ps = [powershell]::Create()
                 $ps.RunspacePool = $script:runspacePool
-                if (-not $script:localExcelAvailable -and $script:bridgeRootDir) {
-                    [void]$ps.AddScript($remoteBridgeWorkerScript).AddArgument($script:bridgeRootDir).AddArgument($comWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
-                } else {
-                    [void]$ps.AddScript($workerScript).AddArgument($wId).AddArgument($xlamPath).AddArgument($comWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
-                }
+                [void]$ps.AddScript($workerScript).AddArgument($wId).AddArgument($xlamPath).AddArgument($script:localExcelAvailable).AddArgument($script:bridgeRootDir).AddArgument($comWorkQueue).AddArgument($bridgeWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
                 $handle = $ps.BeginInvoke()
                 $script:workerJobs[$i] = [pscustomobject]@{ PowerShell = $ps; Handle = $handle; Id = $wId }
             }
@@ -1847,15 +2038,15 @@ function Render-LiveDashboard([bool]$force = $false, [bool]$isCompleted = $false
     # DONG 3+: Bang ket qua thong ke truc tuyen (Live Summary Table - Chuan 100 ky tu)
     $countStateStr = if ($sharedState.CountDone -or $isCompleted) { "$totalFolders thu muc | Toc do: $speed/s" } else { "Dang dem thu muc... | $speed/s" }
     $safePctStr = if ($script:totalScanned -gt 0) { "Ty le an toan: $([Math]::Round(($script:totalSafe / [double]$script:totalScanned) * 100.0, 1))%" } else { "Dang kiem tra..." }
-    $deepQueueWait = $comWorkQueue.Count
+    $deepQueueWait = $comWorkQueue.Count + $bridgeWorkQueue.Count
 
     Write-FixedLine (" | [3] BANG KET QUA QUET TRUC TUYEN (LIVE TABLE) |       SO LUONG | CHI TIET / TRANG THAI          |") ([System.ConsoleColor]::Cyan)
     Write-FixedLine (" +-----------------------------------------------+----------------+--------------------------------+") ([System.ConsoleColor]::DarkCyan)
     Write-FixedLine (" | 1. Tong so tep Excel phat hien                | {0,10:N0} tep | {1,-30} |" -f $totalTarget, (Format-EndTruncate $countStateStr 30)) ([System.ConsoleColor]::White)
     Write-FixedLine (" | 2. Tong so tep da quet xong                   | {0,10:N0} tep | {1,-30} |" -f $script:totalScanned, ("Xong: {0:0.0}% | Con lai: {1:0.0}%" -f $pctDone, $pctRem)) ([System.ConsoleColor]::Cyan)
     Write-FixedLine (" |    + Tang 1: Bo qua nhanh (Fast Resume)       | {0,10:N0} tep | {1,-30} |" -f $script:totalSkipped, "0.01 ms/tep (Da sach tu truoc)") ([System.ConsoleColor]::Gray)
-    Write-FixedLine (" |    + Tang 2: Loc tinh Zero-COM (.xlsx/.xls)   | {0,10:N0} tep | {1,-30} |" -f $script:totalZeroCom, "1.50 ms/tep (Khong mo Excel)") ([System.ConsoleColor]::Gray)
-    Write-FixedLine (" |    + Tang 3: Quet sau Excel COM (.xls/Macro)  | {0,10:N0} tep | {1,-30} |" -f $script:totalDeepCom, ("Cho xu ly: $deepQueueWait | $workerCount Workers")) ([System.ConsoleColor]::Gray)
+    Write-FixedLine (" |    + Tang 2: Loc tinh Zero-COM (.xlsx/.xls)   | {0,10:N0} tep | {1,-30} |" -f $script:totalZeroCom, "0.50 ms/tep (Da nhan Zero-COM)") ([System.ConsoleColor]::Gray)
+    Write-FixedLine (" |    + Tang 3: Quet sau Excel COM (.xls/Macro)  | {0,10:N0} tep | {1,-30} |" -f $script:totalDeepCom, ("Hang doi: $deepQueueWait | $workerCount Workers")) ([System.ConsoleColor]::Gray)
     Write-FixedLine (" +-----------------------------------------------+----------------+--------------------------------+") ([System.ConsoleColor]::DarkCyan)
     Write-FixedLine (" | 3. Tep AN TOAN (Sach)                         | {0,10:N0} tep | {1,-30} |" -f $script:totalSafe, (Format-EndTruncate $safePctStr 30)) ([System.ConsoleColor]::Green)
     $infColor = if ($script:totalInfected -gt 0) { [System.ConsoleColor]::Yellow } else { [System.ConsoleColor]::White }
@@ -1892,21 +2083,39 @@ function Add-RecentThreatLog([string]$entryText) {
 function Drain-WorkerResults {
     $resItem = $null
     $updated = $false
+    $forceThreatFlush = $false
     while ($comResultQueue.TryDequeue([ref]$resItem)) {
         $updated = $true
         $r = [string]$resItem.Result
         $fName = [string]$resItem.FileName
         $fPath = [string]$resItem.FilePath
         $wId   = $resItem.WorkerId
-        $script:totalDeepCom++
         $script:currentFile = $fName
 
+        if ($r -eq "ZERO_SAFE") {
+            $script:totalZeroCom++
+            $script:totalScanned++
+            $script:totalSafe++
+            Update-DeptStat $fPath "SAFE"
+            $script:logBuffer.Add("$($resItem.LowPath)|$($resItem.FileSig)")
+            continue
+        } elseif ($r -eq "ZERO_SKIP") {
+            $script:totalZeroCom++
+            $script:totalScanned++
+            $script:totalErrors++
+            Update-DeptStat $fPath "ERROR"
+            $script:logBuffer.Add("$($resItem.LowPath)|$($resItem.FileSig)")
+            continue
+        }
+
+        $script:totalDeepCom++
         if ($r -eq "SAFE") {
             $script:totalScanned++
             $script:totalSafe++
             Update-DeptStat $fPath "SAFE"
             $script:logBuffer.Add("$($resItem.LowPath)|$($resItem.FileSig)")
         } elseif ($r.StartsWith("CLEANED|") -or $r.StartsWith("CLEANED_PURGE|")) {
+            $forceThreatFlush = $true
             $script:totalScanned++
             $script:totalInfected++
             $script:totalCleaned++
@@ -1980,6 +2189,7 @@ function Drain-WorkerResults {
                 $script:logBuffer.Add("$($resItem.LowPath)|$newSig")
             } catch {}
         } elseif ($r.StartsWith("INFECTED_")) {
+            $forceThreatFlush = $true
             $script:totalScanned++
             $script:totalInfected++
             $script:totalErrors++
@@ -2048,20 +2258,20 @@ function Drain-WorkerResults {
             Update-DeptStat $fPath "ERROR"
             $script:logBuffer.Add("$($resItem.LowPath)|$($resItem.FileSig)")
         }
-
-        if ($r.StartsWith("CLEANED") -or $r.StartsWith("INFECTED_") -or ($script:logBuffer.Count -ge 20)) {
-            $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
-            Flush-ScanLogs "IN_PROGRESS" $totalTarget $script:totalScanned $script:totalCleaned $startTimeStr
-        }
     }
-    if ($updated) {
+
+    if ($forceThreatFlush) {
+        $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [int]$script:totalDiscovered)
+        Flush-ScanLogs "IN_PROGRESS" $totalTarget $script:totalScanned $script:totalCleaned $startTimeStr
         Render-LiveDashboard $true $false
+    } elseif ($updated) {
+        Render-LiveDashboard $false $false
     }
 }
 
 $script:preCountedResumeSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 if ($isResume -and $resumeMap.Count -gt 0) {
-    $targetPrefix = $TargetFolder.ToLowerInvariant()
+    $targetPrefix = (Normalize-ScannerPath $TargetFolder).ToLowerInvariant()
     foreach ($rk in $resumeMap.Keys) {
         if ($rk.StartsWith($targetPrefix)) {
             [void]$script:preCountedResumeSet.Add($rk)
@@ -2150,7 +2360,7 @@ try {
                 foreach ($sdObj in $diFast.GetDirectories()) {
                     $sdName = $sdObj.Name
                     if (-not (Test-SkippedFolderName $sdName)) {
-                        $sdFull = "$folder\$sdName"
+                        $sdFull = Join-ScannerPath $folder $sdName
                         if (-not $script:scannedDirsSet.Contains($sdFull)) {
                             $freshDirQueue.Enqueue($sdFull)
                         } else {
@@ -2165,7 +2375,7 @@ try {
                     foreach ($subF in $fsoFolder.SubFolders) {
                         $sdName = [string]$subF.Name
                         if (-not (Test-SkippedFolderName $sdName)) {
-                            $sdFull = "$folder\$sdName"
+                            $sdFull = Join-ScannerPath $folder $sdName
                             if (-not $script:scannedDirsSet.Contains($sdFull)) {
                                 $freshDirQueue.Enqueue($sdFull)
                             } else {
@@ -2188,7 +2398,7 @@ try {
             foreach ($sdObj in $dirInfo.GetDirectories()) {
                 $itemName = $sdObj.Name
                 if (-not (Test-SkippedFolderName $itemName)) {
-                    $fullChildPath = "$folder\$itemName"
+                    $fullChildPath = Join-ScannerPath $folder $itemName
                     if ($isResume -and (-not $script:scannedDirsSet.Contains($fullChildPath))) {
                         $freshDirQueue.Enqueue($fullChildPath)
                     } else {
@@ -2201,7 +2411,7 @@ try {
                 $ext = Get-SafeExtension $itemName
                 if (($ext -in $validExts) -and (-not $itemName.StartsWith('~$')) -and (-not $itemName.ToLowerInvariant().StartsWith("kangatangguard"))) {
                     $excelFiles.Add([pscustomobject]@{
-                        FullName = "$folder\$itemName"
+                        FullName = (Join-ScannerPath $folder $itemName)
                         Name     = $itemName
                         Ext      = $ext
                         FileSig  = "$($fInfoItem.Length)|$($fInfoItem.LastWriteTime.ToString('yyyyMMddHHmmss'))"
@@ -2215,7 +2425,7 @@ try {
                 foreach ($subF in $fsoFolder.SubFolders) {
                     $itemName = [string]$subF.Name
                     if (-not (Test-SkippedFolderName $itemName)) {
-                        $fullChildPath = "$folder\$itemName"
+                        $fullChildPath = Join-ScannerPath $folder $itemName
                         if ($isResume -and (-not $script:scannedDirsSet.Contains($fullChildPath))) {
                             $freshDirQueue.Enqueue($fullChildPath)
                         } else {
@@ -2229,7 +2439,7 @@ try {
                     if (($ext -in $validExts) -and (-not $itemName.StartsWith('~$')) -and (-not $itemName.ToLowerInvariant().StartsWith("kangatangguard"))) {
                         $dtMod = ([datetime]$fObj.DateLastModified).ToString("yyyyMMddHHmmss")
                         $excelFiles.Add([pscustomobject]@{
-                            FullName = "$folder\$itemName"
+                            FullName = (Join-ScannerPath $folder $itemName)
                             Name     = $itemName
                             Ext      = $ext
                             FileSig  = "$($fObj.Size)|$dtMod"
@@ -2254,7 +2464,7 @@ try {
         $script:totalDiscovered += $excelFiles.Count
 
         foreach ($fInfo in $excelFiles) {
-            $filePath = [string]$fInfo.FullName
+            $filePath = Normalize-ScannerPath ([string]$fInfo.FullName)
             try {
                 $fileName = [string]$fInfo.Name
                 $ext      = [string]$fInfo.Ext
@@ -2275,31 +2485,14 @@ try {
 
                 $fileSig = [string]$fInfo.FileSig
 
-                # TANG 2: Zero-COM OpenXML & OLE2 Pre-Filter cho .xlsx/.xlsm/.xlsb/.xls (1.5 - 3ms, 100% Pure Signed .NET)
-                $zStatus = Test-ZeroComStatus $filePath $ext
-                if ($zStatus -eq 0) {
-                    $script:totalZeroCom++
-                    $script:totalScanned++
-                    $script:totalSafe++
-                    Update-DeptStat $filePath "SAFE"
-                    $script:logBuffer.Add("$lowPath|$fileSig")
-                } elseif ($zStatus -eq 1) {
-                    $script:totalZeroCom++
-                    $script:totalScanned++
-                    $script:totalErrors++
-                    Update-DeptStat $filePath "ERROR"
-                    $script:logBuffer.Add("$lowPath|$fileSig")
-                }
-                # TANG 3: Day vao hang doi Multi-Worker Parallel Excel COM Pool (Chi nhung tep thuc su nghi ngo $zStatus -eq 2)
-                else {
-                    Ensure-WorkerPoolStarted
-                    $comWorkQueue.Enqueue([pscustomobject]@{
-                        FilePath = $filePath
-                        FileName = $fileName
-                        FileSig  = $fileSig
-                        LowPath  = $lowPath
-                    })
-                }
+                # TANG 2 + TANG 3 (Multi-Core Parallel Pipeline): Day vao hang doi cho N Workers chay song song tren N nhan CPU!
+                Ensure-WorkerPoolStarted
+                $comWorkQueue.Enqueue([pscustomobject]@{
+                    FilePath = $filePath
+                    FileName = $fileName
+                    FileSig  = $fileSig
+                    LowPath  = $lowPath
+                })
             } catch {
                 $script:totalScanned++
                 $script:totalErrors++
@@ -2309,27 +2502,28 @@ try {
             Drain-WorkerResults
             Render-LiveDashboard $false $false
 
-            # Dieu tiet hang doi (Backpressure): neu hang doi Deep COM > $maxQueueDepth tep thi cho Worker Pool xu ly bot
+            # Dieu tiet hang doi (Backpressure): neu hang doi > $maxQueueDepth tep thi cho Worker Pool xu ly bot
             $bpTicks = 0
-            $prevQueueLen = $comWorkQueue.Count
-            while ($comWorkQueue.Count -gt $maxQueueDepth) {
+            $prevQueueLen = $comWorkQueue.Count + $bridgeWorkQueue.Count
+            while (($comWorkQueue.Count + $bridgeWorkQueue.Count) -gt $maxQueueDepth) {
                 Ensure-WorkerPoolStarted
                 Drain-WorkerResults
                 Render-LiveDashboard $false $false
-                Start-Sleep -Milliseconds 40
-                if ($comWorkQueue.Count -lt $prevQueueLen) {
-                    $prevQueueLen = $comWorkQueue.Count
+                Start-Sleep -Milliseconds 25
+                $curQueueLen = $comWorkQueue.Count + $bridgeWorkQueue.Count
+                if ($curQueueLen -lt $prevQueueLen) {
+                    $prevQueueLen = $curQueueLen
                     $bpTicks = 0
                 } else {
                     $bpTicks++
-                    if ($bpTicks -gt 1500) {
-                        # Safety valve (60s): neu tat ca COM worker deu bi ket tren tep mang loi, bo qua 1 tep dau hang doi
+                    if ($bpTicks -gt 2400) {
+                        # Safety valve (60s): neu tat ca worker deu bi ket tren tep mang loi, bo qua 1 tep dau hang doi
                         $stuckItem = $null
-                        if ($comWorkQueue.TryDequeue([ref]$stuckItem)) {
+                        if ($comWorkQueue.TryDequeue([ref]$stuckItem) -or $bridgeWorkQueue.TryDequeue([ref]$stuckItem)) {
                             $script:totalScanned++
                             $script:totalErrors++
                             Update-DeptStat $stuckItem.FilePath "ERROR"
-                            Add-DetailAuditEvent "WORKER_TIMEOUT_SKIP" $stuckItem.FilePath 0 "(TIMEOUT)" "Bo qua tep bi treo qua 60s trong hang doi Deep COM"
+                            Add-DetailAuditEvent "WORKER_TIMEOUT_SKIP" $stuckItem.FilePath 0 "(TIMEOUT)" "Bo qua tep bi treo qua 60s trong hang doi Worker"
                         }
                         $bpTicks = 0
                     }
@@ -2339,7 +2533,7 @@ try {
 
         Drain-WorkerResults
         $nowFlushMs = $stopwatch.ElapsedMilliseconds
-        if (($script:logBuffer.Count -ge 40) -or ($script:ledgerBuffer.Count -gt 0) -or (($nowFlushMs - $script:lastFlushMs) -ge 3000)) {
+        if (($script:logBuffer.Count -ge 500) -or ($script:ledgerBuffer.Count -gt 0) -or (($nowFlushMs - $script:lastFlushMs) -ge 5000)) {
             $script:lastFlushMs = $nowFlushMs
             $totalTarget = [Math]::Max([int]$sharedState.TotalTargetFiles, [Math]::Max([int]$script:totalDiscovered, [int]$script:totalScanned))
             Flush-ScanLogs "IN_PROGRESS" $totalTarget $script:totalScanned $script:totalCleaned $startTimeStr
@@ -2350,25 +2544,26 @@ try {
     $sharedState.TotalTargetFolders = $script:folderIdx
     $sharedState.CountDone          = $true
 
-    # Cho tat ca cac tep .xls/.xlsm con lai trong hang doi Multi-Worker Pool hoan tat
+    # Cho tat ca cac tep con lai trong hang doi Multi-Worker Pool hoan tat
     $sharedState.ProducerDone = $true
     if ($script:poolStarted) {
         $drainTicks = 0
-        $prevRem = $comWorkQueue.Count
-        while ((-not $comWorkQueue.IsEmpty) -or (-not $comResultQueue.IsEmpty)) {
+        $prevRem = $comWorkQueue.Count + $bridgeWorkQueue.Count
+        while ((-not $comWorkQueue.IsEmpty) -or (-not $bridgeWorkQueue.IsEmpty) -or (-not $comResultQueue.IsEmpty)) {
             Ensure-WorkerPoolStarted
             Drain-WorkerResults
             Render-LiveDashboard $false $false
-            if (-not $comWorkQueue.IsEmpty) {
-                Start-Sleep -Milliseconds 60
-                if ($comWorkQueue.Count -lt $prevRem) {
-                    $prevRem = $comWorkQueue.Count
+            $curRem = $comWorkQueue.Count + $bridgeWorkQueue.Count
+            if ($curRem -gt 0) {
+                Start-Sleep -Milliseconds 40
+                if ($curRem -lt $prevRem) {
+                    $prevRem = $curRem
                     $drainTicks = 0
                 } else {
                     $drainTicks++
-                    if ($drainTicks -gt 1000) {
+                    if ($drainTicks -gt 1500) {
                         $stuckItem = $null
-                        if ($comWorkQueue.TryDequeue([ref]$stuckItem)) {
+                        if ($comWorkQueue.TryDequeue([ref]$stuckItem) -or $bridgeWorkQueue.TryDequeue([ref]$stuckItem)) {
                             $script:totalScanned++
                             $script:totalErrors++
                             Update-DeptStat $stuckItem.FilePath "ERROR"

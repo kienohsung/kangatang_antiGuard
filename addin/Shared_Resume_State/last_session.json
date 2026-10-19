@@ -1,0 +1,17 @@
+{
+    "TargetFolder":  "D:\\7. AI tools\\kangatang\\addin",
+    "SessionId":  "SCAN_20261019_173510_CM-GA-MRKIENIT1_P36572",
+    "StartTime":  "2026-10-19 17:35:10",
+    "LastUpdate":  "2026-10-19 17:35:10",
+    "Status":  "COMPLETED",
+    "ScannerPid":  36572,
+    "HostName":  "CM-GA-MRKIENIT1",
+    "TotalFiles":  0,
+    "TotalScanned":  0,
+    "TotalSafe":  0,
+    "TotalInfected":  0,
+    "TotalCleaned":  0,
+    "TotalErrors":  0,
+    "ReportDir":  "D:\\7. AI tools\\kangatang\\Scan_Reports",
+    "SessionReportFile":  "D:\\7. AI tools\\kangatang\\Scan_Reports\\Sessions\\Report_SCAN_20261019_173510_CM-GA-MRKIENIT1_P36572_addin.md"
+}

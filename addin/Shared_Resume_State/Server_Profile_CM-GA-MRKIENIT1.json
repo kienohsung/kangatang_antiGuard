@@ -1,0 +1,19 @@
+{
+    "ComputerName":  "CM-GA-MRKIENIT1",
+    "UserName":  "mrKienIT",
+    "Timestamp":  "2026-10-19 17:34:52",
+    "ScannerVersion":  "v3.23.3",
+    "CPU":  "12th Gen Intel(R) Core(TM) i7-12700",
+    "LogicalProcessors":  20,
+    "TotalMemoryGB":  31.8,
+    "OSCaption":  "Microsoft Windows 10 IoT Enterprise LTSC",
+    "OSVersion":  "10.0.19044.0",
+    "PSVersion":  "5.1.19041.7802",
+    "CLRVersion":  "4.0.30319.42000",
+    "ExcelInstalled":  true,
+    "ExcelVersion":  "Excel.Application.16",
+    "WorkerCount":  4,
+    "ActiveWindows":  2,
+    "WorkerMode":  "LOCAL_EXCEL_COM",
+    "TargetFolder":  "D:\\7. AI tools\\kangatang\\addin"
+}
