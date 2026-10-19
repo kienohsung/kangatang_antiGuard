@@ -1,9 +1,9 @@
 @echo off
 REM ============================================================================
-REM KANGATANGGUARD v3.22.2 - STANDALONE 1-CLICK SCANNER
+REM KANGATANGGUARD v3.22.3 - STANDALONE 1-CLICK SCANNER
 REM ============================================================================
 
-title KANGATANGGUARD v3.22.2 - STANDALONE SCANNER
+title KANGATANGGUARD v3.22.3 - STANDALONE SCANNER
 chcp 65001 >nul
 
 pushd "%~dp0"

@@ -17,6 +17,7 @@ Option Explicit
 
 Private Sub Workbook_Open()
     On Error Resume Next
+    If InStr(1, ThisWorkbook.Name, "_HotSwap", vbTextCompare) > 0 Then Exit Sub
     If InStr(1, ThisWorkbook.Name, "_Worker_", vbTextCompare) > 0 Then
         Call InitWorkerMode
         Exit Sub
@@ -35,17 +36,20 @@ Private Sub Workbook_Open()
     End If
     ' v3.16.0: Instant Zero-Spin Startup (< 5ms)
     Call InitializeGuard
-    Application.OnTime Now + TimeValue("00:00:45"), "'" & ThisWorkbook.Name & "'!CheckForLanUpdatesSilent"
+    ' v3.22.3: Auto-check & live hot-swap update sau 2 giay khi mo Excel (khong hoi nguoi dung)
+    Application.OnTime Now + TimeValue("00:00:02"), "'" & ThisWorkbook.Name & "'!CheckForLanUpdatesSilent"
     On Error GoTo 0
 End Sub
 
 Private Sub Workbook_AddinInstall()
     ' v3.16.0: Dam bao khi nguoi dung tick chon hoac Browse -> OK trong Excel Options -> Add-ins
     ' thi Add-in duoc kich hoat tuc thi (< 5ms) khong quay tron va khong tu huy.
+    If InStr(1, ThisWorkbook.Name, "_HotSwap", vbTextCompare) > 0 Then Exit Sub
     Call InitializeGuard
 End Sub
 
 Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    If InStr(1, ThisWorkbook.Name, "_HotSwap", vbTextCompare) > 0 Then Exit Sub
     Call TerminateGuard
 End Sub
 
@@ -151,13 +155,14 @@ Option Explicit
 Private oAppEvents As clsAppEvents
 Public bIsFolderScanning As Boolean
 Private bStartupSweepScheduled As Boolean
+Private bCheckedUpdateInSession As Boolean
 
 ' Scan Cache chong lag: key=UCase(FullName), value=Date
 Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.22.2"
+Public Const CURRENT_VERSION As String = "3.22.3"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -266,6 +271,7 @@ End Sub
 ' ===========================================================================
 Public Sub InitializeGuard()
     On Error Resume Next
+    If InStr(1, ThisWorkbook.Name, "_HotSwap", vbTextCompare) > 0 Then Exit Sub
     If InStr(1, ThisWorkbook.Name, "_Worker_", vbTextCompare) > 0 Then
         Call InitWorkerMode
         Exit Sub
@@ -304,6 +310,16 @@ Public Sub TerminateGuard()
         Call SchedulePostExitVbomFix
         Call RemoveMenu
     End If
+    If Not oAppEvents Is Nothing Then Set oAppEvents.xlApp = Nothing
+    Set oAppEvents = Nothing
+    Set dicScanCache = Nothing
+    bIsFolderScanning = False
+    bStartupSweepScheduled = False
+    On Error GoTo 0
+End Sub
+
+Public Sub PrepareForHotSwapClose()
+    On Error Resume Next
     If Not oAppEvents Is Nothing Then Set oAppEvents.xlApp = Nothing
     Set oAppEvents = Nothing
     Set dicScanCache = Nothing
@@ -2502,14 +2518,15 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
     
     Set wsh = CreateObject("WScript.Shell")
     
-    ' v3.17.1: Rate-limit 1 phut khi chay ngam de moi lan mo lai Excel deu nhan cap nhat tuc thi,
-    ' nhung khong kiem tra lap lai khi mo nhieu file lien tiep trong cung 1 phut!
-    If bSilent Then
-        Dim lastCheck As String
+    ' v3.22.3: Luon kiem tra ngay lan dau tien khi mo phien Excel moi (bCheckedUpdateInSession = False)
+    ' hoac khi InstalledVersion khac CURRENT_VERSION; chi rate-limit 1 phut khi da kiem tra trong cung phien.
+    If bSilent And bCheckedUpdateInSession Then
+        Dim lastCheck As String, regInstVer As String
         On Error Resume Next
         lastCheck = wsh.RegRead("HKCU\Software\KangatangGuard\LastUpdateCheck")
+        regInstVer = wsh.RegRead("HKCU\Software\KangatangGuard\InstalledVersion")
         On Error GoTo UpdateErr
-        If Len(lastCheck) > 0 Then
+        If regInstVer = CURRENT_VERSION And Len(lastCheck) > 0 Then
             If IsDate(lastCheck) Then
                 If DateDiff("n", CDate(lastCheck), Now) < UPDATE_CHECK_MINUTES Then
                     Set wsh = Nothing
@@ -2518,6 +2535,7 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
             End If
         End If
     End If
+    bCheckedUpdateInSession = True
     
     Set fso = CreateObject("Scripting.FileSystemObject")
     
@@ -2583,32 +2601,16 @@ Public Sub CheckForLanUpdates(Optional ByVal bSilent As Boolean = True)
         Exit Sub
     End If
     
-    ' So sanh phien ban
+    ' v3.22.3: Zero-Prompt Auto-Update - Tu dong cap nhat ngay khi co phien ban moi, KHONG hoi nguoi dung
     If IsNewerVersion(serverVer, CURRENT_VERSION) Then
-        Dim promptMsg As String
-        Dim changelog As String
-        changelog = ExtractJsonValue(jsonText, "changelog")
-        
-        promptMsg = Uni("M\u00e1y ch\u1ee7 ph\u00e1t h\u00e0nh phi\u00ean b\u1ea3n M\u1edaI: v") & serverVer & "!" & vbCrLf & _
-                    Uni("(Phi\u00ean b\u1ea3n hi\u1ec7n t\u1ea1i tr\u00ean m\u00e1y b\u1ea1n: v") & CURRENT_VERSION & ")" & vbCrLf & vbCrLf
-        If Len(changelog) > 0 Then
-            promptMsg = promptMsg & Uni("N\u1ed9i dung c\u1eadp nh\u1eadt:") & vbCrLf & changelog & vbCrLf & vbCrLf
-        End If
-        promptMsg = promptMsg & Uni("B\u1ea1n c\u00f3 mu\u1ed1n C\u1eacP NH\u1eacT NGAY kh\u00f4ng?")
-        
-        ' v3.10.0: Ban cap nhat bao mat bat buoc (version.json: "mandatory": true) -> ap dung khong hoi khi chay ngam
-        Dim isMandatory As Boolean
-        isMandatory = (LCase(ExtractJsonValue(jsonText, "mandatory")) = "true")
-        If isMandatory And bSilent Then
-            WriteLog "[UPDATE_MANDATORY] Auto-applying v" & serverVer & " from " & updateSource
-            Call PerformLanUpdate(updateSource, serverVer, True)
-        Else
-            Dim ans As VbMsgBoxResult
-            ans = MsgBoxW(promptMsg, vbYesNo + vbInformation, Uni("KangatangGuard - C\u00f3 phi\u00ean b\u1ea3n m\u1edbi v") & serverVer)
-            If ans = vbYes Then
-                Call PerformLanUpdate(updateSource, serverVer, False)
-            End If
-        End If
+        WriteLog "[AUTO_UPDATE] Auto-applying v" & serverVer & " (current: v" & CURRENT_VERSION & ", silent=" & CStr(bSilent) & ")"
+        On Error Resume Next
+        wsh.RegWrite "HKCU\Software\KangatangGuard\LastUpdateCheck", Format(Now, "yyyy-MM-dd HH:mm:ss"), "REG_SZ"
+        On Error GoTo UpdateErr
+        Set fso = Nothing
+        Set wsh = Nothing
+        Call PerformLanUpdate(updateSource, serverVer, bSilent)
+        Exit Sub
     Else
         If Not bSilent Then
             MsgBoxW Uni("B\u1ea1n \u0111ang s\u1eed d\u1ee5ng phi\u00ean b\u1ea3n M\u1edaI NH\u1ea4T (v") & CURRENT_VERSION & ")!", _
@@ -2767,7 +2769,7 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     End If
     
     ' v3.17.0: Chi sao chep KangatangGuard.xlam, TUYET DOI KHONG sao chep .ps1 vao %APPDATA%
-    Dim srcXlam As String, targetXlam As String, targetPs1 As String
+    Dim srcXlam As String, targetXlam As String, hotSwapXlam As String, targetPs1 As String
     If fso.FileExists(updateSource & "\KangatangGuard_v" & serverVer & ".xlam") Then
         srcXlam = updateSource & "\KangatangGuard_v" & serverVer & ".xlam"
     ElseIf fso.FileExists(updateSource & "\KangatangGuard_latest.xlam") Then
@@ -2776,13 +2778,26 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
         srcXlam = updateSource & "\KangatangGuard.xlam"
     End If
     targetXlam = stagedDir & "\KangatangGuard.xlam"
+    hotSwapXlam = stagedDir & "\KangatangGuard_HotSwap.xlam"
     targetPs1 = stagedDir & "\Kangatang_FolderScanner.ps1"
+    
+    ' Dong KangatangGuard_HotSwap.xlam neu con mo tu lan truoc
+    On Error Resume Next
+    Application.Workbooks("KangatangGuard_HotSwap.xlam").Close SaveChanges:=False
+    Err.Clear
+    On Error GoTo InstallErr
     
     ' Phong thu triet de: Go bo thuoc tinh Read-Only neu ton tai va xoa file cu
     If fso.FileExists(targetXlam) Then
         On Error Resume Next
         fso.GetFile(targetXlam).Attributes = 0
         fso.DeleteFile targetXlam, True
+        On Error GoTo InstallErr
+    End If
+    If fso.FileExists(hotSwapXlam) Then
+        On Error Resume Next
+        fso.GetFile(hotSwapXlam).Attributes = 0
+        fso.DeleteFile hotSwapXlam, True
         On Error GoTo InstallErr
     End If
     If fso.FileExists(targetPs1) Then
@@ -2797,6 +2812,8 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
         fso.CopyFile srcXlam, targetXlam, True
         On Error Resume Next
         If fso.FileExists(targetXlam) Then fso.GetFile(targetXlam).Attributes = 0
+        fso.CopyFile targetXlam, hotSwapXlam, True
+        If fso.FileExists(hotSwapXlam) Then fso.GetFile(hotSwapXlam).Attributes = 0
         On Error GoTo InstallErr
     End If
     
@@ -2814,46 +2831,44 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
         End If
         fso.CopyFile updateSource & "\Kangatang_FolderScanner.ps1", addInsDir & "\Kangatang_FolderScanner.ps1", True
     End If
+    wsh.RegWrite "HKCU\Software\KangatangGuard\PendingHotSwapOldPath", ThisWorkbook.FullName, "REG_SZ"
+    wsh.RegWrite "HKCU\Software\KangatangGuard\PendingHotSwapVersion", serverVer, "REG_SZ"
+    wsh.RegWrite "HKCU\Software\KangatangGuard\PendingHotSwapSilent", IIf(bSilent, "1", "0"), "REG_SZ"
     Err.Clear
     On Error GoTo InstallErr
     
-    ' Tao script ap dung cap nhat ngoai tien trinh (Out-of-Process Updater)
+    ' Tao script ap dung cap nhat du phong ngoai tien trinh (chi dung neu Hot-Swap gap khoa file tu tien trinh khac)
     Dim updaterBat As String
     updaterBat = stagedDir & "\apply_update.cmd"
     
     Dim ts As Object
     Set ts = fso.CreateTextFile(updaterBat, True)
-    ' v3.17.0: Polling nhanh 2 giay, don sach legacy .ps1 trong %APPDATA%\KangatangGuard, assert AccessVBOM
+    ' v3.22.3: Thu copy truc tiep moi giay ngay khi file het bi khoa (khong bi chan boi Excel Worker chay ngam)
     ts.WriteLine "@echo off"
     ts.WriteLine "setlocal"
     ts.WriteLine "set ""LOG=" & guardDir & "\update_apply.log"""
-    ts.WriteLine "echo [%date% %time%] Staged v" & serverVer & ". Waiting for all Excel processes to exit... >> ""%LOG%"""
-    ts.WriteLine "set /a WAITED=0"
-    ts.WriteLine ":WAIT_EXCEL"
-    ts.WriteLine "tasklist /FI ""IMAGENAME eq EXCEL.EXE"" /NH 2>nul | find /I ""EXCEL.EXE"" >nul"
-    ts.WriteLine "if errorlevel 1 goto APPLY"
-    ts.WriteLine "set /a WAITED+=2"
-    ts.WriteLine "if %WAITED% GEQ 60 goto FORCE_CLOSE"
-    ts.WriteLine "ping -n 3 127.0.0.1 >nul"
-    ts.WriteLine "goto WAIT_EXCEL"
-    ts.WriteLine ":FORCE_CLOSE"
-    ts.WriteLine "echo [%date% %time%] Force-closing orphan Excel processes... >> ""%LOG%"""
-    ts.WriteLine "taskkill /F /IM EXCEL.EXE >nul 2>&1"
-    ts.WriteLine "ping -n 3 127.0.0.1 >nul"
-    ts.WriteLine ":APPLY"
-    ts.WriteLine "ping -n 2 127.0.0.1 >nul"
+    ts.WriteLine "echo [%date% %time%] Staged v" & serverVer & ". Waiting for file lock release... >> ""%LOG%"""
     ts.WriteLine "if not exist """ & addInsDir & """ mkdir """ & addInsDir & """ >nul 2>&1"
-    ts.WriteLine "attrib -r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
-    ts.WriteLine "attrib -r """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "attrib -r """ & stagedDir & "\KangatangGuard.xlam"" >nul 2>&1"
-    ts.WriteLine "if exist """ & guardDir & "\Kangatang_FolderScanner.ps1"" (attrib -r """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1 & del /f /q """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1)"
+    ts.WriteLine "set /a WAITED=0"
+    ts.WriteLine ":WAIT_LOCK"
+    ts.WriteLine "attrib -r """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
-    ts.WriteLine "if errorlevel 1 goto FALLBACK_XLSTART"
-    ts.WriteLine "fc /b """ & stagedDir & "\KangatangGuard.xlam"" """ & addInsDir & "\KangatangGuard.xlam"" >nul 2>&1"
-    ts.WriteLine "if errorlevel 1 goto FALLBACK_XLSTART"
-    ts.WriteLine "if exist """ & xlStartDir & "\KangatangGuard.xlam"" del /f /q """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
+    ts.WriteLine "if not errorlevel 1 goto COPIED_OK"
+    ts.WriteLine "set /a WAITED+=1"
+    ts.WriteLine "if %WAITED% GEQ 300 goto FALLBACK_XLSTART"
+    ts.WriteLine "ping -n 2 127.0.0.1 >nul"
+    ts.WriteLine "goto WAIT_LOCK"
+    ts.WriteLine ":COPIED_OK"
+    If Left$(ThisWorkbook.FullName, 2) <> "\\" And InStr(1, ThisWorkbook.FullName, "XLSTART", vbTextCompare) = 0 And LCase$(ThisWorkbook.FullName) <> LCase$(addInsDir & "\KangatangGuard.xlam") Then
+        ts.WriteLine "attrib -r """ & ThisWorkbook.FullName & """ >nul 2>&1"
+        ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & ThisWorkbook.FullName & """ >nul 2>&1"
+    End If
+    ts.WriteLine "if exist """ & guardDir & "\Kangatang_FolderScanner.ps1"" (attrib -r """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1 & del /f /q """ & guardDir & "\Kangatang_FolderScanner.ps1"" >nul 2>&1)"
+    ts.WriteLine "if exist """ & xlStartDir & "\KangatangGuard.xlam"" (attrib -r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1 & del /f /q """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1)"
     ts.WriteLine "goto REG_UPDATE"
     ts.WriteLine ":FALLBACK_XLSTART"
+    ts.WriteLine "attrib -r """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "copy /y """ & stagedDir & "\KangatangGuard.xlam"" """ & xlStartDir & "\KangatangGuard.xlam"" >nul 2>&1"
     ts.WriteLine "if errorlevel 1 goto FAIL"
     ts.WriteLine ":REG_UPDATE"
@@ -2875,29 +2890,166 @@ Public Sub PerformLanUpdate(ByVal updateSource As String, ByVal serverVer As Str
     ts.Close
     Set ts = Nothing
     
-    ' Chay updater script ngam
-    wsh.Run Chr(34) & updaterBat & Chr(34), 0, False
-    
-    WriteLog "[UPDATE_STAGED] v" & serverVer & " from Hub: " & updateSource & " (will apply after Excel exits)"
-    
-    If Not bSilent Then
-        Dim askClose As VbMsgBoxResult
-        askClose = MsgBoxW(Uni("\u0110\u00e3 t\u1ea3i b\u1ea3n c\u1eadp nh\u1eadt v") & serverVer & Uni(" th\u00e0nh c\u00f4ng!" & vbCrLf & vbCrLf & _
-                               "B\u1ea1n c\u00f3 mu\u1ed1n \u0110\u00d3NG EXCEL NGAY B\u00c2Y GI\u1edc \u0111\u1ec3 ho\u00e0n t\u1ea5t c\u1eadp nh\u1eadt kh\u00f4ng?" & vbCrLf & _
-                               "(Ch\u1ecdn 'Yes' \u0111\u1ec3 \u00e1p d\u1ee5ng ngay, ho\u1eb7c 'No' \u0111\u1ec3 t\u1ef1 \u0111\u1ed9ng c\u1eadp nh\u1eadt sau khi b\u1ea1n l\u00e0m vi\u1ec7c xong)."), _
-                           vbYesNo + vbQuestion, Uni("KangatangGuard - C\u1eadp nh\u1eadt th\u00e0nh c\u00f4ng"))
-        If askClose = vbYes Then
-            Application.Quit
-        End If
+    ' v3.22.3: In-Process Live Hot-Swap - Mo KangatangGuard_HotSwap.xlam de thay the nong Add-in ngay trong phien!
+    Dim wbHot As Workbook
+    Set wbHot = Nothing
+    On Error Resume Next
+    If fso.FileExists(hotSwapXlam) Then
+        Set wbHot = Application.Workbooks.Open(hotSwapXlam)
     End If
+    If Not wbHot Is Nothing Then
+        WriteLog "[UPDATE_HOTSWAP] Launching in-process live hot-swap to v" & serverVer
+        Application.OnTime Now, "'" & wbHot.Name & "'!ExecuteInProcessHotSwap"
+    Else
+        WriteLog "[UPDATE_STAGED] Fallback to apply_update.cmd for v" & serverVer
+        wsh.Run Chr(34) & updaterBat & Chr(34), 0, False
+    End If
+    On Error GoTo 0
             
     Set fso = Nothing
     Set wsh = Nothing
     Exit Sub
     
 InstallErr:
-    MsgBoxW Uni("L\u1ed7i khi c\u00e0i \u0111\u1eb7t b\u1ea3n c\u1eadp nh\u1eadt: ") & Err.Description, vbCritical, Uni("KangatangGuard - L\u1ed7i c\u1eadp nh\u1eadt")
+    If Not bSilent Then
+        MsgBoxW Uni("L\u1ed7i khi c\u00e0i \u0111\u1eb7t b\u1ea3n c\u1eadp nh\u1eadt: ") & Err.Description, vbCritical, Uni("KangatangGuard - L\u1ed7i c\u1eadp nh\u1eadt")
+    End If
     On Error GoTo 0
+End Sub
+
+' ===========================================================================
+' v3.22.3: IN-PROCESS LIVE HOT-SWAP UPDATER
+' Chay tu KangatangGuard_HotSwap.xlam:
+'   1. Go kich hoat & dong KangatangGuard.xlam cu ngay trong phien Excel (nha File Handle)
+'   2. Ghi de file moi vao %APPDATA%\Microsoft\AddIns\KangatangGuard.xlam va oldPath
+'   3. Nap lai KangatangGuard.xlam moi tuc thi ma KHONG can dong/mo lai Excel!
+' ===========================================================================
+Public Sub ExecuteInProcessHotSwap()
+    On Error Resume Next
+    Dim fso As Object, wsh As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set wsh = CreateObject("WScript.Shell")
+    
+    Dim oldPath As String, newVer As String, silentFlag As String
+    oldPath = wsh.RegRead("HKCU\Software\KangatangGuard\PendingHotSwapOldPath")
+    newVer = wsh.RegRead("HKCU\Software\KangatangGuard\PendingHotSwapVersion")
+    silentFlag = wsh.RegRead("HKCU\Software\KangatangGuard\PendingHotSwapSilent")
+    Err.Clear
+    
+    Dim addInsDir As String, localAddInFile As String, xlStartFile As String, stagedFile As String
+    addInsDir = Environ("APPDATA") & "\Microsoft\AddIns"
+    If Not fso.FolderExists(addInsDir) Then fso.CreateFolder addInsDir
+    localAddInFile = addInsDir & "\" & ADDIN_NAME
+    xlStartFile = Environ("APPDATA") & "\Microsoft\Excel\XLSTART\" & ADDIN_NAME
+    stagedFile = Environ("APPDATA") & "\KangatangGuard\staged_update\" & ADDIN_NAME
+    If Not fso.FileExists(stagedFile) Then stagedFile = ThisWorkbook.FullName
+    
+    ' 1. Tam tat su kien Excel de dong ban Add-in cu an toan tuc thi
+    Application.EnableEvents = False
+    Application.DisplayAlerts = False
+    
+    Application.Run "'" & ADDIN_NAME & "'!PrepareForHotSwapClose"
+    Err.Clear
+    
+    ' Bo kich hoat AddIn trong Application.AddIns de Excel nha khoa file (File Handle)
+    Dim ai As Object
+    For Each ai In Application.AddIns
+        If InStr(1, ai.Name, "KangatangGuard", vbTextCompare) > 0 Then
+            If LCase$(ai.Name) <> LCase$(ThisWorkbook.Name) Then
+                ai.Installed = False
+            End If
+        End If
+    Next ai
+    Err.Clear
+    
+    ' Dong Workbook KangatangGuard.xlam neu van con trong bo nho
+    Dim wbOld As Workbook
+    Set wbOld = Nothing
+    Set wbOld = Application.Workbooks(ADDIN_NAME)
+    If Not wbOld Is Nothing Then
+        If Not (wbOld Is ThisWorkbook) Then
+            wbOld.Close SaveChanges:=False
+        End If
+    End If
+    Err.Clear
+    
+    ' 2. Ghi de file .xlam moi vao %APPDATA%\Microsoft\AddIns\KangatangGuard.xlam
+    If fso.FileExists(localAddInFile) Then fso.GetFile(localAddInFile).Attributes = 0
+    Err.Clear
+    fso.CopyFile stagedFile, localAddInFile, True
+    Dim bCopyOk As Boolean
+    bCopyOk = (Err.Number = 0)
+    Err.Clear
+    
+    ' Neu oldPath khac localAddInFile (va khong phai UNC / XLSTART), ghi de luon oldPath
+    If Len(oldPath) > 0 And LCase$(oldPath) <> LCase$(localAddInFile) And LCase$(oldPath) <> LCase$(ThisWorkbook.FullName) Then
+        If Left$(oldPath, 2) <> "\\" And InStr(1, oldPath, "XLSTART", vbTextCompare) = 0 Then
+            If fso.FileExists(oldPath) Then fso.GetFile(oldPath).Attributes = 0
+            fso.CopyFile stagedFile, oldPath, True
+            Err.Clear
+        End If
+    End If
+    
+    ' Xoa ban trung lap trong XLSTART neu co
+    If fso.FileExists(xlStartFile) Then
+        fso.GetFile(xlStartFile).Attributes = 0
+        fso.DeleteFile xlStartFile, True
+        Err.Clear
+    End If
+    
+    ' 3. Khoi phuc EnableEvents va nap lai ngay ban Add-in moi trong cung phien Excel!
+    Application.EnableEvents = True
+    
+    For Each ai In Application.AddIns
+        If LCase$(ai.Name) = LCase$(ADDIN_NAME) Then
+            ai.Installed = True
+            Err.Clear
+            Exit For
+        End If
+    Next ai
+    
+    Dim wbNew As Workbook
+    Set wbNew = Nothing
+    Set wbNew = Application.Workbooks(ADDIN_NAME)
+    If wbNew Is Nothing Then
+        If fso.FileExists(localAddInFile) Then
+            Set wbNew = Application.Workbooks.Open(localAddInFile)
+        End If
+    End If
+    If Not wbNew Is Nothing Then
+        Application.Run "'" & wbNew.Name & "'!InitializeGuard"
+        Err.Clear
+    End If
+    
+    If bCopyOk Then
+        If Len(newVer) = 0 Then newVer = CURRENT_VERSION
+        wsh.RegWrite "HKCU\Software\KangatangGuard\InstalledVersion", newVer, "REG_SZ"
+        wsh.RegWrite "HKCU\Software\KangatangGuard\LastUpdateCheck", Format(Now, "yyyy-MM-dd HH:mm:ss"), "REG_SZ"
+        wsh.RegDelete "HKCU\Software\KangatangGuard\PendingHotSwapOldPath"
+        wsh.RegDelete "HKCU\Software\KangatangGuard\PendingHotSwapVersion"
+        wsh.RegDelete "HKCU\Software\KangatangGuard\PendingHotSwapSilent"
+        Err.Clear
+        WriteLog "[HOTSWAP_SUCCESS] Live updated in-process to v" & newVer & " (" & localAddInFile & ")"
+        Call RegisterEndpointHeartbeat
+        
+        If silentFlag = "0" Then
+            MsgBoxW Uni("\u0110\u00e3 t\u1ef1 \u0111\u1ed9ng c\u1eadp nh\u1eadt th\u00e0nh c\u00f4ng KangatangGuard l\u00ean phi\u00ean b\u1ea3n v") & newVer & Uni(" ngay trong phi\u00ean l\u00e0m vi\u1ec7c!"), _
+                    vbInformation, Uni("KangatangGuard v") & newVer & Uni(" - C\u1eadp nh\u1eadt ho\u00e0n t\u1ea5t")
+        End If
+    Else
+        ' Fallback: Neu file bi khoa boi 1 tien trinh EXCEL.EXE khac, kich hoat apply_update.cmd chay ngam
+        Dim updaterBat As String
+        updaterBat = Environ("APPDATA") & "\KangatangGuard\staged_update\apply_update.cmd"
+        If fso.FileExists(updaterBat) Then
+            wsh.Run Chr(34) & updaterBat & Chr(34), 0, False
+        End If
+        WriteLog "[HOTSWAP_DEFERRED] File locked by another process, fallback to apply_update.cmd for v" & newVer
+    End If
+    
+    Application.DisplayAlerts = False
+    Set fso = Nothing
+    Set wsh = Nothing
+    ThisWorkbook.Close SaveChanges:=False
 End Sub
 
 '### END_SECTION: modKangatangScanner ###
@@ -3478,6 +3630,8 @@ End Sub
 ' ===========================================================================
 Public Sub CleanAddInCollisions()
     On Error Resume Next
+    If InStr(1, ThisWorkbook.Name, "_HotSwap", vbTextCompare) > 0 Then Exit Sub
+    If InStr(1, ThisWorkbook.Name, "_Worker_", vbTextCompare) > 0 Then Exit Sub
     Dim reg As Object, fso As Object, wsh As Object
     Set reg = GetObject("winmgmts:\\.\root\default:StdRegProv")
     Set fso = CreateObject("Scripting.FileSystemObject")
@@ -3500,12 +3654,21 @@ Public Sub CleanAddInCollisions()
     
     If LCase$(ThisWorkbook.FullName) <> LCase$(localAddInFile) Then
         If fso.FileExists(ThisWorkbook.FullName) Then
-            If fso.FileExists(localAddInFile) Then fso.GetFile(localAddInFile).Attributes = 0
-            fso.CopyFile ThisWorkbook.FullName, localAddInFile, True
-            If Err.Number = 0 Then
-                WriteLog "[ADDIN_SYNC] Synced local AddIns copy: " & localAddInFile
+            Dim bShouldCopyLocal As Boolean
+            bShouldCopyLocal = Not fso.FileExists(localAddInFile)
+            If Not bShouldCopyLocal Then
+                If fso.GetFile(ThisWorkbook.FullName).DateLastModified > fso.GetFile(localAddInFile).DateLastModified Then
+                    bShouldCopyLocal = True
+                End If
             End If
-            Err.Clear
+            If bShouldCopyLocal Then
+                If fso.FileExists(localAddInFile) Then fso.GetFile(localAddInFile).Attributes = 0
+                fso.CopyFile ThisWorkbook.FullName, localAddInFile, True
+                If Err.Number = 0 Then
+                    WriteLog "[ADDIN_SYNC] Synced local AddIns copy: " & localAddInFile
+                End If
+                Err.Clear
+            End If
         End If
     End If
     

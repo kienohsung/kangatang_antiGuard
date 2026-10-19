@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.22.2 (Zero-AV False Positive, Anti-Freeze Dashboard & 100MB Zero-COM)
+# Phien ban: v3.22.3 (Zero-AV False Positive, Anti-Freeze Dashboard & 100MB Zero-COM)
 # ==============================================================================
 
 param (
@@ -147,7 +147,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.22.2"
+$AppVersion = "3.22.3"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {

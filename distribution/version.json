@@ -1,9 +1,9 @@
 ﻿{
     "local_clone_host":  "CM-GA-MRKIENIT1",
-    "release_timestamp":  "2026-10-19 08:57:11",
+    "release_timestamp":  "2026-10-19 10:11:49",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
     "mandatory":  true,
-    "version":  "3.22.2",
+    "version":  "3.22.3",
     "release_date":  "2026-10-19",
     "local_clone_ip":  "192.168.223.176",
     "files":  {
@@ -12,6 +12,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.22.2 - Bao mat duong dan may chu phan phoi LAN, khoa nut Nhat ky (Log) tren may tram va ho tro chay song song nhieu cua so quet thu muc.",
+    "changelog":  "v3.22.3 - Tu dong cap nhat tuc thi khi mo Excel (In-Process Live Hot-Swap) khong hoi nguoi dung va khong can dong lai Excel.",
     "hub_ip":  "192.168.223.7"
 }

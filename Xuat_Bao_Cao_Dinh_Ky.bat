@@ -1,7 +1,7 @@
 @echo off
-title KangatangGuard v3.22.2 - Xuat Bao Cao Quan Tri Excel Da Sheet (1 Trang A4 Dashboard)
+title KangatangGuard v3.22.3 - Xuat Bao Cao Quan Tri Excel Da Sheet (1 Trang A4 Dashboard)
 echo ======================================================================
-echo    KANGATANG GUARD - TONG HOP & XUAT BAO CAO QUAN TRI EXCEL (v3.22.2)
+echo    KANGATANG GUARD - TONG HOP & XUAT BAO CAO QUAN TRI EXCEL (v3.22.3)
 echo ======================================================================
 echo.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0addin\Sync_ScanReports.ps1"
