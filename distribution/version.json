@@ -1,4 +1,4 @@
-﻿{
+{
     "local_clone_host":  "CM-GA-MRKIENIT1",
     "release_timestamp":  "2026-10-20 00:17:02",
     "hub_unc":  "\\\\192.168.223.7\\file_shared\\vietnam\\z. ETC\\1. addinKangatang",
@@ -12,6 +12,6 @@
                   "xlam":  "KangatangGuard.xlam",
                   "standalone_bat":  "Chay_Diet_Virus_Ngoai.bat"
               },
-    "changelog":  "v3.24.0 - Tang toc quet thu muc (Everything MFT Index + C# Parallel.For Zero-COM Engine cho .xlsx/.xlsm/.xlsb/.xls + Auto-Skip EncryptedPackage).",
+    "changelog":  "v3.24.0 - Tach lan Tier-2/COM, engine Zero-COM doc khoi 32KB (nhanh 3-5x, recall 100%), watchdog Excel theo PID + tu dong dong hop thoai, vaccine XLSTART, Fast Resume so sanh chu ky tep, giam bao nham kangaroo/_laroux.",
     "hub_ip":  "192.168.223.7"
 }
