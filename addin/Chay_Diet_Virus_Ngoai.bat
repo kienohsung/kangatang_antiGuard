@@ -1,15 +1,15 @@
 @echo off
 REM ============================================================================
-REM KANGATANGGUARD v3.23.3 - STANDALONE 1-CLICK SCANNER
+REM KANGATANGGUARD v3.24.0 - STANDALONE 1-CLICK SCANNER
 REM ============================================================================
 
-title KANGATANGGUARD v3.23.3 - STANDALONE SCANNER
+title KANGATANGGUARD v3.24.0 - STANDALONE SCANNER
 chcp 65001 >nul
 
 pushd "%~dp0"
 
 echo ======================================================================
-echo    KANGATANGGUARD v3.23.3 - TRINH DIET VIRUS EXCEL NGOAI (STANDALONE)
+echo    KANGATANGGUARD v3.24.0 - TRINH DIET VIRUS EXCEL NGOAI (STANDALONE)
 echo    Khoi chay bo may diet virus doc lap...
 echo ======================================================================
 echo.

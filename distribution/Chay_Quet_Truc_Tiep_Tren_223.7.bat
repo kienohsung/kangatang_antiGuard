@@ -1,9 +1,9 @@
 @echo off
-title KangatangGuard v3.23.3 - Multi-Window Direct Server Scanner on 223.7 (Log to 223.176)
+title KangatangGuard v3.24.0 - Multi-Window Direct Server Scanner on 223.7 (Log to 223.176)
 pushd "%~dp0"
 
 echo ============================================================================
-echo    KANGATANG GUARD v3.23.3 - MULTI-WINDOW DIRECT SERVER SCANNER (223.7)
+echo    KANGATANG GUARD v3.24.0 - MULTI-WINDOW DIRECT SERVER SCANNER (223.7)
 echo    Turbo Engine: Pure Signed .NET Zero-COM + Multi-Window Isolation
 echo    Developed by OhsungIT Team
 echo ============================================================================
@@ -27,8 +27,8 @@ wmic process where "name='powershell.exe' and commandline like '%%Kangatang_Fold
 if not errorlevel 1 set "HAS_ACTIVE_SCAN=1"
 
 if "%HAS_ACTIVE_SCAN%"=="0" (
-    echo [1/4] No active scan window detected. Cleaning orphan Excel worker processes...
-    taskkill /F /IM excel.exe >nul 2>&1
+    echo [1/4] No active scan window detected. Cleaning orphan automation Excel processes only...
+    wmic process where "name='EXCEL.EXE' and commandline like '%%/automation%%'" call terminate >nul 2>&1
     for %%W in (1 2 3 4 5 6 7 8) do (
         if exist "%GUARD_DIR%\KangatangGuard_Worker_%%W.xlam" del /F /Q "%GUARD_DIR%\KangatangGuard_Worker_%%W.xlam" >nul 2>&1
     )
@@ -73,12 +73,12 @@ if "%HAS_ACTIVE_SCAN%"=="0" (
     )
 )
 
-echo [2/4] Verifying Seqrite-clean v3.23.3 engine and Multi-Window isolation...
+echo [2/4] Verifying Seqrite-clean v3.24.0 engine and Multi-Window isolation...
 echo [3/4] Launching new independent PowerShell Scanner Window...
 echo [4/4] All scan reports, logs, and backups will be synced to 192.168.223.176!
 echo.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -Path '%ADDIN_DIR%\Kangatang_FolderScanner.ps1' -ErrorAction SilentlyContinue; Unblock-File -Path '%ADDIN_DIR%\KangatangGuard.xlam' -ErrorAction SilentlyContinue" >nul 2>&1
-start "KangatangGuard v3.23.3 - Folder Scanner" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%ADDIN_DIR%\Kangatang_FolderScanner.ps1" -InteractivePrompt
+start "KangatangGuard v3.24.0 - Folder Scanner" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%ADDIN_DIR%\Kangatang_FolderScanner.ps1" -InteractivePrompt
 
 popd

@@ -30,3 +30,6 @@ Threat_Samples/
 Quarantine_Backup/
 *.quarantine
 Scan_Reports/
+
+# Local benchmark copies of internal company workbooks (never push to GitHub)
+Bench_Sample/
