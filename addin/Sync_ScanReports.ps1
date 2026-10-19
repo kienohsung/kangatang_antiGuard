@@ -11,7 +11,7 @@ param(
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 $utf8Bom                  = New-Object System.Text.UTF8Encoding($true)
-$AppVersion = "3.21.5"
+$AppVersion = "3.22.0"
 
 Add-Type -AssemblyName System.IO.Compression -ErrorAction SilentlyContinue
 Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue

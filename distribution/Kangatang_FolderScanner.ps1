@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.21.5 (Zero-AV False Positive, Anti-Freeze Dashboard & 100MB Zero-COM)
+# Phien ban: v3.22.0 (Zero-AV False Positive, Anti-Freeze Dashboard & 100MB Zero-COM)
 # ==============================================================================
 
 param (
@@ -62,8 +62,7 @@ function Get-SafeShortPath([string]$p, [switch]$IsDirectory) {
     return $p
 }
 
-# 0. Chot chan Don Tien Trinh Tuyet Doi (Single-Instance Mutex + Active Session Heartbeat)
-# Ngam chan 100% hien tuong tu bat cua so PowerShell thu 2 khi dang quet thu muc
+# 0. Quan ly Da Cua So Song Song (Multi-Window Concurrency & Per-Folder Mutex + Orphan Worker Cleanup)
 $logDir = Join-Path $env:APPDATA "KangatangGuard"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $scanReqFile     = Join-Path $logDir "scan_request.json"
@@ -72,45 +71,67 @@ $scannedLogFile  = Join-Path $logDir "scanned_files.log"
 
 $script:scannerMutex = $null
 $script:hasMutex     = $false
-try {
-    $script:scannerMutex = New-Object System.Threading.Mutex($false, "Local\KangatangGuard_FolderScanner_Mutex")
-    $script:hasMutex = $script:scannerMutex.WaitOne(0, $false)
-} catch {
-    $script:hasMutex = $true
-}
-if (-not $script:hasMutex) {
-    [System.Environment]::Exit(0)
-}
 
-# Kiem tra nhip tim (Heartbeat) trong last_session.json de bao ve ca phien quet cu dang chay
-if (Test-Path -LiteralPath $lastSessionFile) {
+function Get-OtherScannerPids {
+    $pids = New-Object 'System.Collections.Generic.List[int]'
     try {
-        $sessItem = Get-Item -LiteralPath $lastSessionFile -ErrorAction SilentlyContinue
-        $sessMeta = Get-Content -LiteralPath $lastSessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($sessMeta -and ($sessMeta.Status -eq "IN_PROGRESS") -and ((-not $sessMeta.HostName) -or ($sessMeta.HostName -eq $env:COMPUTERNAME))) {
-            $activeOther = $false
-            if ($sessMeta.ScannerPid -and ([int]$sessMeta.ScannerPid -ne $PID)) {
-                $pObj = Get-Process -Id ([int]$sessMeta.ScannerPid) -ErrorAction SilentlyContinue
-                if ($pObj -and ($pObj.ProcessName -match "powershell|pwsh")) {
-                    $activeOther = $true
-                }
-            }
-            if ($activeOther) {
-                if ($script:hasMutex -and ($null -ne $script:scannerMutex)) {
-                    try { $script:scannerMutex.ReleaseMutex(); $script:scannerMutex.Dispose() } catch {}
-                }
-                [System.Environment]::Exit(0)
+        $procs = Get-WmiObject -Class Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue
+        foreach ($pr in $procs) {
+            $pIdVal = [int]$pr.ProcessId
+            $cmdLine = [string]$pr.CommandLine
+            if (($pIdVal -ne $PID) -and ($cmdLine -match "Kangatang_FolderScanner")) {
+                $pids.Add($pIdVal)
             }
         }
     } catch {}
+    return $pids
 }
 
-# Don dep ngay cac tien trinh EXCEL.EXE chay ngam (Zombie Headless Workers) tu phien cu de giai phong khoa file .xlam
-try {
-    Get-Process -Name "EXCEL" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -eq 0 } | ForEach-Object {
-        try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch {}
+function Invoke-WithLogMutex([scriptblock]$Action) {
+    $logMutex = $null
+    $locked   = $false
+    try {
+        $logMutex = New-Object System.Threading.Mutex($false, "Local\KangatangGuard_LogWrite_Mutex")
+        try {
+            $locked = $logMutex.WaitOne(3000, $false)
+        } catch [System.Threading.AbandonedMutexException] {
+            $locked = $true
+        }
+        & $Action
+    } catch {} finally {
+        if ($locked -and ($null -ne $logMutex)) {
+            try { $logMutex.ReleaseMutex() } catch {}
+        }
+        if ($null -ne $logMutex) {
+            try { $logMutex.Dispose() } catch {}
+        }
     }
-    Start-Sleep -Milliseconds 250
+}
+
+# Chi don dep EXCEL.EXE chay ngam mo coi khi KHONG CO cua so Kangatang_FolderScanner nao khac dang chay!
+try {
+    $otherPidsAtStart = @(Get-OtherScannerPids)
+    $alivePidSet = New-Object 'System.Collections.Generic.HashSet[int]'
+    [void]$alivePidSet.Add($PID)
+    foreach ($op in $otherPidsAtStart) { [void]$alivePidSet.Add([int]$op) }
+
+    Get-ChildItem -LiteralPath $logDir -Filter "KangatangGuard_Worker_*.xlam" -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.Name -match '^KangatangGuard_Worker_(\d+)_\d+\.xlam$') {
+            $wOwnerPid = [int]$Matches[1]
+            if (-not $alivePidSet.Contains($wOwnerPid)) {
+                try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue } catch {}
+            }
+        } elseif ($otherPidsAtStart.Count -eq 0) {
+            try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue } catch {}
+        }
+    }
+
+    if ($otherPidsAtStart.Count -eq 0) {
+        Get-Process -Name "EXCEL" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -eq 0 } | ForEach-Object {
+            try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch {}
+        }
+        Start-Sleep -Milliseconds 200
+    }
 } catch {}
 
 try { $null = & cmd.exe /c "chcp 65001 >nul 2>&1" } catch {}
@@ -126,7 +147,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.21.5"
+$AppVersion = "3.22.0"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -135,7 +156,7 @@ if (Test-Path $verJsonPath) {
     } catch {}
 }
 
-$Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion - Bang Dieu Khien Quet Thu Muc (Live Dashboard)"
+$Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion [PID:$PID] - Bang Dieu Khien Quet Thu Muc (Multi-Window)"
 try {
     $rawUI = $Host.UI.RawUI
     $bufSize = $rawUI.BufferSize
@@ -394,6 +415,39 @@ if (-not (Test-Path -LiteralPath $TargetFolder)) {
     exit 1
 }
 
+# Khoa doc quyen THEO TUNG THU MUC (Per-Folder Mutex): Cho phep chay nhieu cua so PowerShell cho nhieu thu muc khac nhau!
+try {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($TargetFolder.ToLowerInvariant()))
+    $sha.Dispose()
+    $folderHash = ([System.BitConverter]::ToString($hashBytes).Replace("-", "")).Substring(0, 16)
+    $script:scannerMutex = New-Object System.Threading.Mutex($false, "Local\KangatangGuard_Folder_$folderHash")
+    try {
+        $script:hasMutex = $script:scannerMutex.WaitOne(0, $false)
+    } catch [System.Threading.AbandonedMutexException] {
+        $script:hasMutex = $true
+    }
+} catch {
+    $script:hasMutex = $true
+}
+if (-not $script:hasMutex) {
+    $dupMsg = "Thu muc nay hien dang duoc quet o mot cua so PowerShell khac:`r`n$TargetFolder`r`n`r`nVui long chon thu muc khac de quet song song!"
+    Write-Host "`n[CANH BAO] $dupMsg" -ForegroundColor Yellow
+    if ($InteractivePrompt) {
+        try {
+            [void][System.Windows.Forms.MessageBox]::Show(
+                $dupMsg,
+                "KangatangGuard v$AppVersion - Thu muc dang duoc quet",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information,
+                [System.Windows.Forms.MessageBoxDefaultButton]::Button1,
+                [System.Windows.Forms.MessageBoxOptions]::DefaultDesktopOnly
+            )
+        } catch {}
+    }
+    exit 0
+}
+
 $script:localVietnamRoot = Get-VietnamRootPrefix $TargetFolder
 
 $prevSessionTotal   = 0
@@ -562,14 +616,22 @@ if ($xlamPath -and (Test-XlamSeqriteClean $xlamPath)) {
     }
 }
 
+$baseWorkers = if ($logicalCpus -ge 12 -and $ramGb -ge 15) {
+    6
+} elseif ($logicalCpus -ge 8 -and $ramGb -ge 8) {
+    4
+} else {
+    2
+}
+$activeWindowCount = 1 + @(Get-OtherScannerPids).Count
 $workerCount = if (-not $script:localExcelAvailable) {
     1
 } elseif ($MaxWorkers -gt 0) {
     $MaxWorkers
-} elseif ($logicalCpus -ge 12 -and $ramGb -ge 15) {
-    6
-} elseif ($logicalCpus -ge 8 -and $ramGb -ge 8) {
-    4
+} elseif ($activeWindowCount -eq 1) {
+    $baseWorkers
+} elseif ($activeWindowCount -eq 2) {
+    [Math]::Max(2, [int][Math]::Floor($baseWorkers / 2))
 } else {
     2
 }
@@ -594,17 +656,20 @@ try {
         ExcelInstalled      = $script:localExcelAvailable
         ExcelVersion        = $excelVerStr
         WorkerCount         = $workerCount
+        ActiveWindows       = $activeWindowCount
         WorkerMode          = $(if ($script:localExcelAvailable) { "LOCAL_EXCEL_COM" } else { "REMOTE_BRIDGE_TO_223_176" })
         TargetFolder        = $TargetFolder
     }
     $hwJson = $hwProfile | ConvertTo-Json -Depth 3
     $profileName = "Server_Profile_$($env:COMPUTERNAME).json"
-    [System.IO.File]::WriteAllText((Join-Path $logDir $profileName), $hwJson, $utf8NoBom)
-    foreach ($sDir in $script:sharedResumeDirs) {
-        try { [System.IO.File]::WriteAllText((Join-Path $sDir $profileName), $hwJson, $utf8NoBom) } catch {}
-    }
-    if ($script:bridgeRootDir) {
-        try { [System.IO.File]::WriteAllText((Join-Path (Join-Path $script:bridgeRootDir "Scan_Reports") $profileName), $hwJson, $utf8NoBom) } catch {}
+    Invoke-WithLogMutex {
+        [System.IO.File]::WriteAllText((Join-Path $logDir $profileName), $hwJson, $utf8NoBom)
+        foreach ($sDir in $script:sharedResumeDirs) {
+            try { [System.IO.File]::WriteAllText((Join-Path $sDir $profileName), $hwJson, $utf8NoBom) } catch {}
+        }
+        if ($script:bridgeRootDir) {
+            try { [System.IO.File]::WriteAllText((Join-Path (Join-Path $script:bridgeRootDir "Scan_Reports") $profileName), $hwJson, $utf8NoBom) } catch {}
+        }
     }
 } catch {}
 
@@ -651,11 +716,11 @@ if ($InteractivePrompt -and (-not $Resume) -and ($matchedResumeCount -gt 0)) {
     try {
         $msgPrompt = "Phat hien $($matchedResumeCount.ToString('N0')) tep Excel da duoc quet an toan truoc do trong thu muc:`r`n$TargetFolder`r`n`r`n" +
                      "- Bam [YES] de TIEP TUC QUET (Ke thua ngay $($matchedResumeCount.ToString('N0')) tep da quet trong 0.1s, chi quet cac tep con lai).`r`n" +
-                     "- Bam [NO] de QUET MOI TU DAU.`r`n`r`n" +
+                     "- Bam [NO] de QUET MOI TU DAU (Chi quet lai thu muc nay, giu nguyen lich su cac thu muc khac).`r`n`r`n" +
                      "(Toan bo Ket qua, Bao cao & Log se tu dong luu ve may 192.168.223.176)"
         $ans = [System.Windows.Forms.MessageBox]::Show(
             $msgPrompt,
-            "KangatangGuard v$AppVersion - Tiep tuc phien quet?",
+            "KangatangGuard v$AppVersion [PID:$PID] - Tiep tuc phien quet?",
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question,
             [System.Windows.Forms.MessageBoxDefaultButton]::Button1,
@@ -680,11 +745,30 @@ if ($isResume) {
 } else {
     $prevSessionCleaned = 0
     $prevSessionStart   = ""
-    try { [System.IO.File]::WriteAllText($scannedLogFile, "", [System.Text.Encoding]::Unicode) } catch {}
+    # Chi xoa cac dong thuoc $TargetFolder khoi scanned_files.log, BAO TOAN 100% lich su cua cac cua so/thu muc khac!
+    Invoke-WithLogMutex {
+        if (Test-Path -LiteralPath $scannedLogFile) {
+            try {
+                $keptLines = New-Object 'System.Collections.Generic.List[string]'
+                foreach ($ln in [System.IO.File]::ReadAllLines($scannedLogFile, [System.Text.Encoding]::Unicode)) {
+                    if ([string]::IsNullOrWhiteSpace($ln)) { continue }
+                    $sep = $ln.IndexOf("|")
+                    if ($sep -gt 0) {
+                        $pOrig = $ln.Substring(0, $sep)
+                        $pNorm = (ConvertTo-TargetVietnamPath $pOrig $script:localVietnamRoot).ToLowerInvariant()
+                        if (-not $pNorm.StartsWith($targetPrefixInit)) {
+                            $keptLines.Add($ln)
+                        }
+                    }
+                }
+                [System.IO.File]::WriteAllLines($scannedLogFile, $keptLines, [System.Text.Encoding]::Unicode)
+            } catch {}
+        }
+    }
 }
 $tempResumeMap = $null
 
-# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.21.5)
+# 5b. He thong Ghi Log Chi Tiet & Xuat Bao Cao Dinh Ky (v3.22.0)
 # Luu truc tiep vao thu muc du an D:\7. AI tools\kangatang\Scan_Reports, hoac \\192.168.223.176\test\Scan_Reports, hoac qua cau noi Sync_To_223_176\Scan_Reports
 $script:projectReportDir = if (Test-Path "D:\7. AI tools\kangatang") {
     "D:\7. AI tools\kangatang\Scan_Reports"
@@ -733,10 +817,12 @@ try {
         Set-ItemProperty -Path $regKeyKg -Name "FirstInstalledDate" -Value $firstInst -Force -ErrorAction SilentlyContinue
     }
     $hbLine = "$macAddr|$ipAddr|$env:COMPUTERNAME|$env:USERNAME|$firstInst|$nowHb|v$AppVersion`r`n"
-    [System.IO.File]::AppendAllText((Join-Path $script:projectReportDir "Endpoint_Heartbeats.log"), $hbLine, [System.Text.Encoding]::Unicode)
+    Invoke-WithLogMutex {
+        [System.IO.File]::AppendAllText((Join-Path $script:projectReportDir "Endpoint_Heartbeats.log"), $hbLine, [System.Text.Encoding]::Unicode)
+    }
 } catch {}
 
-$script:sessionId        = "SCAN_" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_" + $env:COMPUTERNAME
+$script:sessionId        = "SCAN_" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_" + $env:COMPUTERNAME + "_P" + $PID
 $safeLeafName            = ((Get-SafeFileName $TargetFolder) -replace '[^a-zA-Z0-9_\-]', '_')
 if ([string]::IsNullOrWhiteSpace($safeLeafName)) { $safeLeafName = "RootShare" }
 $script:sessionMdName    = "Report_$($script:sessionId)_$safeLeafName.md"
@@ -841,29 +927,31 @@ function Write-PeriodicReportFiles([string]$status, [int]$totalTarget, [string]$
             (Format-CsvField ("Sessions\" + $script:sessionMdName))
         ) -join ",")
 
-        $csvLines = New-Object System.Collections.Generic.List[string]
-        $replaced = $false
-        $sessionPrefix = '"' + $script:sessionId + '",'
-        if (Test-Path -LiteralPath $script:summaryCsvPath) {
-            try {
-                foreach ($ln in [System.IO.File]::ReadAllLines($script:summaryCsvPath, [System.Text.Encoding]::UTF8)) {
-                    if ([string]::IsNullOrWhiteSpace($ln)) { continue }
-                    if ($ln.StartsWith($sessionPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-                        $csvLines.Add($summaryRow)
-                        $replaced = $true
-                    } else {
-                        $csvLines.Add($ln)
+        Invoke-WithLogMutex {
+            $csvLines = New-Object System.Collections.Generic.List[string]
+            $replaced = $false
+            $sessionPrefix = '"' + $script:sessionId + '",'
+            if (Test-Path -LiteralPath $script:summaryCsvPath) {
+                try {
+                    foreach ($ln in [System.IO.File]::ReadAllLines($script:summaryCsvPath, [System.Text.Encoding]::UTF8)) {
+                        if ([string]::IsNullOrWhiteSpace($ln)) { continue }
+                        if ($ln.StartsWith($sessionPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                            $csvLines.Add($summaryRow)
+                            $replaced = $true
+                        } else {
+                            $csvLines.Add($ln)
+                        }
                     }
-                }
-            } catch {}
+                } catch {}
+            }
+            if ($csvLines.Count -eq 0) {
+                $csvLines.Add($summaryHeader)
+            }
+            if (-not $replaced) {
+                $csvLines.Add($summaryRow)
+            }
+            [System.IO.File]::WriteAllLines($script:summaryCsvPath, $csvLines, $utf8Bom)
         }
-        if ($csvLines.Count -eq 0) {
-            $csvLines.Add($summaryHeader)
-        }
-        if (-not $replaced) {
-            $csvLines.Add($summaryRow)
-        }
-        [System.IO.File]::WriteAllLines($script:summaryCsvPath, $csvLines, $utf8Bom)
 
         # 2. Xuat Bao cao Phien quet Chi tiet Markdown (Report_<SessionID>.md & LATEST_SCAN_REPORT.md)
         $pctDone = if ($status -eq "COMPLETED") { 100.0 } elseif ($totalTarget -gt 0) { [Math]::Min(99.9, [Math]::Round(($script:totalScanned / [double]$totalTarget) * 100.0, 1)) } else { 0.0 }
@@ -924,71 +1012,75 @@ function Write-PeriodicReportFiles([string]$status, [int]$totalTarget, [string]$
         }
 
         $mdContent = $md.ToString()
-        [System.IO.File]::WriteAllText($script:sessionMdPath, $mdContent, $utf8Bom)
-        [System.IO.File]::WriteAllText($script:latestMdPath, $mdContent, $utf8Bom)
-        if ($script:localReportDir -ne $script:projectReportDir) {
-            try { [System.IO.File]::WriteAllText((Join-Path $script:localReportDir "LATEST_SCAN_REPORT.md"), $mdContent, $utf8Bom) } catch {}
+        Invoke-WithLogMutex {
+            [System.IO.File]::WriteAllText($script:sessionMdPath, $mdContent, $utf8Bom)
+            [System.IO.File]::WriteAllText($script:latestMdPath, $mdContent, $utf8Bom)
+            if ($script:localReportDir -ne $script:projectReportDir) {
+                try { [System.IO.File]::WriteAllText((Join-Path $script:localReportDir "LATEST_SCAN_REPORT.md"), $mdContent, $utf8Bom) } catch {}
+            }
         }
     } catch {}
 }
 
 function Flush-ScanLogs([string]$status, [int]$totalDiscovered, [int]$scanned, [int]$cleaned, [string]$startTime) {
-    if ($script:logBuffer.Count -gt 0) {
-        try {
-            $chunk = ($script:logBuffer -join "`r`n") + "`r`n"
-            [System.IO.File]::AppendAllText($scannedLogFile, $chunk, [System.Text.Encoding]::Unicode)
-            foreach ($sDir in $script:sharedResumeDirs) {
-                try { [System.IO.File]::AppendAllText((Join-Path $sDir "scanned_files.log"), $chunk, [System.Text.Encoding]::Unicode) } catch {}
-            }
-            $script:logBuffer.Clear()
-        } catch {}
-    }
-    try {
-        $obj = [ordered]@{
-            TargetFolder      = $TargetFolder
-            SessionId         = $script:sessionId
-            StartTime         = $startTime
-            LastUpdate        = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-            Status            = $status
-            ScannerPid        = $PID
-            HostName          = $env:COMPUTERNAME
-            TotalFiles        = $totalDiscovered
-            TotalScanned      = $scanned
-            TotalSafe         = [int]$script:totalSafe
-            TotalInfected     = [int]$script:totalInfected
-            TotalCleaned      = $cleaned
-            TotalErrors       = [int]$script:totalErrors
-            ReportDir         = $script:projectReportDir
-            SessionReportFile = $script:sessionMdPath
-        }
-        $json = $obj | ConvertTo-Json -Depth 3
-        [System.IO.File]::WriteAllText($lastSessionFile, $json, $utf8NoBom)
-        foreach ($sDir in $script:sharedResumeDirs) {
-            try { [System.IO.File]::WriteAllText((Join-Path $sDir "last_session.json"), $json, $utf8NoBom) } catch {}
-        }
-    } catch {}
-
-    # Ghi lo su kien chi tiet ra Scan_Reports\scan_detail_log_YYYYMMDD.txt
-    if ($script:detailLogBuffer.Count -gt 0) {
-        try {
-            $dChunk = ($script:detailLogBuffer -join "`r`n") + "`r`n"
-            [System.IO.File]::AppendAllText($script:detailLogPath, $dChunk, $utf8Bom)
-            $script:detailLogBuffer.Clear()
-        } catch {}
-    }
-
-    # Ghi lo so cai tep nhiem ra Scan_Reports\Infected_Files_Ledger_YYYYMM.csv
     $hadNewInfected = ($script:ledgerBuffer.Count -gt 0)
-    if ($hadNewInfected) {
+    Invoke-WithLogMutex {
+        if ($script:logBuffer.Count -gt 0) {
+            try {
+                $chunk = ($script:logBuffer -join "`r`n") + "`r`n"
+                [System.IO.File]::AppendAllText($scannedLogFile, $chunk, [System.Text.Encoding]::Unicode)
+                foreach ($sDir in $script:sharedResumeDirs) {
+                    try { [System.IO.File]::AppendAllText((Join-Path $sDir "scanned_files.log"), $chunk, [System.Text.Encoding]::Unicode) } catch {}
+                }
+                $script:logBuffer.Clear()
+            } catch {}
+        }
         try {
-            if (-not (Test-Path -LiteralPath $script:ledgerCsvPath)) {
-                $ledgerHeader = "Timestamp,SessionID,ComputerName,UserName,TopDepartmentFolder,FileName,FullPath,FileSizeKB,LastModified,VirusDetail,ActionStatus,BackupNote`r`n"
-                [System.IO.File]::WriteAllText($script:ledgerCsvPath, $ledgerHeader, $utf8Bom)
+            $obj = [ordered]@{
+                TargetFolder      = $TargetFolder
+                SessionId         = $script:sessionId
+                StartTime         = $startTime
+                LastUpdate        = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+                Status            = $status
+                ScannerPid        = $PID
+                HostName          = $env:COMPUTERNAME
+                TotalFiles        = $totalDiscovered
+                TotalScanned      = $scanned
+                TotalSafe         = [int]$script:totalSafe
+                TotalInfected     = [int]$script:totalInfected
+                TotalCleaned      = $cleaned
+                TotalErrors       = [int]$script:totalErrors
+                ReportDir         = $script:projectReportDir
+                SessionReportFile = $script:sessionMdPath
             }
-            $lChunk = ($script:ledgerBuffer -join "`r`n") + "`r`n"
-            [System.IO.File]::AppendAllText($script:ledgerCsvPath, $lChunk, $utf8Bom)
-            $script:ledgerBuffer.Clear()
+            $json = $obj | ConvertTo-Json -Depth 3
+            [System.IO.File]::WriteAllText($lastSessionFile, $json, $utf8NoBom)
+            foreach ($sDir in $script:sharedResumeDirs) {
+                try { [System.IO.File]::WriteAllText((Join-Path $sDir "last_session.json"), $json, $utf8NoBom) } catch {}
+            }
         } catch {}
+
+        # Ghi lo su kien chi tiet ra Scan_Reports\scan_detail_log_YYYYMMDD.txt
+        if ($script:detailLogBuffer.Count -gt 0) {
+            try {
+                $dChunk = ($script:detailLogBuffer -join "`r`n") + "`r`n"
+                [System.IO.File]::AppendAllText($script:detailLogPath, $dChunk, $utf8Bom)
+                $script:detailLogBuffer.Clear()
+            } catch {}
+        }
+
+        # Ghi lo so cai tep nhiem ra Scan_Reports\Infected_Files_Ledger_YYYYMM.csv
+        if ($hadNewInfected) {
+            try {
+                if (-not (Test-Path -LiteralPath $script:ledgerCsvPath)) {
+                    $ledgerHeader = "Timestamp,SessionID,ComputerName,UserName,TopDepartmentFolder,FileName,FullPath,FileSizeKB,LastModified,VirusDetail,ActionStatus,BackupNote`r`n"
+                    [System.IO.File]::WriteAllText($script:ledgerCsvPath, $ledgerHeader, $utf8Bom)
+                }
+                $lChunk = ($script:ledgerBuffer -join "`r`n") + "`r`n"
+                [System.IO.File]::AppendAllText($script:ledgerCsvPath, $lChunk, $utf8Bom)
+                $script:ledgerBuffer.Clear()
+            } catch {}
+        }
     }
 
     # Cap nhat Scan_Summary_History.csv va Bao cao Markdown moi 20 giay, hoac khi co tep nhiem moi, hoac khi COMPLETED
@@ -1625,7 +1717,7 @@ function Render-LiveDashboard([bool]$force = $false, [bool]$isCompleted = $false
     }
 
     try {
-        $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion ($workerCount Workers) | Tien do: $($pctDone.ToString('0.0'))% (Con lai: $($pctRem.ToString('0.0'))%) | Da quet: $($script:totalScanned)/$totalTarget | Da diet: $($script:totalCleaned)"
+        $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion [PID:$PID | $workerCount Workers] | Tien do: $($pctDone.ToString('0.0'))% (Con lai: $($pctRem.ToString('0.0'))%) | Da quet: $($script:totalScanned)/$totalTarget | Da diet: $($script:totalCleaned)"
     } catch {}
 
     # Dat con tro an toan: KHONG BAO GIO tat vinh vien $script:canSetCursor khi nguoi dung keo/thu nho cua so Console!
@@ -2216,11 +2308,11 @@ try {
 
     Add-DetailAuditEvent "SESSION_COMPLETED" $TargetFolder 0 "(ALL)" "Hoan tat trong ${totalSec}s: Scanned=$($script:totalScanned), Infected=$($script:totalInfected), Cleaned=$($script:totalCleaned), Errors=$($script:totalErrors)"
     Flush-ScanLogs "COMPLETED" $script:totalDiscovered $script:totalScanned $script:totalCleaned $startTimeStr
-    $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion - HOAN TAT ($totalSec giay) | Da quet: $($script:totalScanned) | Da diet: $($script:totalCleaned)"
+    $Host.UI.RawUI.WindowTitle = "KangatangGuard v$AppVersion [PID:$PID] - HOAN TAT ($totalSec giay) | Da quet: $($script:totalScanned) | Da diet: $($script:totalCleaned)"
     Write-Host "`n   [HOAN TAT] Qua trinh quet thu muc da ket thuc trong $totalSec giay!" -ForegroundColor Green
     Write-Host "   [BAO CAO]  $($script:latestMdPath)" -ForegroundColor Cyan
 
-    # v3.21.5: Tu dong dong bo va xuat Bao cao Quan tri Excel 6 Sheets (1-Page A4 Dashboard)
+    # v3.22.0: Tu dong dong bo va xuat Bao cao Quan tri Excel 6 Sheets (1-Page A4 Dashboard)
     $syncReportScript = Join-Path $PSScriptRoot "Sync_ScanReports.ps1"
     if (Test-Path -LiteralPath $syncReportScript) {
         try {
@@ -2250,6 +2342,11 @@ try {
     if ($null -ne $script:runspacePool) {
         try { $script:runspacePool.Close(); $script:runspacePool.Dispose() } catch {}
     }
+    try {
+        Get-ChildItem -LiteralPath $logDir -Filter "KangatangGuard_Worker_$($PID)_*.xlam" -ErrorAction SilentlyContinue | ForEach-Object {
+            try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue } catch {}
+        }
+    } catch {}
     if ($script:hasMutex -and ($null -ne $script:scannerMutex)) {
         try { $script:scannerMutex.ReleaseMutex(); $script:scannerMutex.Dispose() } catch {}
     }

@@ -157,7 +157,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.21.5"
+Public Const CURRENT_VERSION As String = "3.22.0"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -749,16 +749,8 @@ End Function
 Public Sub LaunchBackgroundScanner(ByVal folderPath As String, Optional ByVal bResume As Boolean = False, Optional ByVal bForce As Boolean = False)
     On Error GoTo LaunchErr
     
-    If IsScannerCurrentlyRunning() Then
-        On Error Resume Next
-        AppActivate "KangatangGuard"
-        On Error GoTo LaunchErr
-        WriteLog "[SCANNER_ALREADY_ACTIVE] Skipped duplicate PowerShell launch for: " & folderPath
-        If bForce Then
-            MsgBoxW Uni("Tr\u00ecnh qu\u00e9t th\u01b0 m\u1ee5c KangatangGuard hi\u1ec7n \u0111ang ch\u1ea1y!" & vbCrLf & vbCrLf & _
-                        "\u0110\u1ec3 tr\u00e1nh xung \u0111\u1ed9t, h\u1ec7 th\u1ed1ng gi\u1eef nguy\u00ean c\u1eeda s\u1ed5 PowerShell \u0111ang ho\u1ea1t \u0111\u1ed9ng."), _
-                    vbInformation, Uni("KangatangGuard v") & CURRENT_VERSION
-        End If
+    If Not bForce And IsScannerCurrentlyRunning() Then
+        WriteLog "[SCANNER_ALREADY_ACTIVE] Skipped auto PowerShell launch for: " & folderPath
         Exit Sub
     End If
     
@@ -820,7 +812,8 @@ Public Sub LaunchBackgroundScanner(ByVal folderPath As String, Optional ByVal bR
     If Not fso.FileExists(psExe) Then psExe = "powershell.exe"
     
     Dim cmdLine As String
-    cmdLine = Chr(34) & psExe & Chr(34) & " -NoProfile -NoExit -ExecutionPolicy Bypass -File " & Chr(34) & scannerPs1 & Chr(34)
+    cmdLine = Chr(34) & psExe & Chr(34) & " -NoProfile -NoExit -ExecutionPolicy Bypass -File " & Chr(34) & scannerPs1 & Chr(34) & " -TargetFolder " & Chr(34) & cleanFolder & Chr(34)
+    If bResume Then cmdLine = cmdLine & " -Resume"
     
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
