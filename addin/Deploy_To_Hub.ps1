@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.22.3"
+$ReleaseVersion = "3.23.0"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -113,7 +113,7 @@ $versionObj = @{
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Tu dong cap nhat tuc thi khi mo Excel (In-Process Live Hot-Swap) khong hoi nguoi dung va khong can dong lai Excel."
+    changelog         = "v${ReleaseVersion} - Tang toc quet thu muc (Everything MFT Index + C# Parallel.For Zero-COM Engine cho .xlsx/.xlsm/.xlsb/.xls + Auto-Skip EncryptedPackage)."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
