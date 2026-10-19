@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao %APPDATA%\Microsoft\AddIns
-# Phien ban: v3.22.0 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
+# Phien ban: v3.22.1 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.22.0"
+$InstallerVersion = "3.22.1"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan
@@ -262,7 +262,7 @@ try {
         </group>
         <group id="grpTools" label="Hệ thống &amp; Tiện ích">
           <button id="btnFixCopyPaste" label="Khôi phục Copy/Paste" size="large" imageMso="Undo" onAction="Ribbon_RestoreClipboardAndUI" screentip="Khôi phục Copy/Paste &amp; Chuột phải" supertip="Khôi phục lại chức năng Copy/Paste, phím tắt Ctrl+C, Ctrl+V và menu chuột phải nếu bị virus làm hỏng hoặc khóa." />
-          <button id="btnLog" label="Nhật ký (Log)" size="large" imageMso="ImportTextFile" onAction="Ribbon_OpenLogFolder" screentip="Nhật ký kiểm toán" supertip="Mở thư mục chứa nhật ký quét và diệt virus." />
+          <button id="btnLog" label="Nhật ký (Log)" size="large" imageMso="ImportTextFile" getEnabled="Ribbon_GetLogEnabled" onAction="Ribbon_OpenLogFolder" screentip="Nhật ký kiểm toán" supertip="Mở thư mục chứa nhật ký quét và diệt virus (Chỉ dành cho máy quản trị)." />
           <button id="btnUpdate" label="Cập nhật LAN" size="large" imageMso="Synchronize" onAction="Ribbon_CheckForLanUpdates" screentip="Cập nhật mạng LAN" supertip="Kiểm tra và cập nhật phiên bản mới từ máy chủ LAN." />
           <button id="btnAbout" label="Thông tin" size="large" imageMso="Info" onAction="Ribbon_ShowAbout" screentip="Thông tin" supertip="Thông tin phiên bản và xuất xứ KangatangGuard." />
         </group>

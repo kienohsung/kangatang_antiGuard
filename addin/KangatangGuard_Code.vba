@@ -157,7 +157,7 @@ Private dicScanCache As Object
 ' v3.10.0: Chong bat trung nhieu lan quet cho cung 1 thu muc trong 1 phien
 Private dicLaunchedFolders As Object
 
-Public Const CURRENT_VERSION As String = "3.22.0"
+Public Const CURRENT_VERSION As String = "3.22.1"
 Public Const DEFAULT_HUB_PRIMARY As String = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 Public Const DEFAULT_HUB_BACKUP  As String = "\\192.168.223.176\KangatangGuard_Hub"
 Public Const CENTRAL_BACKUP_HUB  As String = "\\192.168.223.176\test\Quarantine_Backup"
@@ -369,6 +369,29 @@ End Sub
 Public Sub Ribbon_OpenLogFolder(ByVal control As Object)
     Call OpenLogFolder
 End Sub
+
+Public Sub Ribbon_GetLogEnabled(ByVal control As Object, ByRef returnedVal As Variant)
+    On Error Resume Next
+    returnedVal = IsAdminMasterMachine()
+    Err.Clear
+End Sub
+
+Public Function IsAdminMasterMachine() As Boolean
+    On Error Resume Next
+    If StrComp(Environ$("COMPUTERNAME"), "CM-GA-MRKIENIT1", vbTextCompare) = 0 Then
+        IsAdminMasterMachine = True
+        Exit Function
+    End If
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso Is Nothing Then
+        If fso.FileExists("D:\7. AI tools\kangatang\addin\KangatangGuard_Code.vba") Then
+            IsAdminMasterMachine = True
+        End If
+        Set fso = Nothing
+    End If
+    Err.Clear
+End Function
 
 Public Sub Ribbon_CheckForLanUpdates(ByVal control As Object)
     Call CheckForLanUpdatesManual
@@ -642,8 +665,7 @@ Public Sub ScanWorkbook(ByVal wb As Workbook, Optional ByVal bFromBeforeSave As 
                         "T\u1ec7p: ") & wb.Name & vbCrLf & vbCrLf & _
                     Uni("Chi ti\u1ebft:") & vbCrLf & detailMsg & vbCrLf & _
                     Uni("Tr\u1ea1ng th\u00e1i: \u0110\u00c3 TI\u00caU DI\u1ec6T TH\u00c0NH C\u00d4NG!" & vbCrLf & _
-                        "B\u1ea3n sao l\u01b0u g\u1ed1c \u0111\u00e3 \u0111\u01b0\u1ee3c c\u00e1ch ly an to\u00e0n v\u1ec1 Kho M\u00e1y ch\u1ee7 LAN (223.176):" & vbCrLf & _
-                        CENTRAL_BACKUP_HUB)
+                        "B\u1ea3n sao l\u01b0u g\u1ed1c \u0111\u00e3 \u0111\u01b0\u1ee3c c\u00e1ch ly an to\u00e0n v\u1ec1 Kho M\u00e1y ch\u1ee7 LAN.")
             If bLaunch Then
                 okMsg = okMsg & vbCrLf & vbCrLf & _
                         Uni("B\u1ea1n c\u00f3 mu\u1ed1n QU\u00c9T TO\u00c0N B\u1ed8 TH\u01af M\u1ee4C ch\u1ee9a t\u1ec7p n\u00e0y ngay b\u00e2y gi\u1edd \u0111\u1ec3 di\u1ec7t s\u1ea1ch c\u00e1c t\u1ec7p l\u00e2n c\u1eadn kh\u00f4ng?")
@@ -2413,10 +2435,15 @@ Public Sub CleanDocumentRecoveryRegistry()
 End Sub
 
 ' ===========================================================================
-' HAM MENU: Mo thu muc Log & Bao cao dinh ky (v3.20.0)
+' HAM MENU: Mo thu muc Log & Bao cao dinh ky (v3.22.1 - Chi cho phep tren may quan tri 223.176)
 ' ===========================================================================
 Public Sub OpenLogFolder()
     On Error Resume Next
+    If Not IsAdminMasterMachine() Then
+        WriteLog "[LOG_ACCESS_BLOCKED] OpenLogFolder blocked on client workstation (" & Environ$("COMPUTERNAME") & ")."
+        Exit Sub
+    End If
+    
     Dim logDir As String
     logDir = Environ("APPDATA") & "\" & LOG_SUBFOLDER
     

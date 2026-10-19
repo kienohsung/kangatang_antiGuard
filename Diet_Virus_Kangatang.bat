@@ -1,14 +1,14 @@
 @echo off
 REM ============================================================================
-REM KANGATANGGUARD v3.22.0 - STANDALONE SYSTEM & FOLDER CLEANER
+REM KANGATANGGUARD v3.22.1 - STANDALONE SYSTEM & FOLDER CLEANER
 REM ============================================================================
 
-title KANGATANGGUARD v3.22.0 - EXCEL CLEANER
+title KANGATANGGUARD v3.22.1 - EXCEL CLEANER
 chcp 65001 >nul
 
 pushd "%~dp0"
 echo ======================================================================
-echo    KANGATANGGUARD v3.22.0 - SYSTEM AND FOLDER CLEANER
+echo    KANGATANGGUARD v3.22.1 - SYSTEM AND FOLDER CLEANER
 echo ======================================================================
 echo.
 

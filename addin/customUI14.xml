@@ -10,7 +10,7 @@
         </group>
         <group id="grpTools" label="Hệ thống &amp; Tiện ích">
           <button id="btnFixCopyPaste" label="Khôi phục Copy/Paste" size="large" imageMso="Undo" onAction="Ribbon_RestoreClipboardAndUI" screentip="Khôi phục Copy/Paste &amp; Chuột phải" supertip="Khôi phục lại chức năng Copy/Paste, phím tắt Ctrl+C, Ctrl+V và menu chuột phải nếu bị virus làm hỏng hoặc khóa." />
-          <button id="btnLog" label="Nhật ký (Log)" size="large" imageMso="ImportTextFile" onAction="Ribbon_OpenLogFolder" screentip="Nhật ký kiểm toán" supertip="Mở thư mục chứa nhật ký quét và diệt virus." />
+          <button id="btnLog" label="Nhật ký (Log)" size="large" imageMso="ImportTextFile" getEnabled="Ribbon_GetLogEnabled" onAction="Ribbon_OpenLogFolder" screentip="Nhật ký kiểm toán" supertip="Mở thư mục chứa nhật ký quét và diệt virus (Chỉ dành cho máy quản trị)." />
           <button id="btnUpdate" label="Cập nhật LAN" size="large" imageMso="Synchronize" onAction="Ribbon_CheckForLanUpdates" screentip="Cập nhật mạng LAN" supertip="Kiểm tra và cập nhật phiên bản mới từ máy chủ LAN." />
           <button id="btnAbout" label="Thông tin" size="large" imageMso="Info" onAction="Ribbon_ShowAbout" screentip="Thông tin" supertip="Thông tin phiên bản và xuất xứ KangatangGuard." />
         </group>
