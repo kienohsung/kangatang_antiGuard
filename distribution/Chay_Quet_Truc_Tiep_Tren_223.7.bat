@@ -1,10 +1,10 @@
 @echo off
-title KangatangGuard v3.23.0 - Multi-Window Direct Server Scanner on 223.7 (Log to 223.176)
+title KangatangGuard v3.23.1 - Multi-Window Direct Server Scanner on 223.7 (Log to 223.176)
 pushd "%~dp0"
 
 echo ============================================================================
-echo    KANGATANG GUARD v3.23.0 - MULTI-WINDOW DIRECT SERVER SCANNER (223.7)
-echo    Turbo Engine: Everything MFT + C# Parallel.For Zero-COM + Multi-Worker
+echo    KANGATANG GUARD v3.23.1 - MULTI-WINDOW DIRECT SERVER SCANNER (223.7)
+echo    Turbo Engine: Pure Signed .NET Zero-COM + Multi-Window Isolation
 echo    Developed by OhsungIT Team
 echo ============================================================================
 echo.
@@ -19,6 +19,8 @@ if not exist "%GUARD_DIR%" mkdir "%GUARD_DIR%" >nul 2>&1
 
 if exist "%XLSTART_DIR%\KangatangGuard.xlam" del /F /Q "%XLSTART_DIR%\KangatangGuard.xlam" >nul 2>&1
 if exist "%XLSTART_DIR%\Kangatang_Bootstrap.xlam" del /F /Q "%XLSTART_DIR%\Kangatang_Bootstrap.xlam" >nul 2>&1
+if exist "%ADDIN_DIR%\Everything.exe" del /F /Q "%ADDIN_DIR%\Everything.exe" >nul 2>&1
+if exist "%ADDIN_DIR%\es.exe" del /F /Q "%ADDIN_DIR%\es.exe" >nul 2>&1
 
 set "HAS_ACTIVE_SCAN=0"
 wmic process where "name='powershell.exe' and commandline like '%%Kangatang_FolderScanner%%'" get ProcessId 2>nul | findstr /R "[0-9]" >nul 2>&1
@@ -45,50 +47,6 @@ for %%D in (D E F G C) do (
         copy /Y "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\KangatangGuard.xlam" "%ADDIN_DIR%\KangatangGuard.xlam" >nul 2>&1
         copy /Y "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\Kangatang_FolderScanner.ps1" "%ADDIN_DIR%\Kangatang_FolderScanner.ps1" >nul 2>&1
         copy /Y "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\version.json" "%ADDIN_DIR%\version.json" >nul 2>&1
-        if exist "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\Everything.exe" (
-            copy /Y "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\Everything.exe" "%~dp0Everything.exe" >nul 2>&1
-            copy /Y "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\Everything.exe" "%ADDIN_DIR%\Everything.exe" >nul 2>&1
-        )
-        if exist "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\es.exe" (
-            copy /Y "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\es.exe" "%~dp0es.exe" >nul 2>&1
-            copy /Y "%%D:\file_shared\vietnam\z. ETC\1. addinKangatang\es.exe" "%ADDIN_DIR%\es.exe" >nul 2>&1
-        )
-    )
-)
-
-REM Auto-discover Everything.exe / es.exe on 223.7 and sync to AddIns & Hub
-set "EVERYTHING_FOUND="
-for %%P in (
-    "%~dp0Everything.exe"
-    "%ADDIN_DIR%\Everything.exe"
-    "C:\Program Files\Everything\Everything.exe"
-    "C:\Program Files (x86)\Everything\Everything.exe"
-    "%LOCALAPPDATA%\Everything\Everything.exe"
-) do (
-    if not defined EVERYTHING_FOUND (
-        if exist "%%~P" set "EVERYTHING_FOUND=%%~P"
-    )
-)
-
-if defined EVERYTHING_FOUND (
-    copy /Y "%EVERYTHING_FOUND%" "%ADDIN_DIR%\Everything.exe" >nul 2>&1
-    copy /Y "%EVERYTHING_FOUND%" "%~dp0Everything.exe" >nul 2>&1
-    tasklist /FI "IMAGENAME eq Everything.exe" 2>nul | find /I "Everything.exe" >nul 2>&1
-    if errorlevel 1 (
-        start "" "%EVERYTHING_FOUND%" -startup >nul 2>&1
-    )
-)
-
-for %%E in (
-    "%~dp0es.exe"
-    "%ADDIN_DIR%\es.exe"
-    "C:\Program Files\Everything\es.exe"
-    "C:\Program Files (x86)\Everything\es.exe"
-    "%LOCALAPPDATA%\Everything\es.exe"
-) do (
-    if exist "%%~E" (
-        copy /Y "%%~E" "%ADDIN_DIR%\es.exe" >nul 2>&1
-        copy /Y "%%~E" "%~dp0es.exe" >nul 2>&1
     )
 )
 
@@ -115,12 +73,12 @@ if "%HAS_ACTIVE_SCAN%"=="0" (
     )
 )
 
-echo [2/4] Verifying Seqrite-clean v3.23.0 C# Parallel Zero-COM + Everything MFT engine...
+echo [2/4] Verifying Seqrite-clean v3.23.1 engine and Multi-Window isolation...
 echo [3/4] Launching new independent PowerShell Scanner Window...
 echo [4/4] All scan reports, logs, and backups will be synced to 192.168.223.176!
 echo.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -Path '%ADDIN_DIR%\Kangatang_FolderScanner.ps1' -ErrorAction SilentlyContinue; Unblock-File -Path '%ADDIN_DIR%\KangatangGuard.xlam' -ErrorAction SilentlyContinue" >nul 2>&1
-start "KangatangGuard v3.23.0 - Folder Scanner" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%ADDIN_DIR%\Kangatang_FolderScanner.ps1" -InteractivePrompt
+start "KangatangGuard v3.23.1 - Folder Scanner" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%ADDIN_DIR%\Kangatang_FolderScanner.ps1" -InteractivePrompt
 
 popd
