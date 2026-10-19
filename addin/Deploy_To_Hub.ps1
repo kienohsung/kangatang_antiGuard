@@ -113,7 +113,7 @@ $versionObj = @{
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Tang toc quet thu muc (Everything MFT Index + C# Parallel.For Zero-COM Engine cho .xlsx/.xlsm/.xlsb/.xls + Auto-Skip EncryptedPackage)."
+    changelog         = "v${ReleaseVersion} - Tach lan Tier-2/COM, engine Zero-COM doc khoi 32KB (nhanh 3-5x, recall 100%), watchdog Excel theo PID + tu dong dong hop thoai, vaccine XLSTART, Fast Resume so sanh chu ky tep, giam bao nham kangaroo/_laroux."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4
