@@ -1,7 +1,7 @@
 # ==============================================================================
 # Kangatang_FolderScanner.ps1
 # Trinh Quet Thu Muc Sieu Toc 4 Tang & Bang Dieu Khien Truc Tuyen (Live Dashboard)
-# Phien ban: v3.24.0 (Split Tier-2/COM Lanes, Streaming LOH-free Zero-COM, Excel PID Watchdog & XLSTART Vaccine)
+# Phien ban: v3.24.1 (Split Tier-2/COM Lanes, Streaming LOH-free Zero-COM, Excel PID Watchdog & XLSTART Vaccine)
 # ==============================================================================
 
 param (
@@ -185,7 +185,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $utf8Bom   = New-Object System.Text.UTF8Encoding($true)
 
 # 1. Dong bo phien ban dong tu version.json hoac Registry InstalledVersion
-$AppVersion = "3.24.0"
+$AppVersion = "3.24.1"
 $verJsonPath = Join-Path $ScriptDir "version.json"
 if (Test-Path $verJsonPath) {
     try {
@@ -1588,6 +1588,7 @@ $comWorkerScript = {
     if (-not (Test-Path -LiteralPath $workerGuardDir)) { try { New-Item -ItemType Directory -Path $workerGuardDir -Force | Out-Null } catch {} }
 
     function Set-ComPhase([string]$ph) {
+        $state["ComKillsInPhase_$workerId"] = 0
         $state["ComPhaseStart_$workerId"] = [DateTime]::UtcNow.Ticks
         $state["ComPhase_$workerId"] = $ph
     }
@@ -1656,8 +1657,8 @@ $comWorkerScript = {
             try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:excel) } catch {}
             $script:excel = $null
         }
-        [System.GC]::Collect()
-        [System.GC]::WaitForPendingFinalizers()
+        # v3.24.1 H1: KHONG goi GC.Collect/WaitForPendingFinalizers trong runspace STA (deadlock voi luong Finalizer khi
+        # RCW thuoc STA khac dang ban/da chet -> ca 4 COM Worker ket o pha QUIT). FinalReleaseComObject + kill PID la du.
         # Dam bao khong con EXCEL.EXE mo coi: cho 5s, qua han thi kill dung PID cua worker nay
         if ($script:excelPid -gt 0) {
             try {
@@ -1742,6 +1743,7 @@ $comWorkerScript = {
         $processedComCount = 0
         $item = $null
         while (-not $state.CancelWorkers) {
+            if ($state["ComRetired_$workerId"]) { break }
             if ($deepQueue.TryDequeue([ref]$item)) {
                 $fPath = [string]$item.FilePath
                 $fName = [string]$item.FileName
@@ -1939,18 +1941,47 @@ function New-WorkerJob([string]$kind, [int]$wId) {
         [void]$ps.AddScript($remoteBridgeWorkerScript).AddArgument($script:bridgeRootDir).AddArgument($bridgeWorkQueue).AddArgument($comResultQueue).AddArgument($sharedState)
     }
     $handle = $ps.BeginInvoke()
-    return [pscustomobject]@{ PowerShell = $ps; Handle = $handle; Id = $wId; Kind = $kind }
+    return [pscustomobject]@{ PowerShell = $ps; Handle = $handle; Id = $wId; Kind = $kind; Retired = $false }
+}
+
+# v3.24.1 H2: Danh sach COM Worker dang hoat dong (worker bi ket vinh vien se bi "nghi huu" & thay the bang worker moi)
+$script:activeComIds  = New-Object System.Collections.Generic.List[int]
+$script:nextComId     = 0
+$script:comStuckCount = 0
+$script:maxComReplace = 0
+
+function Start-ComWorker {
+    $script:nextComId++
+    $script:activeComIds.Add($script:nextComId)
+    $script:workerJobs.Add((New-WorkerJob "COM" $script:nextComId))
+}
+
+function Retire-ComWorker([int]$cId, [string]$reason) {
+    $sharedState["ComRetired_$cId"] = $true
+    [void]$script:activeComIds.Remove($cId)
+    foreach ($j in $script:workerJobs) {
+        if ($j.Kind -eq "COM" -and $j.Id -eq $cId) { $j.Retired = $true }
+    }
+    $script:comStuckCount++
+    Add-DetailAuditEvent "COM_WORKER_STUCK" "COM-W$cId" (100 + $cId) "(STUCK)" "COM-W$cId bi ket ngoai Excel ($reason) -> nghi huu worker nay, khoi tao worker thay the (Excel toi da van = $comWorkerCount)"
+    if ($script:comStuckCount -le $script:maxComReplace) {
+        Start-ComWorker
+    } else {
+        Add-DetailAuditEvent "COM_REPLACE_LIMIT" "COM" 0 "(STUCK)" "Da thay the $($script:maxComReplace) COM Worker - khong tao them; tep nghi ngo con lai se chuyen sang Bridge khi ket thuc"
+    }
 }
 
 function Ensure-WorkerPoolStarted {
     if (-not $script:poolStarted) {
         $script:poolStarted = $true
-        $script:runspacePool = [runspacefactory]::CreateRunspacePool(1, ($workerCount + $comWorkerCount + 1))
+        # Du phong runspace cho COM Worker thay the (worker bi ket van chiem runspace cho den khi tien trinh ket thuc)
+        $script:maxComReplace = $comWorkerCount * 3
+        $script:runspacePool = [runspacefactory]::CreateRunspacePool(1, ($workerCount + $comWorkerCount + $script:maxComReplace + 1))
         $script:runspacePool.ApartmentState = [System.Threading.ApartmentState]::STA
         $script:runspacePool.Open()
         for ($wId = 1; $wId -le $workerCount; $wId++) { $script:workerJobs.Add((New-WorkerJob "T2" $wId)) }
         if ($script:localExcelAvailable -and $xlamPath) {
-            for ($cId = 1; $cId -le $comWorkerCount; $cId++) { $script:workerJobs.Add((New-WorkerJob "COM" $cId)) }
+            for ($cId = 1; $cId -le $comWorkerCount; $cId++) { Start-ComWorker }
         }
     }
 
@@ -1963,6 +1994,7 @@ function Ensure-WorkerPoolStarted {
     if (-not $sharedState.CancelWorkers) {
         for ($i = 0; $i -lt $script:workerJobs.Count; $i++) {
             $job = $script:workerJobs[$i]
+            if ($job.Retired) { continue }
             if (-not $job.Handle.IsCompleted) { continue }
             $needRestart = $false
             if ($job.Kind -eq "T2")  { $needRestart = -not ($sharedState.ProducerDone -and $comWorkQueue.IsEmpty) }
@@ -1977,7 +2009,7 @@ function Ensure-WorkerPoolStarted {
 
 function Test-JobsCompleted([string]$kind) {
     foreach ($j in $script:workerJobs) {
-        if ($j.Kind -eq $kind -and (-not $j.Handle.IsCompleted)) { return $false }
+        if ($j.Kind -eq $kind -and (-not $j.Retired) -and (-not $j.Handle.IsCompleted)) { return $false }
     }
     return $true
 }
@@ -2078,25 +2110,37 @@ function Invoke-ComWatchdog {
     $script:lastWatchdogTicks = $nowT
     if (-not $script:localExcelAvailable) { return }
     $script:scannerExcelCount = Get-ScannerExcelCount
-    for ($cId = 1; $cId -le $comWorkerCount; $cId++) {
+    foreach ($cId in @($script:activeComIds)) {
         $phase = [string]$sharedState["ComPhase_$cId"]
         if ((-not $phase) -or $phase -eq "IDLE" -or $phase -eq "DONE") { continue }
         $elapsedSec = ($nowT - [long]$sharedState["ComPhaseStart_$cId"]) / 10000000.0
         $limit = switch ($phase) { "INIT" { 90 } "SCAN" { 180 } "QUIT" { 15 } default { 120 } }
-        if ($elapsedSec -ge 3) {
+        # v3.24.1 H3: Activation Wizard hien o MOI lan khoi dong Excel -> dong ngay tu giay thu 1 (pha INIT)
+        $dlgAfter = if ($phase -eq "INIT") { 1 } else { 3 }
+        if ($elapsedSec -ge $dlgAfter) {
             $cands = Get-ComCandidatePids $cId
             if ($cands.Count -gt 0) { [void](Close-ScannerExcelDialogs $cands) }
         }
         if ($elapsedSec -gt $limit) {
+            $killsInPhase = [int]$sharedState["ComKillsInPhase_$cId"]
+            if ($killsInPhase -ge 2) {
+                # Da kill 2 lan ma van ket cung pha -> luong worker bi chan NGOAI Excel: nghi huu & thay the (khong spam log)
+                Retire-ComWorker $cId "pha $phase qua han sau $killsInPhase lan kill"
+                continue
+            }
             $cands = Get-ComCandidatePids $cId
             foreach ($kp in $cands) {
                 try { Stop-Process -Id $kp -Force -ErrorAction SilentlyContinue } catch {}
                 try { $sharedState.ComPidSet.Remove($kp) } catch {}
             }
+            $sharedState["ComPid_$cId"] = 0
             $sharedState["ComKilled_$cId"] = $true
             $sharedState["ComPhaseStart_$cId"] = $nowT
+            $sharedState["ComKillsInPhase_$cId"] = $killsInPhase + 1
             $script:comKillCount++
-            Add-DetailAuditEvent "COM_WATCHDOG_KILL" ("PID=" + ($cands -join ",")) (100 + $cId) "(TIMEOUT)" "COM-W$cId qua han ${limit}s o pha $phase -> kill dung PID Excel cua scanner"
+            if ($cands.Count -gt 0 -or $killsInPhase -eq 0) {
+                Add-DetailAuditEvent "COM_WATCHDOG_KILL" ("PID=" + ($cands -join ",")) (100 + $cId) "(TIMEOUT)" "COM-W$cId qua han ${limit}s o pha $phase -> kill dung PID Excel cua scanner"
+            }
         }
     }
 }
@@ -2255,7 +2299,7 @@ function Render-LiveDashboard([bool]$force = $false, [bool]$isCompleted = $false
     $t2Str  = "{0:0.0} ms/tep (IO {1:0.0} ms)" -f $script:t2MsAvg, $script:ioMsAvg
     $comStr = "COM: {0} | Bridge: {1}" -f $deepComQueue.Count, ($bridgeWorkQueue.Count + [int]$sharedState.BridgePending)
     $laneMode = if (-not $script:localExcelAvailable) { "BRIDGE" } elseif ($sharedState.ComDisabled) { "LOCAL->BRIDGE" } else { "LOCAL" }
-    $laneStr = "Excel: {0}/{1} | Dong hop thoai: {2} | Kill: {3} | Lan: {4}" -f $script:scannerExcelCount, $comWorkerCount, $script:dialogCloseCount, $script:comKillCount, $laneMode
+    $laneStr = "Excel: {0}/{1} | Dong hop thoai: {2} | Kill: {3} | Thay worker: {4} | Lan: {5}" -f $script:scannerExcelCount, $comWorkerCount, $script:dialogCloseCount, $script:comKillCount, $script:comStuckCount, $laneMode
 
     Write-FixedLine (" | [3] BANG KET QUA QUET TRUC TUYEN (LIVE TABLE) |       SO LUONG | CHI TIET / TRANG THAI          |") ([System.ConsoleColor]::Cyan)
     Write-FixedLine (" +-----------------------------------------------+----------------+--------------------------------+") ([System.ConsoleColor]::DarkCyan)

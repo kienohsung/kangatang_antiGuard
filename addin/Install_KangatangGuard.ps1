@@ -1,7 +1,7 @@
 # ==============================================================================
 # Install_KangatangGuard.ps1
 # PowerShell Installer: Tao Excel Add-in (.xlam) va cai dat vao %APPDATA%\Microsoft\AddIns
-# Phien ban: v3.24.0 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
+# Phien ban: v3.24.1 (100% Native VBA Folder Scanner & Zero-PS1 Antivirus-Safe Architecture)
 # ==============================================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -9,7 +9,7 @@
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$InstallerVersion = "3.24.0"
+$InstallerVersion = "3.24.1"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - INSTALLER v$InstallerVersion                                  " -ForegroundColor Cyan

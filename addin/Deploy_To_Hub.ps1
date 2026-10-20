@@ -17,7 +17,7 @@ $DesktopDir = "C:\Users\mrKienIT\Desktop\python\coding\AI tools\kangatang"
 # Dia chi May chu Tep LAN chuyen dung (Online 24/7)
 $PrimaryRemoteHub = "\\192.168.223.7\file_shared\vietnam\z. ETC\1. addinKangatang"
 
-$ReleaseVersion = "3.24.0"
+$ReleaseVersion = "3.24.1"
 
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "   KANGATANG GUARD - PHAT HANH PHIEN BAN MOI (v$ReleaseVersion - DUAL-MIRROR) " -ForegroundColor Cyan
@@ -113,7 +113,7 @@ $versionObj = @{
         standalone_bat = "Chay_Diet_Virus_Ngoai.bat"
     }
     mandatory         = $true
-    changelog         = "v${ReleaseVersion} - Tach lan Tier-2/COM, engine Zero-COM doc khoi 32KB (nhanh 3-5x, recall 100%), watchdog Excel theo PID + tu dong dong hop thoai, vaccine XLSTART, Fast Resume so sanh chu ky tep, giam bao nham kangaroo/_laroux."
+    changelog         = "v${ReleaseVersion} - Hotfix lan COM: bo WaitForPendingFinalizers (deadlock STA), watchdog nghi huu & thay the COM Worker bi ket, dong Activation Wizard tu giay thu 1. Nen tang v3.24: Tach lan Tier-2/COM, engine Zero-COM doc khoi 32KB (nhanh 3-5x, recall 100%), watchdog Excel theo PID + tu dong dong hop thoai, vaccine XLSTART, Fast Resume so sanh chu ky tep, giam bao nham kangaroo/_laroux."
 }
 
 $versionJsonContent = $versionObj | ConvertTo-Json -Depth 4

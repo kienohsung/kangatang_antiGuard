@@ -1,9 +1,9 @@
 @echo off
-title KangatangGuard v3.24.0 - Multi-Window Direct Server Scanner on 223.7 (Log to 223.176)
+title KangatangGuard v3.24.1 - Multi-Window Direct Server Scanner on 223.7 (Log to 223.176)
 pushd "%~dp0"
 
 echo ============================================================================
-echo    KANGATANG GUARD v3.24.0 - MULTI-WINDOW DIRECT SERVER SCANNER (223.7)
+echo    KANGATANG GUARD v3.24.1 - MULTI-WINDOW DIRECT SERVER SCANNER (223.7)
 echo    Turbo Engine: Pure Signed .NET Zero-COM + Multi-Window Isolation
 echo    Developed by OhsungIT Team
 echo ============================================================================
@@ -73,12 +73,12 @@ if "%HAS_ACTIVE_SCAN%"=="0" (
     )
 )
 
-echo [2/4] Verifying Seqrite-clean v3.24.0 engine and Multi-Window isolation...
+echo [2/4] Verifying Seqrite-clean v3.24.1 engine and Multi-Window isolation...
 echo [3/4] Launching new independent PowerShell Scanner Window...
 echo [4/4] All scan reports, logs, and backups will be synced to 192.168.223.176!
 echo.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -Path '%ADDIN_DIR%\Kangatang_FolderScanner.ps1' -ErrorAction SilentlyContinue; Unblock-File -Path '%ADDIN_DIR%\KangatangGuard.xlam' -ErrorAction SilentlyContinue" >nul 2>&1
-start "KangatangGuard v3.24.0 - Folder Scanner" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%ADDIN_DIR%\Kangatang_FolderScanner.ps1" -InteractivePrompt
+start "KangatangGuard v3.24.1 - Folder Scanner" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%ADDIN_DIR%\Kangatang_FolderScanner.ps1" -InteractivePrompt
 
 popd
